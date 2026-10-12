@@ -4,3 +4,6 @@ dist/
 .env.*
 !.env.example
 *.log
+
+# Manual deployment packages for the Nia function.
+functions/*.tar.gz

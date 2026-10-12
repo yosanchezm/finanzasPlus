@@ -1,0 +1,21 @@
+# Patterns are listed twice (x and **/x): unlike .gitignore, a .dockerignore
+# pattern without **/ only matches at the root of the build context.
+node_modules
+**/node_modules
+dist
+**/dist
+.env
+.env.*
+**/.env
+**/.env.*
+.git
+**/.git
+*.log
+**/*.log
+
+# Not needed to build the web app.
+functions
+docs
+scripts
+Dockerfile
+.dockerignore
