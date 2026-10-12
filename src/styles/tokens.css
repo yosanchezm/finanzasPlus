@@ -1,0 +1,42 @@
+/*
+ * Design tokens. `static` emits every variable on :root even when no utility
+ * uses it, so the legacy (unlayered) stylesheet can reference them too.
+ */
+@theme static {
+  --color-bg: #f4f5f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8f9f7;
+  --color-border: #e2e6e1;
+  --color-border-strong: #d5dbd6;
+
+  --color-ink: #101814;
+  --color-ink-2: #2e3833;
+  --color-ink-muted: #5b6660;
+  --color-ink-faint: #66716b;
+
+  --color-accent: #0b6e4f;
+  --color-accent-hover: #085a40;
+  --color-accent-soft: #e4f2ec;
+
+  --color-danger: #c2410c;
+  --color-danger-soft: #fcede4;
+
+  --color-sidebar: #0f1a15;
+  --color-sidebar-raised: #16241e;
+  --color-sidebar-line: #24362e;
+  --color-sidebar-text: #a9b8b0;
+  --color-sidebar-label: #7d9087;
+  --color-brand-mint: #8ce6bd;
+
+  --color-partner: #2b4fa8;
+  --color-partner-soft: #e6edfc;
+  --color-shared: #8a5a0b;
+  --color-shared-soft: #fbf1dc;
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}

@@ -60,19 +60,45 @@ function assertConfig() {
   }
 }
 
-function baseQuery() {
-  return [Query.equal('householdId', appwriteConfig.householdId), Query.limit(100)];
+export const PAGE_SIZE = 100;
+
+/**
+ * Every row of the household in `tableId`, following Query.cursorAfter page by page
+ * (PAGE_SIZE rows each) until a short page signals the end.
+ */
+export async function listAllRows(tableId, extraQueries = []) {
+  assertConfig();
+  const rows = [];
+  let cursor = null;
+  for (;;) {
+    const response = await tablesDB.listRows({
+      databaseId: appwriteConfig.databaseId,
+      tableId,
+      queries: [
+        Query.equal('householdId', appwriteConfig.householdId),
+        ...extraQueries,
+        Query.limit(PAGE_SIZE),
+        ...(cursor ? [Query.cursorAfter(cursor)] : []),
+      ],
+      total: false,
+    });
+    const page = response.rows || [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+    cursor = page[page.length - 1].$id;
+  }
 }
 
-async function listRows(tableId, extraQueries = []) {
-  assertConfig();
-  const response = await tablesDB.listRows({
-    databaseId: appwriteConfig.databaseId,
-    tableId,
-    queries: [...baseQuery(), ...extraQueries],
-    total: false,
-  });
-  return response.rows || [];
+/**
+ * Transactions with start <= occurredAt < end, newest first. Backed by the
+ * by_household_date index (householdId ASC, occurredAt DESC).
+ */
+export async function getTransactionsInRange(start, end) {
+  return listAllRows(TABLES.transactions, [
+    Query.greaterThanEqual('occurredAt', start),
+    Query.lessThan('occurredAt', end),
+    Query.orderDesc('occurredAt'),
+  ]);
 }
 
 export async function getCurrentUser() {
@@ -103,31 +129,35 @@ export async function signOut() {
   await account.deleteSession({ sessionId: 'current' });
 }
 
+/**
+ * Household data that is not month-scoped. Transactions are loaded per period
+ * with getTransactionsInRange.
+ */
 export async function getWorkspace() {
   assertConfig();
-  const [household, members, categories, transactions, budgets, goals] = await Promise.all([
+  const [household, members, categories, budgets, goals] = await Promise.all([
     tablesDB.getRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.households, rowId: appwriteConfig.householdId }),
-    listRows(TABLES.members),
-    listRows(TABLES.categories, [Query.orderAsc('name')]),
-    listRows(TABLES.transactions, [Query.orderDesc('occurredAt')]),
-    listRows(TABLES.budgets, [Query.orderDesc('month')]),
-    listRows(TABLES.goals),
+    listAllRows(TABLES.members),
+    listAllRows(TABLES.categories, [Query.orderAsc('name')]),
+    listAllRows(TABLES.budgets, [Query.orderDesc('month')]),
+    listAllRows(TABLES.goals),
   ]);
 
   let workspaceCategories = categories;
   if (!workspaceCategories.length) workspaceCategories = await createDefaultCategories();
-  return { household, members, categories: workspaceCategories, transactions, budgets, goals };
+  return { household, members, categories: workspaceCategories, budgets, goals };
 }
 
+// Seed colors come from the UI palette (src/shared/lib/categories.js CATEGORY_PALETTE).
 async function createDefaultCategories() {
   const defaults = [
-    ['Hogar', 'need', '#88b8ff', 'home'],
-    ['Alimentación', 'need', '#f5c96b', 'receipt'],
-    ['Transporte', 'need', '#8ce6bd', 'transport'],
-    ['Ocio', 'want', '#ff9a7a', 'sparkles'],
-    ['Servicios', 'need', '#bb9cff', 'file'],
-    ['Ahorro', 'saving', '#73d8ff', 'target'],
-    ['Ingresos', 'income', '#8ce6bd', 'wallet'],
+    ['Hogar', 'need', '#1F4E8C', 'home'],
+    ['Alimentación', 'need', '#C99A2E', 'receipt'],
+    ['Transporte', 'need', '#0B6E4F', 'transport'],
+    ['Ocio', 'want', '#E8875A', 'sparkles'],
+    ['Servicios', 'need', '#7A5AF8', 'file'],
+    ['Ahorro', 'saving', '#A7B0AB', 'target'],
+    ['Ingresos', 'income', '#0B6E4F', 'wallet'],
   ];
   const rows = [];
   for (const [name, kind, color, icon] of defaults) {
@@ -210,6 +240,38 @@ export async function createGoal(data) {
     tableId: TABLES.goals,
     rowId: ID.unique(),
     data,
+    permissions: [permissions.readTeam, permissions.updateTeam],
+  });
+}
+
+export async function updateGoal(rowId, data) {
+  assertConfig();
+  return tablesDB.updateRow({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.goals,
+    rowId,
+    data,
+  });
+}
+
+/**
+ * Same row permissions as the seeded categories (team read + update).
+ * Columns per scripts/migrate-appwrite.mjs: householdId, name, kind and color are required; icon is optional.
+ */
+export async function createCategory({ name, kind, color, icon }) {
+  assertConfig();
+  return tablesDB.createRow({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.categories,
+    rowId: ID.unique(),
+    data: {
+      householdId: appwriteConfig.householdId,
+      name,
+      kind,
+      color,
+      ...(icon ? { icon } : {}),
+      archived: false,
+    },
     permissions: [permissions.readTeam, permissions.updateTeam],
   });
 }

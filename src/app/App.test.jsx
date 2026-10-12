@@ -1,0 +1,111 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { addMonths, monthKey, monthRange } from '../shared/lib/dates';
+import { formatMonth } from '../shared/lib/format';
+import * as api from '../appwrite';
+import App from './App';
+
+vi.mock('../appwrite', () => ({
+  appwriteConfig: { currency: 'COP' },
+  missingAppwriteConfig: [],
+  getCurrentUser: vi.fn(),
+  getWorkspace: vi.fn(),
+  getTransactionsInRange: vi.fn(),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  createAccount: vi.fn(),
+  createTransaction: vi.fn(),
+  updateTransaction: vi.fn(),
+  deleteTransaction: vi.fn(),
+  createReceipt: vi.fn(),
+  upsertBudget: vi.fn(),
+  createGoal: vi.fn(),
+  updateGoal: vi.fn(),
+  createCategory: vi.fn(),
+}));
+
+const USER = { $id: 'u1', name: 'Camilo', email: 'camilo@example.com' };
+const WORKSPACE = {
+  household: { $id: 'h1', name: 'Casa Sánchez', ownerId: 'u1' },
+  members: [{ $id: 'm1', userId: 'u1', alias: 'Camilo' }],
+  categories: [{ $id: 'c1', name: 'Mercado', kind: 'need', color: '#0B6E4F' }],
+  budgets: [],
+  goals: [],
+};
+
+const currentMonth = monthKey(new Date());
+const previousMonth = addMonths(currentMonth, -1);
+const middleOf = (key) => {
+  const [year, month] = key.split('-').map(Number);
+  return new Date(year, month - 1, 15, 12).toISOString();
+};
+const rowFor = (key, merchant) => ({
+  $id: `t-${key}`, merchant, categoryId: 'c1', type: 'expense', amountMinor: 1000, currency: 'COP', ownerScope: 'you', occurredAt: middleOf(key),
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.getCurrentUser.mockResolvedValue(USER);
+  api.getWorkspace.mockResolvedValue(WORKSPACE);
+  api.getTransactionsInRange.mockImplementation(async (start) => {
+    if (start === monthRange(currentMonth).start) return [rowFor(currentMonth, 'Compra de este mes')];
+    if (start === monthRange(previousMonth).start) return [rowFor(previousMonth, 'Compra del mes pasado')];
+    return [];
+  });
+});
+
+const renderReadyApp = async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  expect(await screen.findByRole('heading', { level: 1, name: 'Resumen' })).toBeInTheDocument();
+  return user;
+};
+
+describe('App', () => {
+  it('loads the selected month and the 5 previous months as ranges', async () => {
+    await renderReadyApp();
+
+    expect(await screen.findByText('Compra de este mes')).toBeInTheDocument();
+    expect(api.getTransactionsInRange).toHaveBeenCalledWith(monthRange(currentMonth).start, monthRange(currentMonth).end);
+    expect(api.getTransactionsInRange).toHaveBeenCalledWith(monthRange(addMonths(currentMonth, -5)).start, monthRange(currentMonth).start);
+  });
+
+  it('keeps the shell mounted while refreshing', async () => {
+    const user = await renderReadyApp();
+    await screen.findByText('Compra de este mes');
+    let finish;
+    api.getWorkspace.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve(WORKSPACE); }));
+
+    await user.click(screen.getAllByRole('button', { name: 'Actualizar datos' })[0]);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Resumen' })).toBeInTheDocument();
+    expect(screen.getAllByRole('navigation', { name: 'Navegación principal' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Conectando con tu hogar…')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Actualizando datos' })).toBeInTheDocument();
+
+    finish();
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'Actualizando datos' })).not.toBeInTheDocument());
+    expect(screen.getByText('Compra de este mes')).toBeInTheDocument();
+  });
+
+  it('navigates between months, reloading the views and blocking future months', async () => {
+    const user = await renderReadyApp();
+    await screen.findByText('Compra de este mes');
+    const next = () => screen.getAllByRole('button', { name: 'Mes siguiente' })[0];
+
+    expect(next()).toBeDisabled();
+    await user.click(screen.getAllByRole('button', { name: 'Mes anterior' })[0]);
+
+    expect(await screen.findByText('Compra del mes pasado')).toBeInTheDocument();
+    expect(screen.queryByText('Compra de este mes')).not.toBeInTheDocument();
+    expect(api.getTransactionsInRange).toHaveBeenCalledWith(monthRange(previousMonth).start, monthRange(previousMonth).end);
+    const label = formatMonth(previousMonth).replace(' de ', ' ');
+    expect(screen.getAllByRole('group', { name: 'Periodo' })[0]).toHaveTextContent(label.charAt(0).toUpperCase() + label.slice(1));
+    expect(next()).toBeEnabled();
+
+    await user.click(next());
+    expect(await screen.findByText('Compra de este mes')).toBeInTheDocument();
+    expect(next()).toBeDisabled();
+  });
+});
