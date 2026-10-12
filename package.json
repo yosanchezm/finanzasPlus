@@ -1,0 +1,21 @@
+{
+  "name": "finanzas-plus",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "migrate:appwrite": "node --env-file=.env scripts/migrate-appwrite.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "appwrite": "^26.2.0",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
