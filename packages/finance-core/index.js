@@ -26,3 +26,4 @@ export { evaluateCharges } from './src/charges.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
 export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
 export { allocate } from './src/ledger/allocate.js';
+export { project, registerProjector } from './src/ledger/project.js';
