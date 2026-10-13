@@ -20,6 +20,13 @@ describe('MobileTopBar', () => {
     expect(screen.queryByRole('button', { name: 'Mes anterior' })).not.toBeInTheDocument();
   });
 
+  it('hides the month button for views that are not month-scoped', () => {
+    render(<MobileTopBar householdName="Hogar Sánchez" displayName="Camilo Sánchez" month="2026-09" maxMonth="2026-10" onMonthChange={vi.fn()} showPeriod={false} />);
+
+    expect(screen.getByText('Hogar Sánchez')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cambiar mes/ })).not.toBeInTheDocument();
+  });
+
   it('opens a popover with previous and next month', async () => {
     const { onMonthChange, user } = renderBar();
 

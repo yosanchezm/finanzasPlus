@@ -24,6 +24,8 @@ vi.mock('../appwrite', () => ({
   updateGoal: vi.fn(),
   createCategory: vi.fn(),
   listAttachments: vi.fn(),
+  listDebts: vi.fn(),
+  listDebtEvents: vi.fn(),
 }));
 
 const USER = { $id: 'u1', name: 'Camilo', email: 'camilo@example.com' };
@@ -109,6 +111,36 @@ describe('App', () => {
     await user.click(next());
     expect(await screen.findByText('Compra de este mes')).toBeInTheDocument();
     expect(next()).toBeDisabled();
+  });
+});
+
+describe('App debts section', () => {
+  const debtRow = (name, ownerScope) => ({
+    $id: name, name, lender: 'Banco', kind: 'consumer', ownerScope, status: 'active', principalMinor: 1200000, termsVersion: 1,
+    termsJson: JSON.stringify({
+      schemaVersion: 1, kind: 'consumer', unit: 'COP', principalMinor: 1200000, openedOn: '2026-09-01', rate: { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' },
+      system: 'french', periodicity: 'monthly', n: 12, firstDueOn: '2099-01-05', charges: [],
+    }),
+  });
+
+  it('lazily opens Deudas from the sidebar, filtered by the scope control, without the period switcher', async () => {
+    api.listDebts.mockResolvedValue([debtRow('Libre inversión', 'you'), debtRow('Deuda de la pareja', 'partner')]);
+    api.listDebtEvents.mockResolvedValue([]);
+    const user = await renderReadyApp();
+    expect(api.listDebts).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('group', { name: 'Periodo' }).length).toBeGreaterThan(0);
+
+    await user.click(within(screen.getAllByRole('navigation', { name: 'Navegación principal' })[0]).getByRole('button', { name: 'Deudas' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Deudas' })).toBeInTheDocument();
+    expect(await screen.findByRole('article', { name: 'Libre inversión' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Deuda de la pareja' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Periodo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cambiar mes/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Tú' }));
+    expect(screen.queryByRole('article', { name: 'Deuda de la pareja' })).not.toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Libre inversión' })).toBeInTheDocument();
   });
 });
 

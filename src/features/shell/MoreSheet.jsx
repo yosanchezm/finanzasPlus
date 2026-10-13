@@ -4,6 +4,7 @@ import { cn, focusRing } from '../../shared/ui/cn';
 import { navItem } from './navItems';
 
 const GoalsIcon = navItem('Metas').icon;
+const DebtsIcon = navItem('Deudas').icon;
 const itemClass = cn('flex h-12 items-center gap-3 rounded-sm px-3 text-left text-base font-medium', focusRing);
 
 /**
@@ -15,6 +16,7 @@ export default function MoreSheet({ onClose, onNavigate, onOpenAssistant, onRefr
 
   const items = [
     { label: 'Metas', icon: GoalsIcon, action: () => onNavigate('Metas') },
+    { label: 'Deudas', icon: DebtsIcon, action: () => onNavigate('Deudas') },
     { label: 'Nia', icon: Sparkles, action: onOpenAssistant },
     { label: 'Actualizar datos', icon: RefreshCw, action: onRefresh },
   ];

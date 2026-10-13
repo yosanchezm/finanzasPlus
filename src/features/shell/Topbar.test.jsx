@@ -29,6 +29,13 @@ describe('Topbar', () => {
     expect(within(breadcrumb).getByText('Movimientos')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('hides the period switcher for views that are not month-scoped', () => {
+    renderTopbar({ showPeriod: false });
+
+    expect(screen.queryByRole('group', { name: 'Periodo' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actualizar datos' })).toBeInTheDocument();
+  });
+
   it('shows the selected period with month navigation', async () => {
     const { props, user } = renderTopbar();
 

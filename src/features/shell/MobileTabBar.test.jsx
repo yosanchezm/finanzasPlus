@@ -85,6 +85,16 @@ describe('MobileTabBar', () => {
     expect(props.onRefresh).toHaveBeenCalled();
   });
 
+  it('navigates to Deudas from the sheet and closes it, without adding a tab', async () => {
+    const { props, user } = renderTabBar();
+    expect(screen.queryByRole('button', { name: 'Deudas' })).not.toBeInTheDocument();
+
+    await user.click(within(await openSheet(user)).getByRole('button', { name: 'Deudas' }));
+
+    expect(props.onNavigate).toHaveBeenCalledWith('Deudas');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('calls onLogout from "Cerrar sesión" in the sheet', async () => {
     const { props, user } = renderTabBar();
     const sheet = await openSheet(user);

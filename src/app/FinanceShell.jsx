@@ -33,8 +33,11 @@ import { PeriodError, ViewSkeleton } from './ViewSkeleton';
 const TransactionsView = lazy(() => import('../features/transactions/TransactionsView'));
 const BudgetView = lazy(() => import('../features/budget/BudgetView'));
 const GoalsView = lazy(() => import('../features/goals/GoalsView'));
+const DebtsContainer = lazy(() => import('../features/debts/DebtsContainer'));
 
 const PERIOD_VIEWS = ['Resumen', 'Movimientos', 'Presupuesto'];
+// Debts are not month-scoped: the period switcher would suggest otherwise.
+const UNSCOPED_VIEWS = ['Deudas'];
 
 const resetForm = () => ({
   merchant: '', amount: '', categoryId: '', type: 'expense', owner: 'you', date: dateInputValue(), note: '',
@@ -258,6 +261,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         );
       case 'Metas':
         return <GoalsView goals={goals} currentOwnerScope={currentOwnerScope} onAdd={() => setShowGoal(true)} onContribute={contributeToGoal} />;
+      case 'Deudas':
+        return <DebtsContainer inScope={inScope} currentOwnerScope={currentOwnerScope} scopeControl={scopeControl} />;
       default:
         return (
           <DashboardView
@@ -299,6 +304,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         month={selectedMonth}
         maxMonth={currentMonth}
         onMonthChange={setSelectedMonth}
+        showPeriod={!UNSCOPED_VIEWS.includes(activeView)}
         onSearch={searchTransactions}
         busy={data.refreshing || data.periodLoading}
         refreshing={data.refreshing}

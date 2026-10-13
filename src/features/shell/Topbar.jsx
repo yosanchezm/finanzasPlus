@@ -5,7 +5,7 @@ import PeriodSwitcher from './PeriodSwitcher';
 import TopbarSearch from './TopbarSearch';
 
 export default function Topbar({
-  householdName, activeView, month, maxMonth, onMonthChange, onSearch, onAdd, onRefresh, refreshing = false, className,
+  householdName, activeView, month, maxMonth, onMonthChange, onSearch, onAdd, onRefresh, refreshing = false, showPeriod = true, className,
 }) {
   return (
     <header className={cn('sticky top-0 z-10 h-16 items-center gap-3 border-b border-border bg-surface px-8', className)}>
@@ -17,7 +17,7 @@ export default function Topbar({
 
       <div className="ml-auto flex items-center gap-3">
         <TopbarSearch onSearch={onSearch} className="w-[200px] xl:w-[280px]" />
-        <PeriodSwitcher month={month} maxMonth={maxMonth} onChange={onMonthChange} />
+        {showPeriod && <PeriodSwitcher month={month} maxMonth={maxMonth} onChange={onMonthChange} />}
         <Button
           variant="secondary"
           size="icon"

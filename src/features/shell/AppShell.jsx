@@ -10,7 +10,7 @@ import Topbar from './Topbar';
  */
 export default function AppShell({
   householdName, members, displayName, email, activeView, transactionsCount,
-  month, maxMonth, onMonthChange, onSearch, busy = false, refreshing = false,
+  month, maxMonth, onMonthChange, showPeriod = true, onSearch, busy = false, refreshing = false,
   onNavigate, onAdd, onRefresh, onOpenAssistant, onLogout, children,
 }) {
   return (
@@ -43,6 +43,7 @@ export default function AppShell({
           month={month}
           maxMonth={maxMonth}
           onMonthChange={onMonthChange}
+          showPeriod={showPeriod}
           onSearch={onSearch}
           onAdd={onAdd}
           onRefresh={onRefresh}
@@ -55,6 +56,7 @@ export default function AppShell({
           month={month}
           maxMonth={maxMonth}
           onMonthChange={onMonthChange}
+          showPeriod={showPeriod}
         />
 
         <div className="sticky top-[60px] z-10 h-0.5 lg:top-16" aria-hidden={!busy}>

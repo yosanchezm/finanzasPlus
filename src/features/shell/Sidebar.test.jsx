@@ -40,6 +40,15 @@ describe('Sidebar', () => {
     expect(props.onNavigate).toHaveBeenCalledWith('Metas');
   });
 
+  it('offers Deudas and navigates to it', async () => {
+    const { props, user } = renderSidebar({ activeView: 'Deudas' });
+
+    expect(screen.getByRole('button', { name: 'Deudas' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: 'Deudas' }));
+
+    expect(props.onNavigate).toHaveBeenCalledWith('Deudas');
+  });
+
   it('shows the transactions count next to Movimientos', () => {
     renderSidebar({ transactionsCount: 48 });
 
