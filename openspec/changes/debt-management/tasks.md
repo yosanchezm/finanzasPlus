@@ -191,13 +191,13 @@ Capabilities: nia-in-repo-packaging. Nothing past S0a.1 runs until the owner con
 
 ## Phase S7: Credit card (680 lines)
 
-- [ ] S7.1 RED: `packages/finance-core/test/card/card.test.js` + statement fixture (OA-6): `cycleDates` clamps (day 31 in February); `minimumPayment` per rule with a floor, overridden by `adjustment.minimumDueMinor`; revolving 500,000 at 28% EA plus deferred 1,200,000 x 12 at 0% -> 12 x 100,000, revolving at its own rate, statement total = tranche installments + interest + management fee; a later card `rate_change` leaves existing tranche rates; paid in full by the due date -> interest 0; 300,000 unpaid -> next statement includes interest; advance accrues from its date; pay minimum -> not past due and the remainder stays revolving; below minimum -> shortfall `pastDue`; adjustment +350 -> 1,000,350; a plain expense transaction leaves the balance unchanged; fee + IVA link included in the cost. Reqs: CCD-1, CCD-2, CCD-3, CCD-4. Pair: S7.2. Done: fails.
-- [ ] S7.2 GREEN: `packages/finance-core/src/card/card.js` and `registerProjector('card', projectCard)`; barrel exports. Pair: S7.1.
-- [ ] S7.3 RED: wizard card tests: steps Kind -> Basics -> Rate -> Card -> Review, Card step fields (statement and due day, minimum rule, fee with IVA link by default and editable, initial revolving balance, deferred purchases), `toTerms()` valid. Reqs: CCD-1, CCD-3, DWM-2. Pair: S7.4. Done: fails.
-- [ ] S7.4 GREEN: `steps/CardStep.jsx`, card branch in `wizardModel.js`, card option in `KindStep`. Pair: S7.3.
-- [ ] S7.5 RED: card detail tests: tranches and cycle shown, minimum payment and past-due flag, statement dialog writes an `adjustment`, charge dialog writes a `charge` event (deferred tranche appears), a normal expense does not move the balance. Reqs: CCD-1, CCD-3, CCD-4. Pair: S7.6. Done: fails.
-- [ ] S7.6 GREEN: `CardPanel.jsx`, `StatementDialog.jsx`, `ChargeDialog.jsx` (names proposed; "card detail bits" in the design). Pair: S7.5.
-- [ ] S7.7 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S7a/S7b).
+- [x] S7.1 RED: `packages/finance-core/test/card/card.test.js` + statement fixture (OA-6): `cycleDates` clamps (day 31 in February); `minimumPayment` per rule with a floor, overridden by `adjustment.minimumDueMinor`; revolving 500,000 at 28% EA plus deferred 1,200,000 x 12 at 0% -> 12 x 100,000, revolving at its own rate, statement total = tranche installments + interest + management fee; a later card `rate_change` leaves existing tranche rates; paid in full by the due date -> interest 0; 300,000 unpaid -> next statement includes interest; advance accrues from its date; pay minimum -> not past due and the remainder stays revolving; below minimum -> shortfall `pastDue`; adjustment +350 -> 1,000,350; a plain expense transaction leaves the balance unchanged; fee + IVA link included in the cost. Reqs: CCD-1, CCD-2, CCD-3, CCD-4. Pair: S7.2. Done: fails.
+- [x] S7.2 GREEN: `packages/finance-core/src/card/card.js` and `registerProjector('card', projectCard)`; barrel exports. Pair: S7.1.
+- [x] S7.3 RED: wizard card tests: steps Kind -> Basics -> Rate -> Card -> Review, Card step fields (statement and due day, minimum rule, fee with IVA link by default and editable, initial revolving balance, deferred purchases), `toTerms()` valid. Reqs: CCD-1, CCD-3, DWM-2. Pair: S7.4. Done: fails.
+- [x] S7.4 GREEN: `steps/CardStep.jsx`, card branch in `wizardModel.js`, card option in `KindStep`. Pair: S7.3.
+- [x] S7.5 RED: card detail tests: tranches and cycle shown, minimum payment and past-due flag, statement dialog writes an `adjustment`, charge dialog writes a `charge` event (deferred tranche appears), a normal expense does not move the balance. Reqs: CCD-1, CCD-3, CCD-4. Pair: S7.6. Done: fails.
+- [x] S7.6 GREEN: `CardPanel.jsx`, `StatementDialog.jsx`, `ChargeDialog.jsx` (names proposed; "card detail bits" in the design). Pair: S7.5.
+- [x] S7.7 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S7a/S7b).
 
 ## Phase S8: Nia create, list, pay (740 lines)
 
