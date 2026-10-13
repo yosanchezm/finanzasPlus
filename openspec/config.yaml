@@ -1,0 +1,44 @@
+schema: spec-driven
+
+context: |
+  Project: finanzasplus (package "finanzas-plus") - personal finance SPA.
+  Stack: React 19 + Vite 8 + Tailwind v4, plain JSX (no router, no TS config), Radix Dialog, Recharts, lucide-react.
+  Backend: self-hosted Appwrite 1.8 TablesDB; schema via scripts/migrate-appwrite.mjs (idempotent, create-only; `npm run migrate:appwrite`).
+  Telegram bot "Nia": single Appwrite Function functions/nia/index.js (ESM, undici, Gemini JSON intents), no tests; deployed by uploading a tar.gz.
+  Fact: functions/nia has its own .git (remote yosanchezm/nia) and is tracked by the parent repo as a gitlink (mode 160000).
+  Tests: Vitest 5 + jsdom + Testing Library (`npm test` = `vitest run`, ~25 test files under src/). No linter, formatter, type checker script, or coverage tool.
+  Architecture: src/app, src/features, src/shared, src/styles, src/test. Deploy: Dockerfile + nginx (docs/deploy.md, Dokploy).
+
+strict_tdd: true
+
+testing:
+  runner:
+    command: npm test
+    framework: vitest
+    environment: jsdom
+  layers:
+    unit: { available: true, tool: vitest }
+    integration: { available: true, tool: "@testing-library/react + user-event" }
+    e2e: { available: false, tool: null }
+  coverage: { available: false, command: null }
+  quality:
+    linter: { available: false, command: null }
+    type_checker: { available: false, command: null }
+    formatter: { available: false, command: null }
+
+rules:
+  proposal:
+    - Include rollback plan and affected areas (frontend, Appwrite schema, Nia function).
+  specs:
+    - Use Given/When/Then scenarios with RFC 2119 keywords.
+  design:
+    - Document decisions with rationale; call out Appwrite schema migration impact.
+  tasks:
+    - Group by phase; keep each chained slice within the 800-line review budget.
+  apply:
+    - Strict TDD: write a failing Vitest test first, then implement, then refactor.
+    - functions/nia is in scope (owner intent: Nia is part of this project, deployed only as a tar.gz). Until the nested .git/gitlink is resolved, never delete or rewrite functions/nia/.git without explicit owner confirmation.
+  verify:
+    - Run `npm test`; `npm run build` for build sanity.
+  archive:
+    - Merge delta specs into openspec/specs before archiving.

@@ -68,7 +68,7 @@ An `extra_payment` MUST carry a strategy: reduce term, reduce installment, or ad
 
 ### Requirement: Cost-only expense rows
 
-Each payment MUST create at most one `transactions` expense row with `source: 'debt'`, `debtId`, `dedupeKey = debt:{eventId}`, category "Costos financieros" (get-or-create) and ownerScope inherited from the debt. Its amount MUST equal interest + charges + taxes. Principal MUST NOT create an expense. A payment with zero cost creates no row. Voiding a payment MUST void its row. Loan disbursements MUST NOT create income.
+Each payment MUST create at most one `transactions` expense row with `source: 'debt'`, `debtId`, `dedupeKey = debt:{eventId}`, category "Costos financieros" (get-or-create) and ownerScope inherited from the debt. Its amount MUST equal interest + charges + taxes. Principal MUST NOT create an expense. A payment with zero cost creates no row. Voiding a payment MUST delete its expense row (the `void` event is the audit trail), so aggregations stop counting it. Loan disbursements MUST NOT create income.
 
 #### Scenario: Cost row amount
 

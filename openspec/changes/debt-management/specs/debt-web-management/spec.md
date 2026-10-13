@@ -71,7 +71,7 @@ The payment form MUST show the allocation preview (charges, interest, principal)
 
 - GIVEN a recorded payment
 - WHEN the user voids it with confirmation
-- THEN the balance returns to its prior value and the expense is voided
+- THEN the balance returns to its prior value and its expense row is deleted
 
 ### Requirement: Extra-payment simulator
 

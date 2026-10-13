@@ -273,7 +273,7 @@ Precondition: S0b merged and S4 merged (data layer shape).
 | NDA-5 | Simulate and advise | S8.9, S8.10, S9.3-S9.8 |
 | NDA-6 | Paraphrase guardrail | S9.1, S9.2, S9.7, S9.8 |
 
-Coverage: 37 of 37 spec requirements map to at least one task. Threat-matrix rows: Git repository selection and Commit state -> S0a.2, S0a.3; Subprocess (packaging) -> S0b.3; rows marked N/A are omitted.
+Coverage: 38 of 38 spec requirements map to at least one task. Threat-matrix rows: Git repository selection and Commit state -> S0a.2, S0a.3; Subprocess (packaging) -> S0b.3; rows marked N/A are omitted.
 
 ## Final verification checklist (end of S9, before sdd-verify)
 
