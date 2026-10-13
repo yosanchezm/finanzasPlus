@@ -26,6 +26,8 @@ vi.mock('../appwrite', () => ({
   listAttachments: vi.fn(),
   listDebts: vi.fn(),
   listDebtEvents: vi.fn(),
+  createDebt: vi.fn(),
+  debtPort: vi.fn(),
 }));
 
 const USER = { $id: 'u1', name: 'Camilo', email: 'camilo@example.com' };
@@ -141,6 +143,27 @@ describe('App debts section', () => {
     await user.click(screen.getByRole('button', { name: 'Tú' }));
     expect(screen.queryByRole('article', { name: 'Deuda de la pareja' })).not.toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'Libre inversión' })).toBeInTheDocument();
+  });
+
+  it('creates a debt for the household and refreshes the month data afterwards', async () => {
+    api.listDebts.mockResolvedValue([]);
+    api.listDebtEvents.mockResolvedValue([]);
+    api.createDebt.mockResolvedValue({});
+    api.debtPort.mockReturnValue({ createEvent: vi.fn(async ({ id, data }) => ({ $id: id, ...data })) });
+    const user = await renderReadyApp();
+    await user.click(within(screen.getAllByRole('navigation', { name: 'Navegación principal' })[0]).getByRole('button', { name: 'Deudas' }));
+    const refreshesBefore = api.getWorkspace.mock.calls.length;
+
+    await user.click(await screen.findByRole('button', { name: 'Registrar una deuda' }));
+    await user.click(screen.getByRole('button', { name: /^Informal/ }));
+    await user.type(screen.getByLabelText('Nombre de la deuda'), 'Préstamo de papá');
+    await user.type(screen.getByLabelText('Monto del préstamo'), '500000');
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(await screen.findByText('Deuda registrada.')).toBeInTheDocument();
+    expect(api.createDebt).toHaveBeenCalledWith({ id: expect.stringMatching(/^db/), data: expect.objectContaining({ householdId: 'h1', actorId: 'u1', name: 'Préstamo de papá' }) });
+    expect(api.getWorkspace.mock.calls.length).toBeGreaterThan(refreshesBefore);
   });
 });
 

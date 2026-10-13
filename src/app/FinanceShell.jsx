@@ -262,7 +262,17 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
       case 'Metas':
         return <GoalsView goals={goals} currentOwnerScope={currentOwnerScope} onAdd={() => setShowGoal(true)} onContribute={contributeToGoal} />;
       case 'Deudas':
-        return <DebtsContainer inScope={inScope} currentOwnerScope={currentOwnerScope} scopeControl={scopeControl} />;
+        return (
+          <DebtsContainer
+            inScope={inScope}
+            currentOwnerScope={currentOwnerScope}
+            scopeControl={scopeControl}
+            householdId={household.$id}
+            user={user}
+            onRefresh={refreshInPlace}
+            onNotify={notify}
+          />
+        );
       default:
         return (
           <DashboardView
