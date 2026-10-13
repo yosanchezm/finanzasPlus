@@ -1,4 +1,5 @@
 import { compareIso, hasPeriodicity, isIsoDate } from './calendar.js';
+import { normalizeCard } from './card/config.js';
 import { TermsTooLarge, ValidationError } from './errors.js';
 import { assertMinor } from './money.js';
 import { normalizeRate } from './rates.js';
@@ -188,10 +189,7 @@ export function validateTerms(input) {
   if (!isInteger(roundingUnit, 1)) throw fail('invalid_terms', `roundingUnit must be a positive whole number, got ${String(roundingUnit)}`);
   terms.roundingUnit = roundingUnit;
   if (input.lateRate !== undefined) terms.lateRate = normalizeRate(input.lateRate);
-  if (input.card !== undefined) {
-    if (!isObject(input.card)) throw fail('invalid_terms', 'card must be an object');
-    terms.card = JSON.parse(JSON.stringify(input.card));
-  }
+  if (input.card !== undefined || kind === 'card') terms.card = normalizeCard(input.card);
   return terms;
 }
 

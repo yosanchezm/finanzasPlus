@@ -1,0 +1,46 @@
+{
+  "label": "Credit card opened 2026-04-01: statement day 15, due day 30, 28% EA, 500,000 revolving, a 1,200,000 purchase in 12 interest-free installments, 9,000 management fee plus 19% IVA",
+  "provenance": "Independently computed with floating-point arithmetic (round half away from zero per component). Not a bank statement: owner action OA-6 (real statements) is still open.",
+  "terms": {
+    "kind": "card",
+    "principalMinor": 500000,
+    "openedOn": "2026-04-01",
+    "rate": { "value": 28, "basis": "effective", "periodicity": "annual", "timing": "arrears" },
+    "system": "none",
+    "periodicity": "monthly",
+    "charges": [
+      { "id": "mgmt_fee", "kind": "fee", "label": "Cuota de manejo", "basis": "fixed", "value": 9000 },
+      { "id": "mgmt_iva", "kind": "tax", "label": "IVA", "basis": "pctOfCharge", "refId": "mgmt_fee", "value": 19 }
+    ],
+    "card": {
+      "statementDay": 15,
+      "dueDay": 30,
+      "minPayment": { "rule": "interest_fees_plus_pct", "pct": 5, "floorMinor": 20000 },
+      "deferred": [
+        { "id": "nevera", "label": "Nevera", "principalMinor": 1200000, "n": 12, "rate": { "convention": "ZERO" } }
+      ]
+    }
+  },
+  "statement1": {
+    "statementOn": "2026-04-15",
+    "dueOn": "2026-04-30",
+    "interestMinor": 10392,
+    "chargesMinor": 9000,
+    "taxesMinor": 1710,
+    "deferredMinor": 100000,
+    "totalMinor": 121102,
+    "payInFullMinor": 621102
+  },
+  "afterPartialPayment": {
+    "paymentMinor": 200000,
+    "costMinor": 21102,
+    "balanceMinor": 1521102
+  },
+  "unpaid300k": { "paymentMinor": 321102, "revolvingMinor": 300000, "nextInterestMinor": 6235 },
+  "paidInFull2": { "interestMinor": 0, "totalMinor": 110710 },
+  "tranches": {
+    "sixAt12": { "principalMinor": 600000, "n": 6, "firstInterestMinor": 5693, "installmentMinor": 103347 },
+    "threeAt28": { "principalMinor": 300000, "n": 3, "firstInterestMinor": 6235, "installmentMinor": 104185 }
+  },
+  "advance": { "principalMinor": 200000, "rateEA": 35, "firstCycleInterestMinor": 2026, "fullCycleInterestMinor": 5065 }
+}

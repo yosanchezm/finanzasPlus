@@ -1,4 +1,5 @@
 import { compareIso, isIsoDate } from '../calendar.js';
+import { projectCard } from '../card/card.js';
 import { ValidationError } from '../errors.js';
 import { buildSchedule } from '../schedule/index.js';
 import { parseTerms, validateTerms } from '../terms.js';
@@ -10,10 +11,10 @@ import { applyAdjustment, applyChargeChange, applyExtra, applyRateChange, applyR
 // project(debt, events, asOf) is a pure replay (AD1): terms plus the active
 // events in chronological order give the whole state. Nothing is cached.
 
-const PROJECTORS = new Map();
+const PROJECTORS = new Map([['card', projectCard]]);
 
 /**
- * Registers the projector for a debt kind (for example `card`, S7). Pass `null`
+ * Registers the projector for a debt kind (the `card` projector is built in). Pass `null`
  * to remove it. Kinds without a projector use the loan projector.
  * @param {string} kind
  * @param {((context: { debt: object, terms: object, events: object[], asOf: string, opts: object }) => object) | null} projector

@@ -170,6 +170,7 @@ describe('public barrel (index.js)', () => {
         'compareIso',
         'compareStrategies',
         'convertRate',
+        'cycleDates',
         'daysBetween',
         'evaluateCharges',
         'isIsoDate',
