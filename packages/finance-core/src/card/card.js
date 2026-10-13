@@ -20,6 +20,11 @@ import { buildSchedule } from '../schedule/index.js';
 //   - Installment purchases (n >= 2) follow their own French plan fixed at
 //     purchase; a purchase in one installment is an ordinary purchase.
 //   - Cash advances accrue from their date, prorated in their first cycle.
+//   - Past due is measured against the minimum payment of each closed cycle:
+//     payments cover the oldest unmet minimum first, so a late payment still
+//     reduces the shortfall (interest is decided by the balance on the due date).
+//   - An `adjustment` is the statement's truth: it is applied after that day's
+//     close, resets tranche balances and absorbs the rest in the revolving balance.
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_CYCLES = 1200;
@@ -42,6 +47,25 @@ export function cycleDates(statementDay, dueDay, month) {
   if (typeof month !== 'string' || !MONTH.test(month)) throw new ValidationError('invalid_date', `month must be YYYY-MM, got ${String(month)}`);
   const first = `${month}-01`;
   return { statementOn: addMonthsClamped(first, 0, statementDay), dueOn: addMonthsClamped(first, dueDay > statementDay ? 0 : 1, dueDay) };
+}
+
+/**
+ * Minimum payment of a statement. Rules: `interest_fees_plus_pct` (interest,
+ * fees and installments plus `pct`% of the revolving and advance balance),
+ * `installments_due` (interest, fees and installments only) and `pct_balance`
+ * (`pct`% of the whole statement). The floor applies, but never more than the
+ * whole statement is asked.
+ * @param {{ rule?: string, pct?: number, floorMinor?: number }} minPayment
+ * @param {{ contractualMinor: number, revolvingMinor: number, payInFullMinor: number, unit?: number }} cycle
+ * @returns {number}
+ */
+export function minimumPayment(minPayment, cycle) {
+  const { rule = 'interest_fees_plus_pct', pct = 5, floorMinor = 0 } = minPayment ?? {};
+  const { contractualMinor, revolvingMinor, payInFullMinor, unit = 1 } = cycle;
+  let amount = contractualMinor + (revolvingMinor * pct) / 100;
+  if (rule === 'installments_due') amount = contractualMinor;
+  else if (rule === 'pct_balance') amount = (payInFullMinor * pct) / 100;
+  return Math.min(payInFullMinor, Math.max(roundUnit(amount, unit), floorMinor));
 }
 
 /** Closed cycles up to `asOf` (statements on or after the opening date) plus the next one. */
@@ -69,19 +93,23 @@ const balanceOf = (state) =>
 const payInFullOf = (state) =>
   state.accrued.charges + state.accrued.taxes + state.accrued.interest + sum(ofType(state, 'deferred'), (t) => t.dueMinor) + sum(ofType(state, 'advance'), (t) => t.balanceMinor) + state.billed;
 
-function openDeferred(state, spec) {
-  const rows = buildSchedule({
+function frenchRows(state, { openedOn, principalMinor, n, rate }) {
+  return buildSchedule({
     kind: 'other',
-    principalMinor: spec.principalMinor,
-    openedOn: spec.openedOn,
-    rate: spec.rate,
+    principalMinor,
+    openedOn,
+    rate,
     system: 'french',
     periodicity: 'monthly',
-    n: spec.n,
-    firstDueOn: addMonthsClamped(spec.openedOn, 1),
+    n,
+    firstDueOn: addMonthsClamped(openedOn, 1),
     roundingUnit: state.unit,
   });
-  state.tranches.push({ id: spec.id, type: 'deferred', label: spec.label, openedOn: spec.openedOn, principalMinor: spec.principalMinor, balanceMinor: spec.principalMinor, rate: spec.rate, n: spec.n, rows, next: 0, dueMinor: 0 });
+}
+
+function openDeferred(state, spec) {
+  const { id, label, openedOn, principalMinor, n, rate } = spec;
+  state.tranches.push({ id, type: 'deferred', label, openedOn, principalMinor, balanceMinor: principalMinor, rate, n, rows: frenchRows(state, spec), next: 0, dueMinor: 0 });
 }
 
 function applyCharge(state, event) {
@@ -127,10 +155,47 @@ function applyPayment(state, event) {
   const billed = Math.min(left, state.billed);
   state.billed -= billed;
   state.pending -= left - billed;
+  let rest = event.amountMinor;
+  for (const cycle of state.cycles) {
+    const take = Math.min(rest, Math.max(cycle.minimum - cycle.covered, 0));
+    if (take === 0) continue;
+    cycle.covered += take;
+    cycle.eventIds.push(event.id);
+    rest -= take;
+  }
   return { allocation };
 }
 
+function setTranche(state, id, value) {
+  if (id === REVOLVING) {
+    state.billed = value;
+    state.pending = 0;
+    return;
+  }
+  const tranche = state.tranches.find((item) => item.id === id);
+  if (!tranche) return;
+  tranche.balanceMinor = value;
+  if (tranche.type !== 'deferred') return;
+  // Rebuild the installments not billed yet over the same number of statements.
+  tranche.dueMinor = Math.min(tranche.dueMinor, value);
+  const left = tranche.rows.length - tranche.next;
+  const unbilled = value - tranche.dueMinor;
+  tranche.rows = left > 0 && unbilled > 0 ? frenchRows(state, { ...tranche, principalMinor: unbilled, n: left }) : [];
+  tranche.next = 0;
+}
+
+function applyAdjustment(state, event) {
+  const { balanceMinor, trancheBalances = {}, minimumDueMinor } = event.payload;
+  const before = balanceOf(state);
+  for (const id of Object.keys(trancheBalances)) setTranche(state, id, trancheBalances[id]);
+  if (balanceMinor !== undefined) state.billed = Math.max(state.billed + balanceMinor - balanceOf(state), 0);
+  const latest = state.cycles[state.cycles.length - 1];
+  if (minimumDueMinor !== undefined && latest) latest.minimum = minimumDueMinor;
+  return { driftMinor: balanceOf(state) - before, absorbed: balanceMinor === undefined || balanceOf(state) === balanceMinor };
+}
+
 const HANDLERS = {
+  adjustment: applyAdjustment,
   payment: applyPayment,
   extra_payment: applyPayment,
   charge: applyCharge,
@@ -174,6 +239,14 @@ function closeCycle(state, cycle) {
   state.interestBase = null;
   state.billed += state.pending;
   state.pending = 0;
+  const total = lines.interest + lines.deferred + fees.chargesMinor + fees.taxesMinor;
+  const payInFull = payInFullOf(state);
+  const minimum = minimumPayment(state.card.minPayment, {
+    contractualMinor: total,
+    revolvingMinor: state.billed + sum(ofType(state, 'advance'), (t) => t.balanceMinor),
+    payInFullMinor: payInFull,
+    unit,
+  });
   state.cycles.push({
     ...cycle,
     interest: lines.interest,
@@ -181,8 +254,11 @@ function closeCycle(state, cycle) {
     charges: fees.chargesMinor,
     taxes: fees.taxesMinor,
     chargeLines: fees.lines,
-    total: lines.interest + lines.deferred + fees.chargesMinor + fees.taxesMinor,
-    payInFull: payInFullOf(state),
+    total,
+    payInFull,
+    minimum,
+    covered: 0,
+    eventIds: [],
     closing: balanceOf(state),
   });
 }
@@ -232,7 +308,7 @@ export function projectCard({ debt, terms, events, asOf }) {
   };
   for (const item of terms.card.deferred) openDeferred(state, { openedOn: terms.openedOn, ...item });
   const { cycles, next } = cyclesThrough(terms.card, terms.openedOn, asOf);
-  const moments = events.map((event) => ({ at: event.effectiveOn, rank: 0, event }));
+  const moments = events.map((event) => ({ at: event.effectiveOn, rank: event.kind === 'adjustment' ? 3 : 0, event }));
   for (const cycle of cycles) {
     moments.push({ at: cycle.statementOn, rank: 2, close: cycle });
     if (compareIso(cycle.dueOn, asOf) <= 0) moments.push({ at: cycle.dueOn, rank: 1, due: true });
@@ -240,6 +316,7 @@ export function projectCard({ debt, terms, events, asOf }) {
   moments.sort((a, b) => compareIso(a.at, b.at) || a.rank - b.rank);
 
   const applied = [];
+  const notices = [];
   for (const moment of moments) {
     if (moment.close) closeCycle(state, moment.close);
     else if (moment.due) state.interestBase = state.billed;
@@ -248,41 +325,66 @@ export function projectCard({ debt, terms, events, asOf }) {
       const { allocation = null, ...extra } = HANDLERS[event.kind]?.(state, event) ?? {};
       const costMinor = allocation ? allocation.charges + allocation.taxes + allocation.lateInterest + allocation.interest : 0;
       applied.push({ eventId: event.id, kind: event.kind, effectiveOn: event.effectiveOn, allocation, costMinor, ...extra });
+      if (extra.driftMinor) notices.push({ code: 'drift', eventId: event.id, amountMinor: extra.driftMinor, absorbed: extra.absorbed });
     }
   }
 
-  const plan = state.cycles.map((cycle) => ({
-    period: cycle.period,
-    statementOn: cycle.statementOn,
-    dueOn: cycle.dueOn,
-    interestMinor: cycle.interest,
-    principalMinor: cycle.deferred,
-    installmentMinor: cycle.interest + cycle.deferred,
-    charges: cycle.chargeLines,
-    chargesMinor: cycle.charges,
-    taxesMinor: cycle.taxes,
-    closingMinor: cycle.closing,
-    statementTotalMinor: cycle.total,
-    payInFullMinor: cycle.payInFull,
-  }));
+  let dueTaken = false;
+  const plan = state.cycles.map((cycle) => {
+    const outstandingMinor = Math.max(cycle.minimum - cycle.covered, 0);
+    let status = 'future';
+    if (outstandingMinor === 0) status = 'paid';
+    else if (compareIso(cycle.dueOn, asOf) < 0) status = 'pastDue';
+    else if (cycle.covered > 0) status = 'partial';
+    else if (!dueTaken) {
+      status = 'due';
+      dueTaken = true;
+    }
+    return {
+      period: cycle.period,
+      statementOn: cycle.statementOn,
+      dueOn: cycle.dueOn,
+      interestMinor: cycle.interest,
+      principalMinor: cycle.deferred,
+      installmentMinor: cycle.interest + cycle.deferred,
+      charges: cycle.chargeLines,
+      chargesMinor: cycle.charges,
+      taxesMinor: cycle.taxes,
+      closingMinor: cycle.closing,
+      statementTotalMinor: cycle.total,
+      payInFullMinor: cycle.payInFull,
+      minimumMinor: cycle.minimum,
+      totalDueMinor: cycle.minimum,
+      paidMinor: cycle.covered,
+      outstandingMinor,
+      paidByEventIds: cycle.eventIds.slice(),
+      status,
+    };
+  });
+  const pastDueMinor = sum(plan, (entry) => (entry.status === 'pastDue' ? entry.outstandingMinor : 0));
+  const nextDue = plan.find((entry) => entry.status === 'pastDue' || entry.status === 'partial' || entry.status === 'due') ?? null;
   const tranches = trancheView(state);
   return {
     asOf,
     termsVersion: debt.termsVersion ?? 1,
     terms,
     balanceMinor: balanceOf(state),
+    pastDueMinor,
+    nextDue,
     remainingPeriods: tranches.reduce((most, tranche) => Math.max(most, tranche.installmentsLeft ?? 0), 0),
     plan,
     applied,
     tranches,
     totals: totalsOf(applied, state.accrued),
-    notices: applied.filter((entry) => entry.allocation?.surplus > 0).map((entry) => ({ code: 'surplus', eventId: entry.eventId, amountMinor: entry.allocation.surplus })),
+    notices: [...applied.filter((entry) => entry.allocation?.surplus > 0).map((entry) => ({ code: 'surplus', eventId: entry.eventId, amountMinor: entry.allocation.surplus })), ...notices],
     card: {
       statementDay: terms.card.statementDay,
       dueDay: terms.card.dueDay,
       nextStatementOn: next?.statementOn ?? null,
       nextDueOn: next?.dueOn ?? null,
       payInFullMinor: payInFullOf(state),
+      minimumDueMinor: nextDue?.outstandingMinor ?? 0,
+      minimumPastDue: pastDueMinor > 0,
     },
   };
 }

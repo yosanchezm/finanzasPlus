@@ -106,6 +106,7 @@ describe('statements: tranches, interest and management fee', () => {
     const projection = project(debt(), [], '2026-04-10');
     expect(projection.plan).toHaveLength(0);
     expect(projection.balanceMinor).toBe(1_700_000);
+    expect(projection).toMatchObject({ nextDue: null, pastDueMinor: 0 });
     expect(projection.card.nextStatementOn).toBe('2026-04-15');
   });
 

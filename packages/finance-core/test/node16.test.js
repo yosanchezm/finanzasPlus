@@ -175,6 +175,7 @@ describe('public barrel (index.js)', () => {
         'evaluateCharges',
         'isIsoDate',
         'ley1555Notice',
+        'minimumPayment',
         'normalizeRate',
         'parseTerms',
         'periodDates',

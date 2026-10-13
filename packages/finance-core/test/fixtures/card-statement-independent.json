@@ -29,13 +29,16 @@
     "taxesMinor": 1710,
     "deferredMinor": 100000,
     "totalMinor": 121102,
-    "payInFullMinor": 621102
+    "payInFullMinor": 621102,
+    "minimumMinor": 146102,
+    "minimumByRule": { "installments_due": 121102, "pct_balance_10": 62110 }
   },
   "afterPartialPayment": {
     "paymentMinor": 200000,
     "costMinor": 21102,
     "balanceMinor": 1521102
   },
+  "afterMinimum": { "paymentMinor": 146102, "revolvingMinor": 475000, "interestMinor": 9873, "totalMinor": 120583, "payInFullMinor": 595583, "minimumMinor": 144333 },
   "unpaid300k": { "paymentMinor": 321102, "revolvingMinor": 300000, "nextInterestMinor": 6235 },
   "paidInFull2": { "interestMinor": 0, "totalMinor": 110710 },
   "tranches": {
