@@ -16,7 +16,7 @@ import { ScopeControl } from './ScopeControl';
 const linkButton = cn('rounded-sm text-[13px] font-medium text-accent hover:text-accent-hover', focusRing);
 const twoToOne = 'grid gap-4 min-[1100px]:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]';
 
-function RecentTransactions({ items, currentOwnerScope, onSeeAll, onAdd }) {
+function RecentTransactions({ items, currentOwnerScope, onSeeAll, onAdd, onOpenDetail }) {
   const titleId = useId();
   return (
     <Card as="article" padded={false} aria-labelledby={titleId} className="flex flex-col">
@@ -28,7 +28,7 @@ function RecentTransactions({ items, currentOwnerScope, onSeeAll, onAdd }) {
       />
       {items.length ? (
         <ul className="flex flex-col px-2 pb-2">
-          {items.map((item) => <TransactionRow key={item.$id} item={item} currentOwnerScope={currentOwnerScope} />)}
+          {items.map((item) => <TransactionRow key={item.$id} item={item} currentOwnerScope={currentOwnerScope} onOpen={onOpenDetail} />)}
         </ul>
       ) : (
         <EmptyState message="Aún no hay movimientos en este periodo." actionLabel="Registrar movimiento" actionIcon={Plus} onAction={onAdd} />
@@ -91,7 +91,7 @@ function NiaInsight({ budget, remainingDays, isCurrentMonth, onOpenAssistant, on
 export default function DashboardView({
   dateLabel, periodLabel, scope, onScopeChange, totals, incomeCount, expenseCount, budget, remainingDays,
   isCurrentMonth = true, cashflow, history = [], categoryStats, recentTransactions, goals, currentOwnerScope,
-  onNavigate, onAddTransaction, onAddGoal, onOpenAssistant,
+  onNavigate, onAddTransaction, onAddGoal, onOpenAssistant, onOpenDetail,
 }) {
   const seeBudget = () => onNavigate('Presupuesto');
   return (
@@ -111,6 +111,7 @@ export default function DashboardView({
           currentOwnerScope={currentOwnerScope}
           onSeeAll={() => onNavigate('Movimientos')}
           onAdd={onAddTransaction}
+          onOpenDetail={onOpenDetail}
         />
         <div className="flex min-w-0 flex-col gap-4">
           <GoalsSummary goals={goals} onSeeAll={() => onNavigate('Metas')} onAdd={onAddGoal} />

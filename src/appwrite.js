@@ -198,10 +198,27 @@ export async function deleteTransaction(rowId) {
   return tablesDB.deleteRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.transactions, rowId });
 }
 
+const receiptsBucketId = () => String(env.VITE_APPWRITE_RECEIPTS_BUCKET_ID || 'receipts');
+
+/**
+ * Receipts attached to a transaction (attachments table, by_transaction index), each with
+ * the Storage URLs to open it (`viewUrl`) and an image thumbnail (`previewUrl`).
+ * The URLs rely on the Appwrite session cookie, so the UI must handle them failing to load.
+ */
+export async function listAttachments(transactionId) {
+  const rows = await listAllRows(TABLES.attachments, [Query.equal('transactionId', transactionId)]);
+  const bucketId = receiptsBucketId();
+  return rows.map((row) => ({
+    ...row,
+    viewUrl: storage.getFileView({ bucketId, fileId: row.fileId }),
+    previewUrl: storage.getFilePreview({ bucketId, fileId: row.fileId, width: 640, height: 640 }),
+  }));
+}
+
 export async function createReceipt(file, userId, transactionId) {
   assertConfig();
   const uploaded = await storage.createFile({
-    bucketId: String(env.VITE_APPWRITE_RECEIPTS_BUCKET_ID || 'receipts'),
+    bucketId: receiptsBucketId(),
     fileId: ID.unique(),
     file,
     permissions: permissions.transactionRow(userId),

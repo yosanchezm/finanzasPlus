@@ -22,7 +22,8 @@ export function SegmentedControl({ label, labelledBy, options, value, onChange, 
             onClick={() => onChange(option.value)}
             className={cn(
               'rounded-[7px] px-3 font-medium whitespace-nowrap text-ink-muted transition-colors hover:text-ink',
-              size === 'lg' ? 'h-9 text-sm' : 'h-[34px] text-[13px]',
+              // 44px touch targets on phones, compact from sm.
+              size === 'lg' ? 'h-11 text-sm sm:h-9' : 'h-11 text-[13px] sm:h-[34px]',
               pressed && 'bg-surface font-semibold text-ink shadow-[0_1px_2px_rgba(16,24,20,.08)]',
               focusRing,
             )}

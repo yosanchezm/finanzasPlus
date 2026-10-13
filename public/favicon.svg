@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Brand mark. The faint mint edge keeps the dark square visible on dark browser tabs. -->
+  <rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#0F1A15" stroke="#8CE6BD" stroke-opacity="0.4" stroke-width="1"/>
+  <path d="M16 9v14M9 16h14" fill="none" stroke="#8CE6BD" stroke-width="4" stroke-linecap="round"/>
+</svg>

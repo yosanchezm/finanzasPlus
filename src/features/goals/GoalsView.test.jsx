@@ -103,3 +103,15 @@ describe('GoalsView contributions', () => {
     expect(within(card).getByText('$ 1.500')).toBeInTheDocument();
   });
 });
+
+describe('GoalsView on a phone', () => {
+  it('uses the card grid at 375px, with the page action in the header', () => {
+    window.innerWidth = 375;
+    renderView();
+
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nueva meta' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Nuevo movimiento/ })).not.toBeInTheDocument();
+  });
+});

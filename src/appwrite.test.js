@@ -6,7 +6,13 @@ vi.mock('appwrite', async (importOriginal) => {
   const actual = await importOriginal();
   class FakeClient { setEndpoint() { return this; } setProject() { return this; } }
   class FakeAccount { constructor() { this.get = vi.fn(); } }
-  class FakeStorage { constructor() { this.createFile = vi.fn(); } }
+  class FakeStorage {
+    constructor() {
+      this.createFile = vi.fn();
+      this.getFileView = vi.fn();
+      this.getFilePreview = vi.fn();
+    }
+  }
   class FakeTablesDB {
     constructor() {
       this.listRows = vi.fn();
@@ -148,5 +154,43 @@ describe('updateGoal', () => {
     expect(api.tablesDB.updateRow).toHaveBeenCalledWith({
       databaseId: 'db-test', tableId: 'goals', rowId: 'goal-1', data: { currentMinor: 9000000 },
     });
+  });
+});
+
+describe('listAttachments', () => {
+  it('lists the household attachments of one transaction with view and preview URLs', async () => {
+    api.tablesDB.listRows.mockResolvedValueOnce({
+      rows: [{ $id: 'a1', transactionId: 't1', fileId: 'f1', mimeType: 'image/png', originalName: 'ticket.png' }],
+    });
+    api.storage.getFileView.mockReturnValue('https://appwrite.test/v1/storage/buckets/receipts/files/f1/view');
+    api.storage.getFilePreview.mockReturnValue('https://appwrite.test/v1/storage/buckets/receipts/files/f1/preview');
+
+    const attachments = await api.listAttachments('t1');
+
+    const [{ tableId, queries }] = api.tablesDB.listRows.mock.calls[0];
+    expect(tableId).toBe('attachments');
+    expect(parse(queries)).toEqual([
+      { method: 'equal', attribute: 'householdId', values: ['household-test'] },
+      { method: 'equal', attribute: 'transactionId', values: ['t1'] },
+      { method: 'limit', values: [100] },
+    ]);
+    expect(api.storage.getFileView).toHaveBeenCalledWith({ bucketId: 'receipts', fileId: 'f1' });
+    expect(api.storage.getFilePreview).toHaveBeenCalledWith({ bucketId: 'receipts', fileId: 'f1', width: 640, height: 640 });
+    expect(attachments).toEqual([{
+      $id: 'a1',
+      transactionId: 't1',
+      fileId: 'f1',
+      mimeType: 'image/png',
+      originalName: 'ticket.png',
+      viewUrl: 'https://appwrite.test/v1/storage/buckets/receipts/files/f1/view',
+      previewUrl: 'https://appwrite.test/v1/storage/buckets/receipts/files/f1/preview',
+    }]);
+  });
+
+  it('returns an empty list when the transaction has no receipts', async () => {
+    api.tablesDB.listRows.mockResolvedValueOnce({ rows: [] });
+
+    await expect(api.listAttachments('t2')).resolves.toEqual([]);
+    expect(api.storage.getFileView).not.toHaveBeenCalled();
   });
 });

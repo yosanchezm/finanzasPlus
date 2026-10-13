@@ -152,3 +152,28 @@ describe('DashboardView', () => {
     expect(props.onOpenAssistant).toHaveBeenCalled();
   });
 });
+
+describe('DashboardView on a phone and transaction detail', () => {
+  const recent = [
+    { $id: 't1', merchant: 'Nómina', categoryName: 'Ingresos', type: 'income', amountMinor: 5200000, currency: 'COP', ownerScope: 'you', occurredAt: at(1) },
+    { $id: 't2', merchant: 'Taxi', categoryName: 'Transporte', type: 'expense', amountMinor: 48900, currency: 'COP', ownerScope: 'partner', occurredAt: at(2) },
+  ];
+
+  it('keeps recent transactions as a list at 375px', () => {
+    window.innerWidth = 375;
+    renderDashboard({ recentTransactions: recent });
+    const card = screen.getByRole('article', { name: 'Últimos movimientos' });
+
+    expect(within(card).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(card).queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('opens the detail from a recent transaction', async () => {
+    const onOpenDetail = vi.fn();
+    const { user } = renderDashboard({ recentTransactions: recent, onOpenDetail });
+
+    await user.click(screen.getByRole('button', { name: 'Ver detalle de Taxi' }));
+
+    expect(onOpenDetail).toHaveBeenCalledWith(recent[1]);
+  });
+});

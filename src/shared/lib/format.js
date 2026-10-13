@@ -68,3 +68,11 @@ export const formatMonthName = (key) => {
   const text = new Intl.DateTimeFormat('es-CO', { month: 'long' }).format(new Date(`${key}-01T12:00:00`));
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
+
+/** "27 oct 2026 · 2:05 p. m." in local time. */
+export const formatDateTime = (isoDate) => {
+  const date = new Date(isoDate);
+  if (!isoDate || Number.isNaN(date.getTime())) return 'Sin fecha';
+  const time = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' }).format(date).replace(/\s+/g, ' ');
+  return `${formatDate(isoDate)} ${date.getFullYear()} · ${time}`;
+};

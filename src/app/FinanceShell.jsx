@@ -7,6 +7,7 @@ import {
   createReceipt,
   createTransaction,
   deleteTransaction,
+  listAttachments,
   updateGoal,
   updateTransaction,
   upsertBudget,
@@ -17,6 +18,7 @@ import DashboardView from '../features/dashboard/DashboardView';
 import { ScopeControl } from '../features/dashboard/ScopeControl';
 import GoalModal from '../features/goals/GoalModal';
 import AppShell from '../features/shell/AppShell';
+import TransactionDetail from '../features/transactions/TransactionDetail';
 import TransactionModal from '../features/transactions/TransactionModal';
 import { categoryColor, iconForCategory } from '../shared/lib/categories';
 import { addMonths, dateInputValue, daysInMonth, monthKey, monthStartDate, monthsEndingAt } from '../shared/lib/dates';
@@ -69,6 +71,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   const [receiptFile, setReceiptFile] = useState(null);
   const [newTransaction, setNewTransaction] = useState(resetForm);
   const [showGoal, setShowGoal] = useState(false);
+  const [detailTransaction, setDetailTransaction] = useState(null);
 
   const data = useFinanceData(initialWorkspace, selectedMonth);
   const { household, members, categories, budgets, goals } = data.workspace;
@@ -112,7 +115,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     const budget = budgets.find((item) => item.categoryId === category.$id && item.month === selectedMonth);
     return { ...category, color: categoryColor(category), value, budget: Number(budget?.plannedMinor || 0) };
   }), [categories, visibleTransactions, budgets, selectedMonth]);
-  const categoryTotal = categoryStats.reduce((sum, item) => sum + item.value, 0);
+  // Same rule as the Presupuesto summary: only categories with a limit count against the budget.
+  const budgetedSpent = categoryStats.filter((item) => item.budget > 0).reduce((sum, item) => sum + item.value, 0);
   const budgetTotal = categoryStats.reduce((sum, item) => sum + item.budget, 0);
   const cashflow = useMemo(
     () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth)),
@@ -231,6 +235,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             onAdd={openCreateTransaction}
             onEdit={openEditTransaction}
             onDelete={removeTransaction}
+            onOpenDetail={setDetailTransaction}
             scopeControl={scopeControl}
           />
         );
@@ -263,7 +268,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             totals={totals}
             incomeCount={visibleTransactions.filter((item) => item.type === 'income').length}
             expenseCount={visibleTransactions.filter((item) => item.type === 'expense').length}
-            budget={{ planned: budgetTotal, spent: categoryTotal }}
+            budget={{ planned: budgetTotal, spent: budgetedSpent }}
             remainingDays={remainingDays}
             isCurrentMonth={isCurrentMonth}
             cashflow={cashflow}
@@ -276,6 +281,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             onAddTransaction={openCreateTransaction}
             onAddGoal={() => setShowGoal(true)}
             onOpenAssistant={() => setShowAssistant(true)}
+            onOpenDetail={setDetailTransaction}
           />
         );
     }
@@ -306,6 +312,18 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
       </AppShell>
 
       {showTransaction && <TransactionModal form={newTransaction} setForm={setNewTransaction} categories={categories} receiptFile={receiptFile} setReceiptFile={setReceiptFile} editing={editingTransaction} saving={saving} onClose={() => setShowTransaction(false)} onSubmit={saveTransaction} />}
+      {detailTransaction && (
+        <TransactionDetail
+          transaction={detailTransaction}
+          currentOwnerScope={currentOwnerScope}
+          currentUserId={user.$id}
+          members={members}
+          loadAttachments={listAttachments}
+          onClose={() => setDetailTransaction(null)}
+          onEdit={(item) => { setDetailTransaction(null); openEditTransaction(item); }}
+          onDelete={(item) => { setDetailTransaction(null); removeTransaction(item); }}
+        />
+      )}
       {showGoal && <GoalModal onClose={() => setShowGoal(false)} onSubmit={saveGoal} />}
       {showAssistant && <AssistantPanel onClose={() => setShowAssistant(false)} onNavigate={(view) => { setActiveView(view); setShowAssistant(false); }} totals={totals} transactionsCount={periodTransactions.length} />}
       <Toast message={toast} />

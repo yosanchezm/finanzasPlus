@@ -161,3 +161,70 @@ describe('BudgetView add category', () => {
     expect(screen.getByRole('dialog', { name: 'Nueva categoría' })).toBeInTheDocument();
   });
 });
+
+describe('BudgetView on a phone', () => {
+  it('renders each category as a stacked card instead of the table', () => {
+    window.innerWidth = 375;
+    renderView();
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const cards = within(screen.getByRole('list', { name: 'Categorías' })).getAllByRole('listitem');
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toHaveTextContent('Restaurantes');
+    expect(within(cards[0]).getByText('Excedido')).toBeInTheDocument();
+    expect(within(cards[0]).getByText('141 %')).toBeInTheDocument();
+    expect(within(cards[0]).getByText('− $ 245.300')).toBeInTheDocument();
+    expect(within(cards[0]).getByLabelText('Límite de Restaurantes')).toBeInTheDocument();
+  });
+
+  it('keeps save-on-blur and its indicator in the card', async () => {
+    window.innerWidth = 375;
+    const { props, user } = renderView();
+    const input = screen.getByLabelText('Límite de Mercado');
+
+    await user.clear(input);
+    await user.type(input, '2000000');
+    await user.tab();
+
+    expect(props.onSave).toHaveBeenCalledWith('c2', '2000000', BUDGETS[1]);
+    const card = within(screen.getByRole('list', { name: 'Categorías' })).getAllByRole('listitem')[1];
+    expect(await within(card).findByText('Guardado')).toBeInTheDocument();
+  });
+});
+
+describe('BudgetView summary', () => {
+  const UNBUDGETED = CATEGORIES.map((category) => ({ ...category, budget: 0 }));
+
+  it('without limits shows "Sin definir", a dash, no exceeded count and a prompt with the copy action', async () => {
+    const { props, user } = renderView({ categories: UNBUDGETED, budgets: PREVIOUS_BUDGETS });
+    const summary = screen.getByRole('region', { name: 'Resumen del presupuesto' });
+
+    expect(within(summary).getByText('Sin definir')).toBeInTheDocument();
+    expect(within(summary).getByText('—')).toBeInTheDocument();
+    expect(within(summary).queryByText('Categorías excedidas')).not.toBeInTheDocument();
+    expect(within(summary).queryByText(/− \$/)).not.toBeInTheDocument();
+    expect(within(summary).getByText('Define un límite por categoría para ver cuánto te queda.')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Copiar del mes anterior' })).toHaveLength(1);
+
+    await user.click(within(summary).getByRole('button', { name: 'Copiar del mes anterior' }));
+    expect(props.onCopyPrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it('without limits and nothing to copy shows only the prompt', () => {
+    renderView({ categories: UNBUDGETED, budgets: [] });
+
+    expect(screen.getByText('Define un límite por categoría para ver cuánto te queda.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copiar del mes anterior' })).not.toBeInTheDocument();
+  });
+
+  it('with limits counts only budgeted categories and shows unbudgeted spending apart', () => {
+    renderView({ categories: CATEGORIES.map((category) => (category.$id === 'c3' ? { ...category, value: 50000 } : category)) });
+    const summary = screen.getByRole('region', { name: 'Resumen del presupuesto' });
+
+    expect(within(summary).getByText('$ 2.400.000')).toBeInTheDocument();
+    expect(within(summary).getByText('$ 2.325.300')).toBeInTheDocument();
+    expect(within(summary).getByText('$ 74.700')).toBeInTheDocument();
+    expect(within(summary).getByText('1 de 2')).toBeInTheDocument();
+    expect(summary).toHaveTextContent('Gasto sin límite: $ 50.000');
+  });
+});

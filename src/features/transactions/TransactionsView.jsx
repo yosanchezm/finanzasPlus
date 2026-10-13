@@ -29,21 +29,26 @@ const matchesSearch = (item, query) => (
   `${item.merchant || ''} ${item.categoryName || ''} ${item.note || ''}`.toLowerCase().includes(query.trim().toLowerCase())
 );
 
+// The row itself opens the detail, so these buttons must not let the click reach it.
 function RowActions({ item, onEdit, onDelete }) {
-  const iconButton = cn('grid size-9 place-items-center rounded-sm text-ink-muted hover:bg-surface-2 hover:text-ink', focusRing);
+  const iconButton = cn('grid size-10 place-items-center rounded-sm text-ink-muted hover:bg-surface hover:text-ink', focusRing);
   return (
     <span className="flex shrink-0 items-center gap-0.5">
-      <button type="button" aria-label={`Editar ${item.merchant}`} title="Editar" onClick={() => onEdit(item)} className={iconButton}>
+      <button type="button" aria-label={`Editar ${item.merchant}`} title="Editar" onClick={(event) => { event.stopPropagation(); onEdit(item); }} className={iconButton}>
         <Pencil size={16} aria-hidden="true" />
       </button>
-      <button type="button" aria-label={`Eliminar ${item.merchant}`} title="Eliminar" onClick={() => onDelete(item)} className={cn(iconButton, 'hover:bg-danger-soft hover:text-danger')}>
+      <button type="button" aria-label={`Eliminar ${item.merchant}`} title="Eliminar" onClick={(event) => { event.stopPropagation(); onDelete(item); }} className={cn(iconButton, 'hover:bg-danger-soft hover:text-danger')}>
         <Trash2 size={16} aria-hidden="true" />
       </button>
     </span>
   );
 }
 
-function TransactionsTable({ items, currentOwnerScope, onEdit, onDelete }) {
+/**
+ * Desktop table. The concept cell holds the real button (keyboard and screen readers);
+ * clicking anywhere else on the row is a mouse shortcut to the same detail.
+ */
+function TransactionsTable({ items, currentOwnerScope, onEdit, onDelete, onOpenDetail }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] border-collapse">
@@ -59,9 +64,21 @@ function TransactionsTable({ items, currentOwnerScope, onEdit, onDelete }) {
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.$id} className="hover:bg-surface-2">
+            <tr key={item.$id} onClick={onOpenDetail ? () => onOpenDetail(item) : undefined} className={cn('hover:bg-surface-2', onOpenDetail && 'cursor-pointer')}>
               <td className={cn(tdClass, 'text-ink-muted tabular-nums')}>{formatDate(item.occurredAt)}</td>
-              <td className={cn(tdClass, 'max-w-[280px] truncate font-medium text-ink')}>{item.merchant}</td>
+              <td className={cn(tdClass, 'max-w-[280px] py-1.5 font-medium text-ink')}>
+                {onOpenDetail ? (
+                  <button
+                    type="button"
+                    aria-haspopup="dialog"
+                    aria-label={`Ver detalle de ${item.merchant}`}
+                    onClick={(event) => { event.stopPropagation(); onOpenDetail(item); }}
+                    className={cn('block w-full truncate rounded-sm py-1.5 text-left font-medium hover:text-accent', focusRing)}
+                  >
+                    {item.merchant}
+                  </button>
+                ) : <span className="block truncate">{item.merchant}</span>}
+              </td>
               <td className={tdClass}>
                 <span className="inline-flex items-center gap-1.5 text-ink-2">
                   <span aria-hidden="true" className="size-2 rounded-[2px]" style={{ backgroundColor: item.categoryColor || '#A7B0AB' }} />
@@ -90,11 +107,12 @@ const OWNER_OPTIONS = [
 ];
 const NO_CATEGORY = '__none__';
 
-const selectClass = 'h-10 min-w-0 rounded-sm border border-border-strong bg-surface px-3 text-base text-ink outline-none focus:border-accent focus:ring-3 focus:ring-accent/15 sm:text-sm';
+// Full width on phones so the filter bar stacks instead of overflowing; natural width from sm.
+const selectClass = 'h-11 w-full min-w-0 rounded-sm border border-border-strong bg-surface px-3 text-base text-ink outline-none focus:border-accent focus:ring-3 focus:ring-accent/15 sm:h-10 sm:w-auto sm:text-sm';
 
 function FilterSelect({ label, value, onChange, children }) {
   return (
-    <label className="min-w-0">
+    <label className="w-full min-w-0 sm:w-auto">
       <span className="sr-only">{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)} className={cn(selectClass, value !== 'all' && 'border-accent bg-accent-soft text-[#074d37]')}>
         {children}
@@ -121,7 +139,7 @@ function Pagination({ start, end, total, page, pageCount, onPage }) {
  * `search` can be controlled by the parent (the topbar search sets it); otherwise it is local.
  */
 export default function TransactionsView({
-  transactions, categories = [], month, currentOwnerScope, onAdd, onEdit, onDelete, scopeControl,
+  transactions, categories = [], month, currentOwnerScope, onAdd, onEdit, onDelete, onOpenDetail, scopeControl,
   search: controlledSearch, onSearchChange,
 }) {
   const [localSearch, setLocalSearch] = useState('');
@@ -173,18 +191,18 @@ export default function TransactionsView({
         title="Movimientos"
         subtitle="Consulta, filtra y corrige los registros del hogar."
         actions={(
+          // Page-specific actions only; "Nuevo movimiento" lives in the topbar and the tab-bar FAB.
           <>
             {scopeControl}
             <Button variant="secondary" onClick={exportCsv} disabled={!filtered.length}>
               <Download size={16} aria-hidden="true" />Exportar CSV
             </Button>
-            <Button onClick={onAdd}><Plus size={16} strokeWidth={2.25} aria-hidden="true" />Nuevo movimiento</Button>
           </>
         )}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="relative block min-w-0 flex-[1_1_240px] sm:max-w-[320px]">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <label className="relative block w-full min-w-0 sm:w-auto sm:flex-[1_1_240px] sm:max-w-[320px]">
           <span className="sr-only">Buscar movimientos</span>
           <Search size={16} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" />
           <input
@@ -192,10 +210,10 @@ export default function TransactionsView({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Concepto, categoría o nota…"
-            className="h-10 w-full rounded-sm border border-border-strong bg-surface pr-3 pl-9 text-base text-ink outline-none placeholder:text-ink-faint/80 focus:border-accent focus:ring-3 focus:ring-accent/15 sm:text-sm"
+            className="h-11 w-full rounded-sm border border-border-strong bg-surface pr-3 pl-9 text-base text-ink outline-none placeholder:text-ink-faint/80 focus:border-accent focus:ring-3 focus:ring-accent/15 sm:h-10 sm:text-sm"
           />
         </label>
-        <SegmentedControl label="Tipo" options={TYPE_OPTIONS} value={type} onChange={setType} />
+        <SegmentedControl label="Tipo" options={TYPE_OPTIONS} value={type} onChange={setType} fill={!wide} className={wide ? undefined : 'w-full'} />
         <FilterSelect label="Categoría" value={categoryId} onChange={setCategoryId}>
           <option value="all">Todas las categorías</option>
           {sortedCategories.map((category) => <option key={category.$id} value={category.$id}>{category.name}</option>)}
@@ -226,7 +244,7 @@ export default function TransactionsView({
         ) : (
           <>
             {wide ? (
-              <TransactionsTable items={pageItems} currentOwnerScope={currentOwnerScope} onEdit={onEdit} onDelete={setPendingDelete} />
+              <TransactionsTable items={pageItems} currentOwnerScope={currentOwnerScope} onEdit={onEdit} onDelete={setPendingDelete} onOpenDetail={onOpenDetail} />
             ) : (
               <ul aria-label="Movimientos" className="flex flex-col p-1">
                 {pageItems.map((item) => (
@@ -234,7 +252,8 @@ export default function TransactionsView({
                     key={item.$id}
                     item={item}
                     currentOwnerScope={currentOwnerScope}
-                    className="px-2"
+                    onOpen={onOpenDetail}
+                    className="pr-1"
                     actions={<RowActions item={item} onEdit={onEdit} onDelete={setPendingDelete} />}
                   />
                 ))}

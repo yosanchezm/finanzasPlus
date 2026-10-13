@@ -5,6 +5,7 @@ const TONES = {
   partner: 'bg-partner-soft text-partner',
   shared: 'bg-shared-soft text-shared',
   danger: 'bg-danger-soft text-[#9a3412]',
+  neutral: 'bg-[#eef1ed] text-ink-2',
 };
 
 export function Chip({ tone = 'you', className, children }) {

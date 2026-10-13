@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMonths, monthKey, monthRange } from '../shared/lib/dates';
@@ -23,6 +23,7 @@ vi.mock('../appwrite', () => ({
   createGoal: vi.fn(),
   updateGoal: vi.fn(),
   createCategory: vi.fn(),
+  listAttachments: vi.fn(),
 }));
 
 const USER = { $id: 'u1', name: 'Camilo', email: 'camilo@example.com' };
@@ -48,6 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.getCurrentUser.mockResolvedValue(USER);
   api.getWorkspace.mockResolvedValue(WORKSPACE);
+  api.listAttachments.mockResolvedValue([]);
   api.getTransactionsInRange.mockImplementation(async (start) => {
     if (start === monthRange(currentMonth).start) return [rowFor(currentMonth, 'Compra de este mes')];
     if (start === monthRange(previousMonth).start) return [rowFor(previousMonth, 'Compra del mes pasado')];
@@ -107,5 +109,22 @@ describe('App', () => {
     await user.click(next());
     expect(await screen.findByText('Compra de este mes')).toBeInTheDocument();
     expect(next()).toBeDisabled();
+  });
+});
+
+describe('App transaction detail', () => {
+  it('opens the detail from Resumen, lists its receipts and edits it from there', async () => {
+    const user = await renderReadyApp();
+
+    await user.click(await screen.findByRole('button', { name: 'Ver detalle de Compra de este mes' }));
+    const detail = screen.getByRole('dialog', { name: 'Compra de este mes' });
+    expect(await within(detail).findByText('Sin recibo')).toBeInTheDocument();
+    expect(api.listAttachments).toHaveBeenCalledWith(`t-${currentMonth}`);
+
+    await user.click(within(detail).getByRole('button', { name: 'Editar' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Compra de este mes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Editar movimiento' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Concepto')).toHaveValue('Compra de este mes');
   });
 });

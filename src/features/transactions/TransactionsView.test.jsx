@@ -29,6 +29,7 @@ const renderView = (overrides = {}) => {
     onAdd: vi.fn(),
     onEdit: vi.fn(),
     onDelete: vi.fn(),
+    onOpenDetail: vi.fn(),
     ...overrides,
   };
   render(<TransactionsView {...props} />);
@@ -132,12 +133,67 @@ describe('TransactionsView', () => {
     expect(screen.getByRole('button', { name: 'Editar Taxi' })).toBeInTheDocument();
   });
 
-  it('calls onAdd from the header action', async () => {
-    const { props, user } = renderView();
+  it('leaves the global create action to the topbar and the tab bar', () => {
+    renderView();
 
-    await user.click(screen.getByRole('button', { name: 'Nuevo movimiento' }));
+    expect(screen.queryByRole('button', { name: /Nuevo movimiento/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exportar CSV' })).toBeInTheDocument();
+  });
+
+  it('keeps the create action inside the empty state', async () => {
+    const { props, user } = renderView({ transactions: [] });
+
+    await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }));
 
     expect(props.onAdd).toHaveBeenCalled();
+  });
+});
+
+describe('TransactionsView detail entry points', () => {
+  it('opens the detail from the concept button', async () => {
+    const { props, user } = renderView();
+
+    await user.click(screen.getByRole('button', { name: 'Ver detalle de Taxi' }));
+
+    expect(props.onOpenDetail).toHaveBeenCalledWith(TRANSACTIONS[2]);
+  });
+
+  it('opens the detail with the keyboard', async () => {
+    const { props, user } = renderView();
+
+    screen.getByRole('button', { name: 'Ver detalle de Nómina' }).focus();
+    await user.keyboard('{Enter}');
+
+    expect(props.onOpenDetail).toHaveBeenCalledWith(TRANSACTIONS[1]);
+  });
+
+  it('opens the detail when any part of the row is clicked', async () => {
+    const { props, user } = renderView();
+
+    await user.click(within(screen.getByRole('row', { name: /Taxi/ })).getByText('Transporte'));
+
+    expect(props.onOpenDetail).toHaveBeenCalledWith(TRANSACTIONS[2]);
+  });
+
+  it('does not open the detail from the edit and delete buttons', async () => {
+    const { props, user } = renderView();
+
+    await user.click(screen.getByRole('button', { name: 'Editar Taxi' }));
+    await user.click(screen.getByRole('button', { name: 'Eliminar Taxi' }));
+
+    expect(props.onEdit).toHaveBeenCalledWith(TRANSACTIONS[2]);
+    expect(props.onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it('opens the detail from the mobile list item', async () => {
+    window.innerWidth = 375;
+    const { props, user } = renderView();
+
+    await user.click(screen.getByRole('button', { name: 'Ver detalle de Mercado semanal' }));
+    await user.click(screen.getByRole('button', { name: 'Editar Taxi' }));
+
+    expect(props.onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(props.onOpenDetail).toHaveBeenCalledWith(TRANSACTIONS[0]);
   });
 });
 
