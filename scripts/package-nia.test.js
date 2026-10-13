@@ -138,6 +138,21 @@ describe('packageNia (CLI, --out redirected to a temp dir)', () => {
     }
   });
 
+  it('inlines the shared finance core and the debt modules instead of importing them', () => {
+    expect(bundle).toMatch(/function planCommit\(/);
+    expect(bundle).toMatch(/function commitPlan\(/);
+    expect(bundle).toMatch(/function findDebt\(/);
+    expect(importSpecifiers(bundle).filter((specifier) => specifier.startsWith('.') || specifier.includes('packages'))).toEqual([]);
+  });
+
+  it('keeps the debt modules free of APIs newer than Node 16.0 (array .at, Object.hasOwn)', () => {
+    const dir = resolve(root, 'functions/nia/debt');
+    const sources = readdirSync(dir).filter((name) => name.endsWith('.js') && !name.endsWith('.test.js'));
+
+    expect(sources).toContain('handler.js');
+    for (const name of sources) expect(readFileSync(join(dir, name), 'utf8'), name).not.toMatch(/\.at\(|Object\.hasOwn\(/);
+  });
+
   it('is a negative control: the import check flags relative and packages/ paths', () => {
     expect(importSpecifiers('import a from "../../packages/finance-core/index.js";\nimport("./x.js");\nrequire("fs");'))
       .toEqual(['../../packages/finance-core/index.js', './x.js', 'fs']);

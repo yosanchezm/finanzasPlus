@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Blob } from 'node:buffer';
 import undici from 'undici';
+import { confirmDebt, handleDebt, handleDebtCallback } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
 
@@ -29,6 +30,8 @@ const TABLES = {
   budgets: 'budgets',
   goals: 'goals',
   attachments: 'attachments',
+  debts: 'debts',
+  debtEvents: 'debt_events',
 };
 
 let writeLog = () => {};
@@ -161,7 +164,8 @@ async function appwriteRequest(path, { method = 'GET', body, headers = {} } = {}
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
   if (!response.ok) {
-    throw new Error(`${method} ${path} → ${response.status}: ${data.message || data.raw || response.statusText}`);
+    // `status` lets the debt core tell "already exists" (409) from real failures.
+    throw Object.assign(new Error(`${method} ${path} → ${response.status}: ${data.message || data.raw || response.statusText}`), { status: response.status });
   }
   return data;
 }
@@ -171,6 +175,10 @@ async function listRows(table, queries) {
   for (const query of queries) params.append('queries[]', query);
   const result = await appwriteRequest(`/tablesdb/${config.databaseId}/tables/${table}/rows?${params}`);
   return result.rows || [];
+}
+
+function queryOffset(value) {
+  return query('offset', undefined, Number(value));
 }
 
 async function createRow(table, data, permissions = []) {
@@ -198,6 +206,40 @@ async function deleteRow(table, rowId) {
   return appwriteRequest(`/tablesdb/${config.databaseId}/tables/${table}/rows/${encodeURIComponent(rowId)}`, {
     method: 'DELETE',
   });
+}
+
+// Debt flow seam (functions/nia/debt/handler.js): thin adapters over the helpers above. Rows are flat,
+// ids are chosen by the caller (deterministic ids make retries idempotent) and a 409 carries `status`.
+const DEBT_ROW_ACTIONS = { debts: ['read', 'update'], debt_events: ['read'], transactions: ['read', 'update', 'delete'], categories: ['read', 'update'] };
+const DEBT_PAGE = 100;
+
+async function debtListRows(table, where) {
+  const filters = Object.entries(where).map(([field, value]) => queryEqual(field, value));
+  const rows = [];
+  for (let offset = 0; ; offset += DEBT_PAGE) {
+    const page = await listRows(table, [...filters, queryLimit(DEBT_PAGE), queryOffset(offset)]);
+    rows.push(...page.map((row) => ({ ...rowData(row), $id: row.$id, $createdAt: row.$createdAt })));
+    if (page.length < DEBT_PAGE) return rows;
+  }
+}
+
+function debtCreateRow(table, { id, data }) {
+  const permissions = (DEBT_ROW_ACTIONS[table] || ['read']).map((action) => permission(action, `team:${config.teamId}`));
+  return appwriteRequest(`/tablesdb/${config.databaseId}/tables/${table}/rows`, { method: 'POST', body: compactObject({ rowId: id, data, permissions }) });
+}
+
+function debtDeps() {
+  return {
+    config: { householdId: config.householdId, timezone: config.timezone, currency: config.currency },
+    now: () => new Date(),
+    ids: { pending: () => randomId().slice(0, 24) },
+    listRows: debtListRows,
+    createRow: debtCreateRow,
+    deleteRow,
+    gemini: (prompt) => geminiJson([{ text: prompt }], 0.1),
+    sendMessage,
+    saveSession,
+  };
 }
 
 async function telegramRequest(method, payload) {
@@ -385,7 +427,8 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     `La moneda predeterminada del hogar es ${config.currency}.`,
     `En este chat el usuario está configurado como ${profile.alias}, con alcance predeterminado ${profile.ownerScope}.`,
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
-    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas); conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
     'Resuelve referencias como ayer, el viernes pasado o la semana pasada usando la fecha actual y la zona horaria. Si son ambiguas, marca date como faltante.',
@@ -393,7 +436,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     'Para presupuestos, convierte “este mes”, “el próximo mes” o una fecha indicada en month con formato YYYY-MM. Para metas, convierte fechas objetivo a YYYY-MM-DD. Para un aporte a una meta, usa action contribute y contributionMinor.',
     'Para actualizar o eliminar un movimiento, presupuesto, meta o categoría, completa selector con nombre, comercio, fecha, monto o ID cuando el usuario lo proporcione. Para consultar datos usa action list.',
     'Devuelve únicamente JSON válido, sin markdown, con exactamente estas claves de nivel superior:',
-    '{"intent":"transaction|budget|goal|category|analysis|conversation","action":"create|update|delete|contribute|list|none","reply":"string|null","transaction":{"type":"expense|income|transfer","amountMinor":number|null,"currency":"COP","occurredAt":"ISO-8601|null","merchant":"string|null","category":"string|null","ownerScope":"you|partner|shared|null","note":"string|null","confidence":number,"missingFields":["amount|date|merchant|category|owner"]},"budget":{"month":"YYYY-MM|null","category":"string|null","plannedMinor":number|null,"alertAtPercent":number|null},"goal":{"name":"string|null","targetMinor":number|null,"currentMinor":number|null,"contributionMinor":number|null,"targetDate":"YYYY-MM-DD|null","ownerScope":"you|partner|shared|null","status":"active|completed|paused|null"},"category":{"name":"string|null","kind":"need|want|saving|income|null","color":"string|null","icon":"string|null"},"selector":{"id":"string|null","name":"string|null","merchant":"string|null","date":"YYYY-MM-DD|null","amountMinor":number|null,"position":"latest|oldest|null"}}',
+    '{"intent":"transaction|budget|goal|category|analysis|conversation|debt","action":"create|update|delete|contribute|list|none","reply":"string|null","transaction":{"type":"expense|income|transfer","amountMinor":number|null,"currency":"COP","occurredAt":"ISO-8601|null","merchant":"string|null","category":"string|null","ownerScope":"you|partner|shared|null","note":"string|null","confidence":number,"missingFields":["amount|date|merchant|category|owner"]},"budget":{"month":"YYYY-MM|null","category":"string|null","plannedMinor":number|null,"alertAtPercent":number|null},"goal":{"name":"string|null","targetMinor":number|null,"currentMinor":number|null,"contributionMinor":number|null,"targetDate":"YYYY-MM-DD|null","ownerScope":"you|partner|shared|null","status":"active|completed|paused|null"},"category":{"name":"string|null","kind":"need|want|saving|income|null","color":"string|null","icon":"string|null"},"selector":{"id":"string|null","name":"string|null","merchant":"string|null","date":"YYYY-MM-DD|null","amountMinor":number|null,"position":"latest|oldest|null"}}',
     'Para COP amountMinor es un entero en pesos colombianos, no en centavos. En conversation responde en español, con claridad y sin inventar datos. En analysis deja reply breve: el sistema consultará los datos reales. Para list no inventes resultados.',
     previous ? `Interpretación pendiente anterior:\n${JSON.stringify(previous)}` : 'No hay interpretación pendiente.',
     history?.length ? `Contexto reciente del chat:\n${conversationContext(history)}` : 'No hay contexto conversacional anterior.',
@@ -873,6 +916,11 @@ async function confirmOperation(chatId, actorId, operation) {
 async function confirmPending(chatId, actorId, profile, updateId) {
   const session = await getSession(chatId);
   const pending = pendingFromSession(session);
+  if (pending?.kind === 'debt') {
+    // Before the status check: the second tap of a finished debt flow must answer "ya registrado".
+    await confirmDebt(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session) }, pending);
+    return;
+  }
   if (!pending || !['awaiting_confirmation', 'awaiting_clarification'].includes(session.status)) {
     await sendMessage(chatId, 'No tengo un movimiento pendiente para confirmar.');
     return;
@@ -930,7 +978,7 @@ async function cancelPending(chatId, actorId) {
 }
 
 function intentFor(raw, attachment) {
-  if (['analysis', 'conversation', 'transaction', 'budget', 'goal', 'category'].includes(raw?.intent)) return raw.intent;
+  if (['analysis', 'conversation', 'transaction', 'budget', 'goal', 'category', 'debt'].includes(raw?.intent)) return raw.intent;
   if (raw?.transaction || attachment) return 'transaction';
   return 'conversation';
 }
@@ -948,7 +996,8 @@ async function handleTextOrReceipt(message, updateId, profile) {
   const actorId = actorFromMessage(message);
   const text = String(message.text || message.caption || '').trim();
   const session = await getSession(chatId);
-  const previous = pendingFromSession(session);
+  const stored = pendingFromSession(session);
+  const previous = stored?.kind === 'debt' && stored.done ? null : stored; // a finished debt flow is not context
   const history = historyFromSession(session);
   const attachment = await downloadTelegramAttachment(message);
   if (!text && !attachment) {
@@ -959,6 +1008,11 @@ async function handleTextOrReceipt(message, updateId, profile) {
   const raw = await askGemini(text, attachment, previous, history, profile);
   const intent = intentFor(raw, attachment);
   const userContext = text || '[Adjunto una imagen o documento]';
+
+  if (intent === 'debt') {
+    await handleDebt(debtDeps(), { chatId, actorId, profile, text, history, previous, sessionStatus: session?.status });
+    return;
+  }
 
   const operation = normaliseOperation(raw, profile);
   if (operation && (intent !== 'transaction' || ['update', 'delete'].includes(operation.action))) {
@@ -1053,7 +1107,10 @@ async function handleUpdate(update) {
     const actorId = String(callback.from.id);
     if (callback.data === 'nia:confirm') await confirmPending(chatId, actorId, profile, update.update_id);
     else if (callback.data === 'nia:cancel') await cancelPending(chatId, actorId);
-    else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');
+    else if (/^nia:(pick:|strat:|conv:|simpay$)/.test(callback.data || '')) {
+      const session = await getSession(chatId);
+      await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
+    } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');
     return;
   }
   const message = update.message;
