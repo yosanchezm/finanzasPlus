@@ -1,7 +1,7 @@
 import { formatMoney } from '../../../../shared/lib/format';
 import { formatDueDate, kindInfo } from '../../debtLabels';
 import Notices from '../Notices';
-import { SYSTEM_LABELS, describeRate } from '../wizardModel';
+import { MIN_RULES, SYSTEM_LABELS, describeRate } from '../wizardModel';
 
 function Row({ label, children }) {
   return (
@@ -9,6 +9,20 @@ function Row({ label, children }) {
       <dt className="text-[13px] text-ink-muted">{label}</dt>
       <dd className="text-right text-sm font-medium text-ink tabular-nums">{children}</dd>
     </div>
+  );
+}
+
+function CardRows({ terms }) {
+  const { card, charges } = terms;
+  const fee = charges.find((charge) => charge.id === 'mgmt_fee');
+  const iva = charges.find((charge) => charge.id === 'mgmt_iva');
+  return (
+    <>
+      <Row label="Corte y pago">Corte el día {card.statementDay}, pago el día {card.dueDay}</Row>
+      <Row label="Pago mínimo">{MIN_RULES.find((rule) => rule.value === card.minPayment.rule).label}</Row>
+      <Row label="Cuota de manejo">{fee ? `${formatMoney(fee.value)}${iva ? ` + IVA ${iva.value} %` : ''}` : 'Sin cuota de manejo'}</Row>
+      {card.deferred.length > 0 && <Row label="Compras a cuotas">{card.deferred.length} {card.deferred.length === 1 ? 'compra a cuotas' : 'compras a cuotas'}</Row>}
+    </>
   );
 }
 
@@ -23,9 +37,9 @@ export default function ReviewStep({ result }) {
         <h3 className="text-sm font-semibold text-ink">Vista previa</h3>
         <dl className="flex flex-col gap-2">
           <Row label="Tipo">{kindInfo(terms.kind).label}</Row>
-          <Row label="Monto del préstamo">{formatMoney(terms.principalMinor)}</Row>
+          <Row label={terms.kind === 'card' ? 'Saldo actual' : 'Monto del préstamo'}>{formatMoney(terms.principalMinor)}</Row>
           <Row label="Tasa">{describeRate(terms.rate)}</Row>
-          <Row label="Plan">{SYSTEM_LABELS[terms.system]}</Row>
+          {terms.kind === 'card' ? <CardRows terms={terms} /> : <Row label="Plan">{SYSTEM_LABELS[terms.system]}</Row>}
           {summary && (
             <>
               <Row label="Primera cuota"><span>{formatMoney(summary.firstDueMinor)}</span> <span className="text-ink-muted">{formatDueDate(summary.firstDueOn)}</span></Row>

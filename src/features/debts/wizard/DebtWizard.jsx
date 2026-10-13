@@ -4,6 +4,7 @@ import { dateInputValue } from '../../../shared/lib/dates';
 import { Button } from '../../../shared/ui/Button';
 import { DialogContent, DialogHeader, DialogRoot } from '../../../shared/ui/Dialog';
 import BasicsStep from './steps/BasicsStep';
+import CardStep from './steps/CardStep';
 import ChargesStep from './steps/ChargesStep';
 import KindStep from './steps/KindStep';
 import PlanStep from './steps/PlanStep';
@@ -41,6 +42,7 @@ export default function DebtWizard({ saveState, onSubmit, onClose, today = dateI
       case 'kind': return <KindStep kind={state.kind} onPick={(kind) => { dispatch({ type: 'kind', kind }); dispatch({ type: 'step', to: 'next' }); }} />;
       case 'basics': return <BasicsStep state={state} set={set} />;
       case 'rate': return <RateStep rate={state.rate} echo={rateEcho(state.rate, state.kind === 'mortgage' ? 'mortgage' : 'consumer', state.openedOn)} onChange={(patch) => dispatch({ type: 'rate', patch })} />;
+      case 'card': return <CardStep card={state.card} dispatch={dispatch} />;
       case 'plan': return <PlanStep state={state} set={set} />;
       case 'charges': return <ChargesStep charges={state.charges} dispatch={dispatch} />;
       default: return <ReviewStep result={result} />;

@@ -6,10 +6,11 @@ import {
 // Pure state of the "Nueva deuda" wizard. Form values stay as the strings the inputs hold;
 // `toTerms` converts them and lets the finance core be the judge of what is valid.
 
-export const STEP_TITLES = { kind: 'Tipo de deuda', basics: 'Datos básicos', rate: 'Tasa de interés', plan: 'Plan de pagos', charges: 'Seguros y cargos', review: 'Resumen' };
+export const STEP_TITLES = { kind: 'Tipo de deuda', basics: 'Datos básicos', rate: 'Tasa de interés', plan: 'Plan de pagos', card: 'Tu tarjeta', charges: 'Seguros y cargos', review: 'Resumen' };
 
 export const stepsFor = (kind) => {
   if (kind === 'informal') return ['kind', 'basics', 'review'];
+  if (kind === 'card') return ['kind', 'basics', 'rate', 'card', 'review'];
   if (kind === 'family') return ['kind', 'basics', 'rate', 'plan', 'review'];
   return ['kind', 'basics', 'rate', 'plan', 'charges', 'review'];
 };
@@ -24,6 +25,7 @@ export const SYSTEMS_BY_KIND = {
   family: ['french', 'manual'],
   other: ['manual', 'french'],
   informal: ['none'],
+  card: ['none'],
 };
 export const SYSTEM_LABELS = {
   french: 'Cuota fija (sistema francés)',
@@ -42,6 +44,15 @@ export const CHARGE_PRESETS = [
   { key: 'gmf', kind: 'tax', label: 'GMF (4 x 1000)', basis: 'pctOfSubtotal', unit: '%', defaultValue: '0.4' },
 ];
 
+/** Minimum-payment rules a card can use (see the core's `minimumPayment`). */
+export const MIN_RULES = [
+  { value: 'interest_fees_plus_pct', label: 'Intereses, cuota de manejo, cuotas y un porcentaje del saldo' },
+  { value: 'installments_due', label: 'Intereses, cuota de manejo y cuotas del mes' },
+  { value: 'pct_balance', label: 'Un porcentaje del total del extracto' },
+];
+export const NEW_PURCHASE = { label: '', amount: '', n: '12', rate: '0' };
+const DEFAULT_CARD = { statementDay: '', dueDay: '', minRule: 'interest_fees_plus_pct', minPct: '5', minFloor: '', fee: '', feeIva: true, feeIvaPct: '19', deferred: [] };
+
 export const PERIODICITY_ADJECTIVES = {
   weekly: 'semanal', biweekly: 'cada 14 días', monthly: 'mensual', bimonthly: 'bimestral', quarterly: 'trimestral', semiannual: 'semestral', annual: 'anual',
 };
@@ -54,14 +65,15 @@ const isInterestFree = (kind) => kind === 'family' || kind === 'informal';
 export const initialWizard = (today) => ({
   step: 'kind', kind: null, name: '', lender: '', ownerScope: 'shared', principal: '', openedOn: today,
   rate: BLANK_RATE, system: 'french', periodicity: 'monthly', n: '12', firstDueOn: '',
-  grace: { periods: '0', type: 'total' }, balloon: '', manualPlan: [], charges: {},
+  grace: { periods: '0', type: 'total' }, balloon: '', manualPlan: [], charges: {}, card: DEFAULT_CARD,
 });
 
 export function wizardReducer(state, action) {
   switch (action.type) {
     case 'set': return { ...state, ...action.patch };
     case 'rate': return { ...state, rate: { ...state.rate, ...action.patch } };
-    case 'kind': return action.kind === state.kind ? state : { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '' };
+    case 'kind': return action.kind === state.kind ? state : { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '', card: DEFAULT_CARD };
+    case 'card': return { ...state, card: { ...state.card, ...action.patch } };
     case 'step': {
       const steps = stepsFor(state.kind);
       const at = steps.indexOf(state.step);
@@ -96,8 +108,45 @@ const chargesOf = (selected) => CHARGE_PRESETS.filter((preset) => preset.key in 
   ...(preset.refId ? { refId: preset.refId } : {}),
 }));
 
+const blank = (text) => String(text).trim() === '';
+
+// The management fee is an ordinary monthly charge; its IVA is a `pctOfCharge` link the user can edit or remove.
+const cardCharges = ({ fee, feeIva, feeIvaPct }) => {
+  if (blank(fee)) return [];
+  const line = { cadence: 'per_installment' };
+  const lines = [{ ...line, id: 'mgmt_fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: pesos(fee) }];
+  if (feeIva) lines.push({ ...line, id: 'mgmt_iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'mgmt_fee', value: num(feeIvaPct) });
+  return lines;
+};
+
+function cardTerms(state) {
+  const { card } = state;
+  return {
+    kind: 'card',
+    principalMinor: blank(state.principal) ? 0 : pesos(state.principal),
+    openedOn: state.openedOn,
+    rate: toRate(state.rate),
+    system: 'none',
+    periodicity: 'monthly',
+    charges: cardCharges(card),
+    card: {
+      statementDay: num(card.statementDay),
+      dueDay: num(card.dueDay),
+      minPayment: { rule: card.minRule, pct: num(card.minPct), floorMinor: blank(card.minFloor) ? 0 : pesos(card.minFloor) },
+      deferred: card.deferred.map((item, index) => ({
+        id: `p${index + 1}`,
+        label: item.label.trim() || `Compra ${index + 1}`,
+        principalMinor: pesos(item.amount),
+        n: num(item.n),
+        rate: { convention: 'EA', value: blank(item.rate) ? 0 : num(item.rate) },
+      })),
+    },
+  };
+}
+
 /** Validated DebtTerms for the current form. Throws the core's ValidationError when the data is not valid. */
 export function toTerms(state) {
+  if (state.kind === 'card') return validateTerms(cardTerms(state));
   const { system } = state;
   const terms = { kind: state.kind, principalMinor: pesos(state.principal), openedOn: state.openedOn, rate: toRate(state.rate), system };
   if (system !== 'none') {
@@ -151,6 +200,7 @@ const CORE_ISSUES = {
   manual_plan_below_interest: ['plan', 'Una cuota del plan no alcanza a cubrir los intereses de ese periodo. Súbela o revisa la tasa.'],
   installment_too_low: ['plan', 'La cuota no alcanza a pagar el crédito con esta tasa. Revisa el plan.'],
   invalid_charge: ['charges', 'Revisa los seguros y cargos: cada uno necesita un valor válido.'],
+  invalid_card: ['card', 'Revisa los días de corte y de pago, el porcentaje del pago mínimo y las compras a cuotas (mínimo 2 cuotas).'],
   terms_too_large: ['plan', 'El plan es demasiado largo para guardarlo. Reduce las cuotas.'],
 };
 const GENERIC_ISSUE = { step: 'plan', message: 'Revisa el número de cuotas y la periodicidad.' };
@@ -158,7 +208,11 @@ const GENERIC_ISSUE = { step: 'plan', message: 'Revisa el número de cuotas y la
 function missingFields(state) {
   const issues = [];
   if (!state.name.trim()) issues.push({ step: 'basics', message: 'Escribe un nombre para la deuda.', missing: true });
-  if (!String(state.principal).trim()) issues.push({ step: 'basics', message: 'Escribe el monto del préstamo.', missing: true });
+  if (state.kind !== 'card' && !String(state.principal).trim()) issues.push({ step: 'basics', message: 'Escribe el monto del préstamo.', missing: true });
+  if (state.kind === 'card') {
+    if (blank(state.card.statementDay)) issues.push({ step: 'card', message: 'Escribe el día de corte.', missing: true });
+    if (blank(state.card.dueDay)) issues.push({ step: 'card', message: 'Escribe el día límite de pago.', missing: true });
+  }
   if (String(state.rate.value).trim() === '') issues.push({ step: 'rate', message: 'Escribe la tasa de interés (0 si no cobra intereses).', missing: true });
   for (const preset of CHARGE_PRESETS) {
     if (preset.key in state.charges && !String(state.charges[preset.key]).trim()) {
@@ -184,7 +238,7 @@ export function evaluate(state) {
     return { issues: [], terms, summary, notices };
   } catch (error) {
     const [step, message] = CORE_ISSUES[error?.code] ?? [];
-    const found = message ? { step, message } : GENERIC_ISSUE;
+    const found = message ? { step: state.kind === 'card' && step === 'charges' ? 'card' : step, message } : GENERIC_ISSUE;
     // A field that is still empty explains its own step better than the core's complaint about it.
     return { issues: issues.some((issue) => issue.step === found.step) ? issues : [...issues, found] };
   }

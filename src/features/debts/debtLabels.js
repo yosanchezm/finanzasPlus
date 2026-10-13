@@ -1,7 +1,7 @@
-import { Banknote, Car, CircleHelp, Handshake, HandCoins, House, Landmark, Users } from 'lucide-react';
+import { Banknote, Car, CircleHelp, CreditCard, Handshake, HandCoins, House, Landmark, Users } from 'lucide-react';
 import { formatDate } from '../../shared/lib/format';
 
-/** Loan kinds the create wizard offers (cards arrive with their own flow). */
+/** Debt kinds the create wizard offers. */
 export const DEBT_KINDS = [
   { value: 'consumer', label: 'Consumo', icon: Banknote, hint: 'Libre inversión u otro crédito de consumo' },
   { value: 'vehicle', label: 'Vehículo', icon: Car, hint: 'Crédito para carro o moto' },
@@ -10,6 +10,7 @@ export const DEBT_KINDS = [
   { value: 'leasing', label: 'Leasing', icon: HandCoins, hint: 'Cuotas con un pago final grande' },
   { value: 'family', label: 'Familiar', icon: Users, hint: 'Préstamo de un familiar o amigo, con o sin intereses' },
   { value: 'informal', label: 'Informal', icon: Handshake, hint: 'Sin plan de cuotas: solo llevas el saldo' },
+  { value: 'card', label: 'Tarjeta de crédito', icon: CreditCard, hint: 'Extractos, compras a cuotas, avances y pago mínimo' },
   { value: 'other', label: 'Otro', icon: CircleHelp, hint: 'Pagos irregulares que defines tú' },
 ];
 
