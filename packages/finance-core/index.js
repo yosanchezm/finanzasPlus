@@ -28,3 +28,5 @@ export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledg
 export { allocate } from './src/ledger/allocate.js';
 export { project, registerProjector } from './src/ledger/project.js';
 export { commitPlan, planCommit } from './src/ledger/commit.js';
+export { simulateExtra } from './src/prepay/simulate.js';
+export { compareStrategies } from './src/prepay/compare.js';
