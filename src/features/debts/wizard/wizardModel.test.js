@@ -30,6 +30,13 @@ describe('steps and defaults per kind', () => {
     expect(run([{ type: 'kind', kind: 'other' }]).system).toBe('manual');
   });
 
+  it('keeps what was typed when the same kind is picked again, and resets it for another kind', () => {
+    const typed = [{ type: 'kind', kind: 'consumer' }, rate({ value: '24' })];
+
+    expect(run([...typed, { type: 'kind', kind: 'consumer' }]).rate.value).toBe('24');
+    expect(run([...typed, { type: 'kind', kind: 'family' }]).rate.value).toBe('0');
+  });
+
   it('moves between the steps of the kind and stops at both ends', () => {
     const start = run([{ type: 'kind', kind: 'informal' }]);
     const at = (...moves) => moves.reduce((state, to) => wizardReducer(state, { type: 'step', to }), start).step;

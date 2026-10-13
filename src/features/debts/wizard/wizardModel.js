@@ -61,7 +61,7 @@ export function wizardReducer(state, action) {
   switch (action.type) {
     case 'set': return { ...state, ...action.patch };
     case 'rate': return { ...state, rate: { ...state.rate, ...action.patch } };
-    case 'kind': return { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '' };
+    case 'kind': return action.kind === state.kind ? state : { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '' };
     case 'step': {
       const steps = stepsFor(state.kind);
       const at = steps.indexOf(state.step);
