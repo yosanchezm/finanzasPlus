@@ -36,6 +36,8 @@ export const TABLES = {
   budgets: 'budgets',
   goals: 'goals',
   attachments: 'attachments',
+  debts: 'debts',
+  debtEvents: 'debt_events',
 };
 
 const teamRole = Role.team(appwriteConfig.teamId);
@@ -52,6 +54,12 @@ export const permissions = {
     Permission.delete(userRole(userId)),
   ],
   attachmentRow: () => [Permission.read(teamRole)],
+  // Debts are archived, never deleted.
+  debtRow: () => [Permission.read(teamRole), Permission.update(teamRole)],
+  // Debt events are append-only: no update, no delete.
+  debtEventRow: () => [Permission.read(teamRole)],
+  // Cost rows are deleted when their payment is voided (AD7), by either member.
+  costRow: () => [Permission.read(teamRole), Permission.update(teamRole), Permission.delete(teamRole)],
 };
 
 function assertConfig() {
@@ -291,4 +299,132 @@ export async function createCategory({ name, kind, color, icon }) {
     },
     permissions: [permissions.readTeam, permissions.updateTeam],
   });
+}
+
+// ---------------------------------------------------------------------------
+// Debt management. These functions are the `port` that commitPlan
+// (packages/finance-core/src/ledger/commit.js) writes through. Errors keep the
+// SDK's HTTP status in `code`: 409 means "already exists", 404 "missing".
+// Note: TablesDB.createTransaction (the Appwrite Transactions API) is unrelated
+// to createTransaction above, which creates finance transaction rows.
+// ---------------------------------------------------------------------------
+
+const hasStatus = (error, status) => error?.code === status || error?.status === status;
+
+export async function listDebts() {
+  return listAllRows(TABLES.debts);
+}
+
+/** Every event of the household, or only those of `debtId`. Callers sort (project() does). */
+export async function listDebtEvents(debtId) {
+  return listAllRows(TABLES.debtEvents, debtId ? [Query.equal('debtId', debtId)] : []);
+}
+
+/** @param {{ id?: string, data: object }} debt `id` is deterministic for web and Nia (`db{nonce}`). */
+export async function createDebt({ id, data }) {
+  assertConfig();
+  return tablesDB.createRow({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.debts,
+    rowId: id || ID.unique(),
+    data,
+    permissions: permissions.debtRow(),
+  });
+}
+
+/** Rejects with a 409 when `data.dedupeKey` (unique index) or the id already exists. */
+export async function createDebtEvent({ id, data }) {
+  assertConfig();
+  return tablesDB.createRow({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.debtEvents,
+    rowId: id || ID.unique(),
+    data,
+    permissions: permissions.debtEventRow(),
+  });
+}
+
+export async function findDebtEventByDedupe(dedupeKey) {
+  assertConfig();
+  const response = await tablesDB.listRows({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.debtEvents,
+    queries: [Query.equal('householdId', appwriteConfig.householdId), Query.equal('dedupeKey', dedupeKey), Query.limit(1)],
+    total: false,
+  });
+  return response.rows?.[0] ?? null;
+}
+
+/** Expense row that carries only the cost of a payment. `id` is `dc{eventId}`; a 409 means it already exists. */
+export async function createCostRow({ id, data }) {
+  assertConfig();
+  return tablesDB.createRow({
+    databaseId: appwriteConfig.databaseId,
+    tableId: TABLES.transactions,
+    rowId: id,
+    data,
+    permissions: permissions.costRow(),
+  });
+}
+
+export async function updateCostRow(rowId, data) {
+  return updateTransaction(rowId, data);
+}
+
+/** A row that is already gone (404) counts as deleted. */
+export async function deleteCostRow(rowId) {
+  try {
+    await deleteTransaction(rowId);
+  } catch (error) {
+    if (!hasStatus(error, 404)) throw error;
+  }
+}
+
+export async function listCostRows(debtId) {
+  return listAllRows(TABLES.transactions, [Query.equal('debtId', debtId)]);
+}
+
+const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
+const foldName = (value) => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+
+async function findCostCategory() {
+  const categories = await listAllRows(TABLES.categories);
+  return categories.find((category) => foldName(category.name) === foldName(COST_CATEGORY.name)) ?? null;
+}
+
+/**
+ * Id of the "Costos financieros" category: found by folded name, else created
+ * with the deterministic id `cf{householdId}` (cut to Appwrite's 36 characters).
+ * If a concurrent client creates it first (409), the category is read back.
+ */
+export async function ensureCostCategory(householdId = appwriteConfig.householdId) {
+  assertConfig();
+  const existing = await findCostCategory();
+  if (existing) return existing.$id;
+  try {
+    const created = await tablesDB.createRow({
+      databaseId: appwriteConfig.databaseId,
+      tableId: TABLES.categories,
+      rowId: `cf${householdId}`.slice(0, 36),
+      data: { householdId, ...COST_CATEGORY, archived: false },
+      permissions: [permissions.readTeam, permissions.updateTeam],
+    });
+    return created.$id;
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+    const raced = await findCostCategory();
+    if (!raced) throw error;
+    return raced.$id;
+  }
+}
+
+/** The port `commitPlan(port, plan)` needs (see commit.js). */
+export function debtPort() {
+  return {
+    ensureCostCategory,
+    createEvent: createDebtEvent,
+    findEventByDedupe: findDebtEventByDedupe,
+    createCostRow,
+    deleteCostRow,
+  };
 }
