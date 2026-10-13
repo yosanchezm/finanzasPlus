@@ -30,3 +30,4 @@ export { project, registerProjector } from './src/ledger/project.js';
 export { commitPlan, planCommit } from './src/ledger/commit.js';
 export { simulateExtra } from './src/prepay/simulate.js';
 export { compareStrategies } from './src/prepay/compare.js';
+export { ADVICE_DEFAULTS, advise } from './src/advice/advice.js';

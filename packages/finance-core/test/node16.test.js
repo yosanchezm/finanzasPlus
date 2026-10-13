@@ -98,6 +98,7 @@ describe('finance-core sources', () => {
     expect(paths).toEqual(
       expect.arrayContaining([
         'index.js',
+        'src/advice/advice.js',
         'src/calendar.js',
         'src/charges.js',
         'src/errors.js',
@@ -144,6 +145,7 @@ describe('public barrel (index.js)', () => {
   it('exports exactly the public API and no internals', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
+        'ADVICE_DEFAULTS',
         'CONVENTIONS',
         'CommitError',
         'EVENT_KINDS',
@@ -157,6 +159,7 @@ describe('public barrel (index.js)', () => {
         'activeEvents',
         'addDays',
         'addMonthsClamped',
+        'advise',
         'allocate',
         'assertMinor',
         'buildSchedule',
