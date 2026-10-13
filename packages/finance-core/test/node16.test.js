@@ -105,6 +105,7 @@ describe('finance-core sources', () => {
         'src/ledger/events.js',
         'src/ledger/project.js',
         'src/ledger/rows.js',
+        'src/ledger/tail.js',
         'src/legal.js',
         'src/money.js',
         'src/rates.js',

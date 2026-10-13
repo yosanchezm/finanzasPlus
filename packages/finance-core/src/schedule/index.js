@@ -2,7 +2,7 @@ import { PERIODICITIES, isIsoDate, periodDates } from '../calendar.js';
 import { evaluateCharges } from '../charges.js';
 import { ValidationError } from '../errors.js';
 import { periodicRate } from '../rates.js';
-import { validateTerms } from '../terms.js';
+import { MAX_PERIODS, validateTerms } from '../terms.js';
 import { buildBullet } from './bullet.js';
 import { buildFrench } from './french.js';
 import { buildGerman } from './german.js';
@@ -27,8 +27,14 @@ function dueDates(terms, fromPeriod, startDate) {
   return periodDates(terms.firstDueOn, terms.periodicity, terms.n, terms.dueDay).slice(fromPeriod - 1);
 }
 
-/** Layers the terms' charges over amortization rows; principal is left untouched. */
-function addCharges(rows, terms) {
+/**
+ * Layers the terms' charges over amortization rows (period numbers are the
+ * terms' own); principal is left untouched.
+ * @param {object[]} rows ScheduleRow[]
+ * @param {object} terms Validated terms.
+ * @returns {object[]} ScheduleRow[] with charges recomputed.
+ */
+export function addCharges(rows, terms) {
   const shared = {
     originalMinor: terms.principalMinor,
     periodsPerYear: PERIODICITIES[terms.periodicity].perYear,
@@ -51,14 +57,17 @@ function addCharges(rows, terms) {
  * - `balanceMinor`: opening balance of that row (default `terms.principalMinor`).
  * - `startDate`: due date of that row (default: the original calendar's date);
  *   ignored for manual plans, whose dates are explicit.
+ * - `installmentMinor` (French only): keep this installment and let the number
+ *   of periods float until the balance is cleared (the calendar continues past
+ *   `terms.n` when needed). Throws `installment_too_low` if it cannot amortize.
  * @param {object} terms DebtTerms; validated here.
- * @param {{ fromPeriod?: number, balanceMinor?: number, startDate?: string }} [options]
+ * @param {{ fromPeriod?: number, balanceMinor?: number, startDate?: string, installmentMinor?: number }} [options]
  * @returns {object[]} ScheduleRow[]; empty for a balance-only (`system: 'none'`) debt.
  */
 export function buildSchedule(terms, options = {}) {
   const normalized = validateTerms(terms);
   if (normalized.system === 'none') return [];
-  const { fromPeriod = 1, balanceMinor = normalized.principalMinor, startDate } = options;
+  const { fromPeriod = 1, balanceMinor = normalized.principalMinor, startDate, installmentMinor } = options;
   if (!Number.isInteger(fromPeriod) || fromPeriod < 1 || fromPeriod > normalized.n) {
     throw invalidOption(`fromPeriod must be a whole number in 1..${normalized.n}, got ${String(fromPeriod)}`);
   }
@@ -68,13 +77,18 @@ export function buildSchedule(terms, options = {}) {
   if (startDate !== undefined && !isIsoDate(startDate)) {
     throw invalidOption(`startDate must be a real YYYY-MM-DD date, got ${String(startDate)}`);
   }
+  if (installmentMinor !== undefined && (normalized.system !== 'french' || !Number.isSafeInteger(installmentMinor) || installmentMinor < 1)) {
+    throw invalidOption(`installmentMinor must be a positive whole number of pesos and needs the french system, got ${String(installmentMinor)}`);
+  }
+  const calendar = installmentMinor === undefined ? normalized : { ...normalized, n: MAX_PERIODS };
   const rows = BUILDERS[normalized.system]({
     terms: normalized,
     i: periodicRate(normalized.rate, normalized.periodicity),
     unit: normalized.roundingUnit,
     balance: balanceMinor,
     fromPeriod,
-    dates: dueDates(normalized, fromPeriod, startDate),
+    dates: dueDates(calendar, fromPeriod, startDate),
+    installment: installmentMinor,
   });
   return normalized.charges.length === 0 ? rows : addCharges(rows, normalized);
 }

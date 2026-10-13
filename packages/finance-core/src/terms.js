@@ -11,7 +11,8 @@ export const TERMS_SCHEMA_VERSION = 1;
 /** Size of the `termsJson` column; serialization over this throws `TermsTooLarge`. */
 export const TERMS_MAX_CHARS = 8000;
 
-const MAX_PERIODS = 2000;
+/** Upper bound on the number of periods of a schedule. */
+export const MAX_PERIODS = 2000;
 const DEBT_KINDS = ['consumer', 'vehicle', 'libranza', 'mortgage', 'leasing', 'family', 'informal', 'card', 'other'];
 const SYSTEMS = ['french', 'german', 'bullet', 'interest_only', 'manual', 'none'];
 const GRACE_SYSTEMS = ['french', 'german'];

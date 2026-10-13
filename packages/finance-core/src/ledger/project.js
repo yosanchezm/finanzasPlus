@@ -4,7 +4,8 @@ import { buildSchedule } from '../schedule/index.js';
 import { parseTerms, validateTerms } from '../terms.js';
 import { BUCKETS, emptyBuckets } from './allocate.js';
 import { activeEvents, sortEvents, validateEvent } from './events.js';
-import { balanceAt, decorate, newRow, payRows, paySplit, rowDue, rowOutstanding } from './rows.js';
+import { balanceAt, decorate, newRow, payBalanceOnly, payRows, paySplit, rowDue, rowOutstanding } from './rows.js';
+import { applyAdjustment, applyChargeChange, applyExtra, applyRateChange, applyRestructure } from './tail.js';
 
 // project(debt, events, asOf) is a pure replay (AD1): terms plus the active
 // events in chronological order give the whole state. Nothing is cached.
@@ -31,14 +32,6 @@ function debtTerms(debt) {
 
 const costOf = (allocation) => (allocation ? allocation.charges + allocation.taxes + allocation.lateInterest + allocation.interest : 0);
 
-function payBalanceOnly(state, amountMinor, split) {
-  const stated = { ...emptyBuckets(), ...(split ?? { principal: amountMinor }) };
-  const principal = Math.min(stated.principal, state.noneBalance);
-  state.noneBalance -= principal;
-  const result = { ...stated, principal };
-  return { ...result, surplus: amountMinor - BUCKETS.reduce((sum, key) => sum + result[key], 0) };
-}
-
 function applyPayment(state, event) {
   const { bankSplit } = event.payload;
   if (state.work.system === 'none') return { allocation: payBalanceOnly(state, event.amountMinor, bankSplit) };
@@ -48,8 +41,16 @@ function applyPayment(state, event) {
   return { allocation };
 }
 
-// Handlers by event kind; kinds without one (disbursement, charge) only appear in `applied`.
-const HANDLERS = { payment: applyPayment };
+// Handlers by event kind; each returns `{ allocation?, ... }` and may rewrite the state.
+// Kinds without one (disbursement, charge) only appear in `applied`.
+const HANDLERS = {
+  payment: applyPayment,
+  extra_payment: applyExtra,
+  rate_change: applyRateChange,
+  charge_change: applyChargeChange,
+  restructure: applyRestructure,
+  adjustment: applyAdjustment,
+};
 
 function totalsOf(applied, rows) {
   const paid = emptyBuckets();
@@ -78,6 +79,7 @@ function totalsOf(applied, rows) {
 function projectLoan({ debt, terms, events, asOf }) {
   const state = {
     work: terms,
+    offset: 0,
     rows: terms.system === 'none' ? [] : buildSchedule(terms).map(newRow),
     noneBalance: terms.system === 'none' ? terms.principalMinor : 0,
     termsVersion: debt.termsVersion ?? 1,
@@ -85,9 +87,10 @@ function projectLoan({ debt, terms, events, asOf }) {
   const applied = [];
   const notices = [];
   for (const event of events) {
-    const { allocation = null, ...extra } = HANDLERS[event.kind]?.(state, event) ?? {};
+    const { allocation = null, absorbed, ...extra } = HANDLERS[event.kind]?.(state, event) ?? {};
     applied.push({ eventId: event.id, kind: event.kind, effectiveOn: event.effectiveOn, allocation, costMinor: costOf(allocation), ...extra });
     if (allocation && allocation.surplus > 0) notices.push({ code: 'surplus', eventId: event.id, amountMinor: allocation.surplus });
+    if (extra.driftMinor) notices.push({ code: 'drift', eventId: event.id, amountMinor: extra.driftMinor, absorbed });
   }
   const plan = decorate(state.rows, asOf);
   return {

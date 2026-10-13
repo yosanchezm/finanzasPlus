@@ -79,6 +79,19 @@ export function paySplit(rows, split, eventId) {
 }
 
 /**
+ * Pays a balance-only debt (system none): principal reduces the balance, cost
+ * stated by the bank counts as paid, and whatever exceeds the balance is surplus.
+ * @param {{ noneBalance: number }} state Mutated.
+ */
+export function payBalanceOnly(state, amountMinor, split) {
+  const stated = { ...emptyBuckets(), ...(split ?? { principal: amountMinor }) };
+  const principal = Math.min(stated.principal, state.noneBalance);
+  state.noneBalance -= principal;
+  const result = { ...stated, principal };
+  return { ...result, surplus: amountMinor - BUCKETS.reduce((sum, key) => sum + result[key], 0) };
+}
+
+/**
  * Principal still owed on `date`: the unpaid principal of the rows, minus the
  * interest of capitalizing rows (negative principal) that has not accrued yet.
  */

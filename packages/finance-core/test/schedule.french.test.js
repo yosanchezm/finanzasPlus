@@ -133,3 +133,63 @@ describe('buildSchedule options', () => {
     expect(() => buildSchedule(french(), { startDate: '2027-13-01' })).toThrow(ValidationError);
   });
 });
+
+describe('buildSchedule installmentMinor (keep the installment, let the term float)', () => {
+  const installment = 380_381;
+
+  it('clears a smaller balance in fewer installments of the same amount, the last one smaller', () => {
+    const rows = buildSchedule(french(), { fromPeriod: 13, balanceMinor: 6_000_000, installmentMinor: installment });
+    expect(rows.length).toBeGreaterThan(15);
+    expect(rows.length).toBeLessThan(24);
+    expect(rows.slice(0, -1).every((row) => row.installmentMinor === installment)).toBe(true);
+    expect(rows[rows.length - 1].installmentMinor).toBeLessThanOrEqual(installment);
+    expect(rows[0]).toMatchObject({ period: 13, dueOn: '2027-02-15', openingMinor: 6_000_000 });
+    expect(rows[rows.length - 1].period).toBe(12 + rows.length);
+    expect(sum(rows, 'principalMinor')).toBe(6_000_000);
+    expect(rows[rows.length - 1].closingMinor).toBe(0);
+  });
+
+  it('runs past the original term when the balance needs more installments, on the same calendar', () => {
+    const rows = buildSchedule(french({ rate: { value: 40, basis: 'effective', periodicity: 'annual', timing: 'arrears' } }), {
+      fromPeriod: 25,
+      balanceMinor: 8_000_000,
+      installmentMinor: installment,
+    });
+    expect(rows.length).toBeGreaterThan(12);
+    expect(rows[0].dueOn).toBe('2028-02-15');
+    expect(rows[12].dueOn).toBe('2029-02-15');
+    expect(rows[rows.length - 1].closingMinor).toBe(0);
+  });
+
+  it('is exact at 0%: 800,000 at 100,000 is eight installments', () => {
+    const zero = french({ principalMinor: 1_200_000, n: 12, rate: { convention: 'ZERO' } });
+    const rows = buildSchedule(zero, { fromPeriod: 2, balanceMinor: 800_000, installmentMinor: 100_000 });
+    expect(rows.map((row) => row.installmentMinor)).toEqual(Array(8).fill(100_000));
+    expect(buildSchedule(zero, { fromPeriod: 2, balanceMinor: 750_000, installmentMinor: 100_000 }).map((row) => row.principalMinor)).toEqual([
+      100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 50_000,
+    ]);
+  });
+
+  it('applies the terms charges to the rebuilt rows', () => {
+    const fee = { id: 'fee', kind: 'fee', basis: 'fixed', value: 10_000 };
+    const rows = buildSchedule(french({ charges: [fee] }), { fromPeriod: 13, balanceMinor: 6_000_000, installmentMinor: installment });
+    expect(rows.length).toBeLessThan(24);
+    expect(rows.every((row) => row.chargesMinor === 10_000 && row.totalDueMinor === row.installmentMinor + 10_000)).toBe(true);
+  });
+
+  it('rejects an installment that cannot amortize the balance and invalid usage', () => {
+    const codeOf = (options, terms = french()) => {
+      try {
+        buildSchedule(terms, options);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        return error.code;
+      }
+      return 'no error';
+    };
+    expect(codeOf({ balanceMinor: 10_000_000, installmentMinor: 100_000 })).toBe('installment_too_low');
+    expect(codeOf({ installmentMinor: 0 })).toBe('invalid_option');
+    expect(codeOf({ installmentMinor: 1.5 })).toBe('invalid_option');
+    expect(codeOf({ installmentMinor: 100_000 }, french({ system: 'german' }))).toBe('invalid_option');
+  });
+});
