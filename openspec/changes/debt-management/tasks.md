@@ -219,16 +219,16 @@ Precondition: S0b merged and S4 merged (data layer shape).
 
 ## Phase S9: Nia simulate, advise, guardrails (about 580 lines)
 
-- [ ] S9.1 RED: `guard.test.js`: `numbersIn` normalizes `.` and `,` separators and percent signs; a paraphrase with 42% not in `facts` returns `null`; a faithful paraphrase passes; over 4096 characters returns `null`. Reqs: NDA-6, DPA-3. Pair: S9.2. Done: fails.
-- [ ] S9.2 GREEN: `guard.js`. Pair: S9.1.
-- [ ] S9.3 RED: `cashflow.test.js`: 3 full months of average income and expense, margin, installment-to-income ratio, `tightMargin`, `higherRateDebt` with the gap rule; thresholds from `ADVICE_DEFAULTS`, overridden by env `DEBT_ADVICE_THRESHOLDS` JSON (invalid JSON falls back to defaults); paginated query helpers `queryGreaterEqual`, `queryLessThan`, `queryCursorAfter`. Reqs: NDA-5, DPA-2. Pair: S9.4. Done: fails.
-- [ ] S9.4 GREEN: `cashflow.js` and the query helpers in `functions/nia/index.js`. Pair: S9.3.
-- [ ] S9.5 RED: `replies.test.js` additions: a 360-row schedule shows only 3-6 rows (within the spec's 3-12) plus a web link, at most 4096 characters, a `nia:simpay` button; deterministic simulate and advise templates built from `facts`. Reqs: NDA-5. Pair: S9.6. Done: fails.
-- [ ] S9.6 GREEN: `replies.js` simulate and advise templates. Pair: S9.5. Note: the web link uses the existing app URL env var if one exists, else a documented optional one.
-- [ ] S9.7 RED: `handler.test.js` additions: simulate is read-only and `nia:simpay` creates a pending pay with the strategy; advise flows `compareStrategies` + `cashflowSignals` -> `advise` -> `buildFacts` -> Gemini paraphrase -> `guardParaphrase`; invented number -> template; Gemini failure -> template and the flow completes; `workspaceSnapshot` carries code-computed debt summaries and the model does no debt arithmetic. Reqs: NDA-5, NDA-6, DPA-2, DPA-3. Pair: S9.8. Done: fails.
-- [ ] S9.8 GREEN: `handler.js` simulate/advise and the snapshot summary in `index.js`. Pair: S9.7.
-- [ ] S9.9 Docs: `functions/nia/README.md` (debt intent and actions, `DEBT_ADVICE_THRESHOLDS`), `docs/setup.md` section 2 (new Nia env var), `docs/deploy.md` (redeploy the tarball after S9). Reqs: NDA-5, NIP-3. Pair: n/a (docs). Done: instructions verified once.
-- [ ] S9.10 REFACTOR and final verification: `npm test`, `npm run build`, `npm run package:nia` and smoke GET, size checkpoint. Done: owner actions OA-3 and OA-4 reported as pending/done in the PR; ready for sdd-verify.
+- [x] S9.1 RED: `guard.test.js`: `numbersIn` normalizes `.` and `,` separators and percent signs; a paraphrase with 42% not in `facts` returns `null`; a faithful paraphrase passes; over 4096 characters returns `null`. Reqs: NDA-6, DPA-3. Pair: S9.2. Done: fails.
+- [x] S9.2 GREEN: `guard.js`. Pair: S9.1.
+- [x] S9.3 RED: `cashflow.test.js`: 3 full months of average income and expense, margin, installment-to-income ratio, `tightMargin`, `higherRateDebt` with the gap rule; thresholds from `ADVICE_DEFAULTS`, overridden by env `DEBT_ADVICE_THRESHOLDS` JSON (invalid JSON falls back to defaults); paginated query helpers `queryGreaterEqual`, `queryLessThan`, `queryCursorAfter`. Reqs: NDA-5, DPA-2. Pair: S9.4. Done: fails. (Done: the tests are in `cashflow.test.js` and `index.test.js`; the helpers landed with their use in the wiring commit.)
+- [x] S9.4 GREEN: `cashflow.js` and the query helpers in `functions/nia/index.js`. Pair: S9.3.
+- [x] S9.5 RED: `replies.test.js` additions: a 360-row schedule shows only 3-6 rows (within the spec's 3-12) plus a web link, at most 4096 characters, a `nia:simpay` button; deterministic simulate and advise templates built from `facts`. Reqs: NDA-5. Pair: S9.6. Done: fails.
+- [x] S9.6 GREEN: `replies.js` simulate and advise templates. Pair: S9.5. Note: the web link uses the existing app URL env var if one exists, else a documented optional one.
+- [x] S9.7 RED: `handler.test.js` additions: simulate is read-only and `nia:simpay` creates a pending pay with the strategy; advise flows `compareStrategies` + `cashflowSignals` -> `advise` -> `buildFacts` -> Gemini paraphrase -> `guardParaphrase`; invented number -> template; Gemini failure -> template and the flow completes; `workspaceSnapshot` carries code-computed debt summaries and the model does no debt arithmetic. Reqs: NDA-5, NDA-6, DPA-2, DPA-3. Pair: S9.8. Done: fails.
+- [x] S9.8 GREEN: `handler.js` simulate/advise and the snapshot summary in `index.js`. Pair: S9.7.
+- [x] S9.9 Docs: `functions/nia/README.md` (debt intent and actions, `DEBT_ADVICE_THRESHOLDS`), `docs/setup.md` section 2 (new Nia env var), `docs/deploy.md` (redeploy the tarball after S9). Reqs: NDA-5, NIP-3. Pair: n/a (docs). Done: instructions verified once.
+- [x] S9.10 REFACTOR and final verification: `npm test`, `npm run build`, `npm run package:nia` and smoke GET, size checkpoint. Done: owner actions OA-3 and OA-4 reported as pending/done in the PR; ready for sdd-verify.
 
 ## Requirement index and traceability
 
@@ -277,6 +277,6 @@ Coverage: 37 of 37 spec requirements map to at least one task. Threat-matrix row
 
 ## Final verification checklist (end of S9, before sdd-verify)
 
-- [ ] `npm test` and `npm run build` pass; `npm run package:nia` produces `functions/nia.tar.gz` that passes the smoke test.
-- [ ] No tarball or `node_modules` tracked; `git ls-files -s functions/nia` has no 160000 entry.
+- [x] `npm test` and `npm run build` pass; `npm run package:nia` produces `functions/nia.tar.gz` that passes the smoke test.
+- [x] No tarball or `node_modules` tracked; `git ls-files -s functions/nia` has no 160000 entry.
 - [ ] Owner actions OA-1 to OA-6 each marked done, skipped with reason, or pending in the PR descriptions.
