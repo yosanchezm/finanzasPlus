@@ -177,17 +177,17 @@ Capabilities: nia-in-repo-packaging. Nothing past S0a.1 runs until the owner con
 
 ## Phase S6: Detail, plan, payment, void, simulator, reconcile (760 lines)
 
-- [ ] S6.1 RED: `src/features/debts/reconcile.test.js` (pure `planReconcile(debt, events, costRows)`): a missing row is created once, a stale amount updated, an orphan (voided or backdated) deleted, a second pass is a no-op. Reqs: DL-5 ("Atomic or reconcilable"). Pair: S6.2. Done: fails.
-- [ ] S6.2 GREEN: `reconcile.js` and `useDebtData.reconcileCosts(debtId)` on detail open, with a toast and a non-blocking notice when it fails. Pair: S6.1.
-- [ ] S6.3 RED: `DebtDetail.test.jsx`, `PlanTable.test.jsx`, `EventHistory.test.jsx`: 3 payments on 12 installments -> rows 1-3 paid, row 4 due, last closing 0; chips for partial and pastDue; paginated plan; real-cost totals; itemized charge lines vs bundled totals; history includes voided events and a void action. Reqs: DWM-3. Pair: S6.4. Done: fails.
-- [ ] S6.4 GREEN: `DebtDetail.jsx`, `PlanTable.jsx`, `EventHistory.jsx` (rendering `projection.plan` only). Pair: S6.3.
-- [ ] S6.5 RED: `PaymentDialog.test.jsx`: preview split principal 199,505 / cost 190,876 labelled "Vista previa"; an amount above the installment requires a strategy; saved event and expense equal the preview; double tap creates one event (same nonce); save error keeps the dialog open, projection unchanged, retry reuses the nonce; `reload()`/`onRefresh` only after `commitPlan` resolves. Reqs: DWM-4, DWM-6, DL-5. Pair: S6.6. Done: fails.
-- [ ] S6.6 GREEN: `PaymentDialog.jsx` and the pay handler in `DebtsContainer.jsx`. Pair: S6.5.
-- [ ] S6.7 RED: void flow tests: confirmation dialog, `void` event appended plus cost row `dc{id}` deleted, balance returns to the prior value, failure leaves state unchanged. Reqs: DWM-4, DL-1, DL-5. Pair: S6.8. Done: fails.
-- [ ] S6.8 GREEN: void handler. Pair: S6.7.
-- [ ] S6.9 RED: `PrepaymentSimulator.test.jsx`: amount -> strategies side by side (term, installment, interest and charges saved) with verdict and reason; no write mock is called; 0% shows liquidity-only; "Registrar como abono" opens `PaymentDialog` prefilled with amount and strategy. Reqs: DWM-5, DPA-1, DPA-2. Pair: S6.10. Done: fails. Open point: the web needs `advise` signals; pass `higherRateDebt` computed from the other loaded debts and `tightMargin` only if the shell exposes 3-month income and expense, else null (confirm at apply).
-- [ ] S6.10 GREEN: `PrepaymentSimulator.jsx` and wiring. Pair: S6.9.
-- [ ] S6.11 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S6a/S6b).
+- [x] S6.1 RED: `src/features/debts/reconcile.test.js` (pure `planReconcile(debt, events, costRows)`): a missing row is created once, a stale amount updated, an orphan (voided or backdated) deleted, a second pass is a no-op. Reqs: DL-5 ("Atomic or reconcilable"). Pair: S6.2. Done: fails.
+- [x] S6.2 GREEN: `reconcile.js` and `useDebtData.reconcileCosts(debtId)` on detail open, with a toast and a non-blocking notice when it fails. Pair: S6.1.
+- [x] S6.3 RED: `DebtDetail.test.jsx`, `PlanTable.test.jsx`, `EventHistory.test.jsx`: 3 payments on 12 installments -> rows 1-3 paid, row 4 due, last closing 0; chips for partial and pastDue; paginated plan; real-cost totals; itemized charge lines vs bundled totals; history includes voided events and a void action. Reqs: DWM-3. Pair: S6.4. Done: fails.
+- [x] S6.4 GREEN: `DebtDetail.jsx`, `PlanTable.jsx`, `EventHistory.jsx` (rendering `projection.plan` only). Pair: S6.3.
+- [x] S6.5 RED: `PaymentDialog.test.jsx`: preview split principal 199,505 / cost 190,876 labelled "Vista previa"; an amount above the installment requires a strategy; saved event and expense equal the preview; double tap creates one event (same nonce); save error keeps the dialog open, projection unchanged, retry reuses the nonce; `reload()`/`onRefresh` only after `commitPlan` resolves. Reqs: DWM-4, DWM-6, DL-5. Pair: S6.6. Done: fails.
+- [x] S6.6 GREEN: `PaymentDialog.jsx` and the pay handler in `DebtsContainer.jsx`. Pair: S6.5.
+- [x] S6.7 RED: void flow tests: confirmation dialog, `void` event appended plus cost row `dc{id}` deleted, balance returns to the prior value, failure leaves state unchanged. Reqs: DWM-4, DL-1, DL-5. Pair: S6.8. Done: fails.
+- [x] S6.8 GREEN: void handler. Pair: S6.7.
+- [x] S6.9 RED: `PrepaymentSimulator.test.jsx`: amount -> strategies side by side (term, installment, interest and charges saved) with verdict and reason; no write mock is called; 0% shows liquidity-only; "Registrar como abono" opens `PaymentDialog` prefilled with amount and strategy. Reqs: DWM-5, DPA-1, DPA-2. Pair: S6.10. Done: fails. Open point: the web needs `advise` signals; pass `higherRateDebt` computed from the other loaded debts and `tightMargin` only if the shell exposes 3-month income and expense, else null (confirm at apply).
+- [x] S6.10 GREEN: `PrepaymentSimulator.jsx` and wiring. Pair: S6.9.
+- [x] S6.11 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S6a/S6b).
 
 ## Phase S7: Credit card (680 lines)
 
