@@ -121,6 +121,8 @@ npm run package:nia
 
 El archivo resultante es `functions/nia.tar.gz` (ignorado por Git). Para poder volver a una versión anterior de Nia, conserva una copia del `tar.gz` antes de reemplazarlo y vuelve a subirla.
 
+Vuelve a generar y subir el `tar.gz` después de cada cambio de Nia. El de la gestión de deudas (crear, pagar, listar, simular y recomendar abonos) necesita antes las tablas `debts` y `debt_events` en la base de datos en producción: aplica la migración de la sección 3 de [setup.md](setup.md) y luego sube el paquete. Las variables opcionales `NIA_WEB_URL` y `DEBT_ADVICE_THRESHOLDS` se agregan en la Function y requieren un nuevo despliegue para tomar efecto.
+
 ## Verificación local
 
 ```bash

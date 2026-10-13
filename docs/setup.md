@@ -46,6 +46,9 @@ HOUSEHOLD_ID=id_de_la_fila_del_hogar
 HOUSEHOLD_CURRENCY=COP
 HOUSEHOLD_TIMEZONE=America/Bogota
 RECEIPTS_BUCKET_ID=receipts
+# Opcionales: enlace a la web en las simulaciones de deudas y umbrales de la recomendación de abonos
+NIA_WEB_URL=https://finanzas.personal.muxiistudio.com
+DEBT_ADVICE_THRESHOLDS={"tightMarginRatio":0.1,"maxInstallmentToIncome":0.3,"higherRateGapPct":0}
 TELEGRAM_USER_MAP={"123456789":{"ownerScope":"you","appwriteUserId":"id_appwrite_tuyo"},"987654321":{"ownerScope":"partner","appwriteUserId":"id_appwrite_de_tu_pareja"}}
 ```
 
@@ -271,6 +274,9 @@ HOUSEHOLD_ID=id_de_la_fila_del_hogar
 HOUSEHOLD_CURRENCY=COP
 HOUSEHOLD_TIMEZONE=America/Bogota
 RECEIPTS_BUCKET_ID=receipts
+# Opcionales: enlace a la web en las simulaciones de deudas y umbrales de la recomendación de abonos
+NIA_WEB_URL=https://finanzas.personal.muxiistudio.com
+DEBT_ADVICE_THRESHOLDS={"tightMarginRatio":0.1,"maxInstallmentToIncome":0.3,"higherRateGapPct":0}
 TELEGRAM_USER_MAP={"123456789":{"ownerScope":"you","appwriteUserId":"id_appwrite_tuyo"},"987654321":{"ownerScope":"partner","appwriteUserId":"id_appwrite_de_tu_pareja"}}
 ```
 
@@ -331,6 +337,8 @@ Invoke-RestMethod -Uri "https://api.telegram.org/bot$token/getWebhookInfo" | Con
 Luego envía `/start` al bot y prueba primero un mensaje de texto; después una foto nítida del recibo. Si `getWebhookInfo` muestra `last_error_message`, corrige primero DNS, certificado o el acceso `Any` de la Function.
 
 ## 8. Cómo debe comportarse Nia
+
+Las variables `NIA_WEB_URL` y `DEBT_ADVICE_THRESHOLDS` son opcionales. `NIA_WEB_URL` es la URL pública de la app web: si la defines, las simulaciones de abonos largas incluyen el enlace al plan completo (sin ella, solo dicen que está en la web). `DEBT_ADVICE_THRESHOLDS` es un JSON que ajusta cuándo Nia considera apretado el margen o el peso de la cuota; si falta o es inválido se usan los valores por defecto (ver `functions/nia/README.md`, sección Deudas).
 
 Nunca guardar directamente la primera interpretación de una foto o frase. Gemini debe devolver JSON estructurado con:
 
