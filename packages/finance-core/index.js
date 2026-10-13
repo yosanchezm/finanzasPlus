@@ -22,3 +22,4 @@ export {
 } from './src/rates.js';
 export { SMMLV_TABLE, USURY_TABLE, ley1555Notice, usuryNotice } from './src/legal.js';
 export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
+export { buildSchedule } from './src/schedule/index.js';

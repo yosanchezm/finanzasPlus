@@ -1,0 +1,23 @@
+{
+  "label": "French 10,000,000 COP at 24% EA over 36 monthly installments",
+  "provenance": "Independently computed with floating-point arithmetic (round half away from zero per component). Not a bank statement: owner action OA-6 (real statements) is still open.",
+  "terms": {
+    "kind": "consumer",
+    "principalMinor": 10000000,
+    "openedOn": "2026-01-15",
+    "rate": { "value": 24, "basis": "effective", "periodicity": "annual", "timing": "arrears" },
+    "system": "french",
+    "periodicity": "monthly",
+    "n": 36,
+    "firstDueOn": "2026-02-15"
+  },
+  "periodicRate": 0.018087582483510722,
+  "installmentMinor": 380381,
+  "rows": {
+    "1": { "dueOn": "2026-02-15", "openingMinor": 10000000, "interestMinor": 180876, "principalMinor": 199505, "installmentMinor": 380381, "closingMinor": 9800495 },
+    "2": { "dueOn": "2026-03-15", "openingMinor": 9800495, "interestMinor": 177267, "principalMinor": 203114, "installmentMinor": 380381, "closingMinor": 9597381 },
+    "35": { "dueOn": "2028-12-15", "openingMinor": 740585, "interestMinor": 13395, "principalMinor": 366986, "installmentMinor": 380381, "closingMinor": 373599 },
+    "36": { "dueOn": "2029-01-15", "openingMinor": 373599, "interestMinor": 6758, "principalMinor": 373599, "installmentMinor": 380357, "closingMinor": 0 }
+  },
+  "totals": { "interestMinor": 3693692, "installmentsMinor": 13693692 }
+}

@@ -103,6 +103,9 @@ describe('finance-core sources', () => {
         'src/legal.js',
         'src/money.js',
         'src/rates.js',
+        'src/schedule/french.js',
+        'src/schedule/index.js',
+        'src/schedule/row.js',
         'src/terms.js',
       ]),
     );
@@ -138,6 +141,7 @@ describe('public barrel (index.js)', () => {
         'addDays',
         'addMonthsClamped',
         'assertMinor',
+        'buildSchedule',
         'compareIso',
         'convertRate',
         'daysBetween',
