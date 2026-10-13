@@ -33,6 +33,17 @@ describe('DebtsView', () => {
     expect(within(card).getByText('Tú')).toBeInTheDocument();
   });
 
+  it('labels a credit card by its minimum payment and does not show a paid-off percentage', () => {
+    const cardItem = item({ id: 'c1', name: 'Visa Oro', kind: 'card', progressPercent: 0, nextDue: { dueOn: '2026-11-10', amountMinor: 121102, status: 'due' } });
+    render(<DebtsView status="ready" items={[cardItem]} totals={TOTALS} currentOwnerScope="you" onAdd={vi.fn()} onRetry={vi.fn()} />);
+    const card = screen.getByRole('article', { name: 'Visa Oro' });
+
+    expect(within(card).getByText('Pago mínimo')).toBeInTheDocument();
+    expect(within(card).getByText('$ 121.102')).toBeInTheDocument();
+    expect(within(card).queryByText('Próxima cuota')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/Pagado/)).not.toBeInTheDocument();
+  });
+
   it('flags an overdue installment and labels an interest-free debt', () => {
     renderView();
     const card = screen.getByRole('article', { name: 'Préstamo de mamá' });

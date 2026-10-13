@@ -21,6 +21,8 @@ export default function DebtCard({ item, currentOwnerScope, onOpen }) {
   const titleId = useId();
   const { label, icon } = kindInfo(item.kind);
   const { nextDue } = item;
+  // A card's balance revolves, so a paid-off percentage is meaningless and its next amount is the minimum payment.
+  const card = item.kind === 'card';
 
   return (
     <Card as="article" aria-labelledby={titleId} className={`flex flex-col gap-4 ${onOpen ? 'relative hover:border-border-strong' : ''}`}>
@@ -43,18 +45,22 @@ export default function DebtCard({ item, currentOwnerScope, onOpen }) {
         <>
           <div className="flex flex-col gap-1.5">
             <span className="text-2xl font-semibold tracking-[-0.5px] text-ink tabular-nums">{formatMoney(item.balanceMinor)}</span>
-            <ProgressBar value={item.progressPercent} />
-            <span className="text-[13px] text-ink-muted tabular-nums">Pagado {formatPercent(item.progressPercent)}</span>
+            {!card && (
+              <>
+                <ProgressBar value={item.progressPercent} />
+                <span className="text-[13px] text-ink-muted tabular-nums">Pagado {formatPercent(item.progressPercent)}</span>
+              </>
+            )}
           </div>
           <dl className="mt-auto flex flex-col gap-2 border-t border-[#eef1ed] pt-4">
-            <Fact label="Próxima cuota">
+            <Fact label={card ? 'Pago mínimo' : 'Próxima cuota'}>
               {nextDue ? (
                 <>
                   <span>{formatMoney(nextDue.amountMinor)}</span>
                   <span className="text-ink-muted">{formatDueDate(nextDue.dueOn)}</span>
                   {nextDue.status === 'pastDue' && <Chip tone="danger">Vencida</Chip>}
                 </>
-              ) : 'Sin cuota pendiente'}
+              ) : card ? 'Sin pago mínimo pendiente' : 'Sin cuota pendiente'}
             </Fact>
             <Fact label="Tasa">{formatEa(item.eaPercent)}</Fact>
           </dl>
