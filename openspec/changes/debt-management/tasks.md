@@ -161,19 +161,19 @@ Capabilities: nia-in-repo-packaging. Nothing past S0a.1 runs until the owner con
 
 ## Phase S5: Web navigation, list, loan wizard (760 lines)
 
-- [ ] S5.1 RED: `src/features/debts/debtViewModel.test.js`: projects each debt, totals (balance, monthly installments, next due), `inScope` filter hides another member's personal debt, not month-scoped. Reqs: DWM-1. Pair: S5.2. Done: fails.
-- [ ] S5.2 GREEN: `debtViewModel.js`. Pair: S5.1.
-- [ ] S5.3 RED: `useDebtData.test.jsx`: loads `debts` and `debt_events` with `listAllRows` (mocked), states loading -> ready, failure -> `status:'error'` with `retry`, `reload`. Reqs: DWM-6. Pair: S5.4. Done: fails.
-- [ ] S5.4 GREEN: `useDebtData.js`. Pair: S5.3.
-- [ ] S5.5 RED: `DebtsView.test.jsx`: both debts listed (name, lender, balance, next installment and date, EA), totals equal the sum, empty state with a create action, load failure shows an error panel with "Reintentar" and no stale totals. Reqs: DWM-1, DWM-6. Pair: S5.6. Done: fails.
-- [ ] S5.6 GREEN: `DebtsView.jsx`, `DebtCard.jsx`, `DebtsContainer.jsx` (list and create handler with `saveState` and a dialog nonce). Pair: S5.5.
-- [ ] S5.7 RED: `wizard/wizardModel.test.js`: reducer and steps per kind (consumer/vehicle/libranza, mortgage German/French, leasing balloon, family rate ZERO default, informal `system:'none'`), charge presets (seguro de vida `pctOutstanding`, GMF `pctOfSubtotal` 0.4, IVA `pctOfCharge` 19), validation (negative principal, invalid anticipated rate), `toTerms()` passes `validateTerms`. Reqs: DWM-2. Pair: S5.8. Done: fails.
-- [ ] S5.8 GREEN: `wizard/wizardModel.js`. Pair: S5.7.
-- [ ] S5.9 RED: `wizard/DebtWizard.test.jsx` (jsdom + user-event): 2.1% monthly nominal echoes about 28.3% EA; 0% French saves with zero interest; first installment shown before saving; usury warning does not disable save; invalid input disables save with an inline message; save failure keeps the dialog open with `readableError` and "Reintentar", the same nonce is reused and the list stays unchanged; creation writes the debt plus the `disbursement` event with deterministic ids (`db{nonce}`, dedupe `web:{nonce}:disb`) and no income row. Reqs: DWM-2, DWM-6, IRC-4, DL-1. Pair: S5.10. Done: fails.
-- [ ] S5.10 GREEN: `RateField.jsx`, `wizard/DebtWizard.jsx`, `steps/{Kind,Basics,Rate,Plan,Charges,Review}Step.jsx` (Radix Dialog). Pair: S5.9.
-- [ ] S5.11 RED: nav tests (extend existing shell tests): Sidebar and MoreSheet show "Deudas"; `MobileTabBar` only forwards `onNavigate`; `FinanceShell` lazily renders `DebtsContainer` for 'Deudas' with `inScope`, `currentOwnerScope`, `user`, `categories`, `onRefresh`; the period switcher is hidden. Reqs: DWM-1. Pair: S5.12. Done: fails.
-- [ ] S5.12 GREEN: `src/features/shell/navItems.js` (CreditCard icon), `MoreSheet.jsx`, `MobileTabBar.jsx`, `src/app/FinanceShell.jsx` (lazy case; not in `PERIOD_VIEWS`). Pair: S5.11. Done: green.
-- [ ] S5.13 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S5a/S5b).
+- [x] S5.1 RED: `src/features/debts/debtViewModel.test.js`: projects each debt, totals (balance, monthly installments, next due), `inScope` filter hides another member's personal debt, not month-scoped. Reqs: DWM-1. Pair: S5.2. Done: fails.
+- [x] S5.2 GREEN: `debtViewModel.js`. Pair: S5.1.
+- [x] S5.3 RED: `useDebtData.test.jsx`: loads `debts` and `debt_events` with `listAllRows` (mocked), states loading -> ready, failure -> `status:'error'` with `retry`, `reload`. Reqs: DWM-6. Pair: S5.4. Done: fails.
+- [x] S5.4 GREEN: `useDebtData.js`. Pair: S5.3.
+- [x] S5.5 RED: `DebtsView.test.jsx`: both debts listed (name, lender, balance, next installment and date, EA), totals equal the sum, empty state with a create action, load failure shows an error panel with "Reintentar" and no stale totals. Reqs: DWM-1, DWM-6. Pair: S5.6. Done: fails.
+- [x] S5.6 GREEN: `DebtsView.jsx`, `DebtCard.jsx`, `DebtsContainer.jsx` (list and create handler with `saveState` and a dialog nonce). Pair: S5.5.
+- [x] S5.7 RED: `wizard/wizardModel.test.js`: reducer and steps per kind (consumer/vehicle/libranza, mortgage German/French, leasing balloon, family rate ZERO default, informal `system:'none'`), charge presets (seguro de vida `pctOutstanding`, GMF `pctOfSubtotal` 0.4, IVA `pctOfCharge` 19), validation (negative principal, invalid anticipated rate), `toTerms()` passes `validateTerms`. Reqs: DWM-2. Pair: S5.8. Done: fails.
+- [x] S5.8 GREEN: `wizard/wizardModel.js`. Pair: S5.7.
+- [x] S5.9 RED: `wizard/DebtWizard.test.jsx` (jsdom + user-event): 2.1% monthly nominal echoes about 28.3% EA; 0% French saves with zero interest; first installment shown before saving; usury warning does not disable save; invalid input disables save with an inline message; save failure keeps the dialog open with `readableError` and "Reintentar", the same nonce is reused and the list stays unchanged; creation writes the debt plus the `disbursement` event with deterministic ids (`db{nonce}`, dedupe `web:{nonce}:disb`) and no income row. Reqs: DWM-2, DWM-6, IRC-4, DL-1. Pair: S5.10. Done: fails.
+- [x] S5.10 GREEN: `RateField.jsx`, `wizard/DebtWizard.jsx`, `steps/{Kind,Basics,Rate,Plan,Charges,Review}Step.jsx` (Radix Dialog). Pair: S5.9.
+- [x] S5.11 RED: nav tests (extend existing shell tests): Sidebar and MoreSheet show "Deudas"; `MobileTabBar` only forwards `onNavigate`; `FinanceShell` lazily renders `DebtsContainer` for 'Deudas' with `inScope`, `currentOwnerScope`, `user`, `categories`, `onRefresh`; the period switcher is hidden. Reqs: DWM-1. Pair: S5.12. Done: fails.
+- [x] S5.12 GREEN: `src/features/shell/navItems.js` (CreditCard icon), `MoreSheet.jsx`, `MobileTabBar.jsx`, `src/app/FinanceShell.jsx` (lazy case; not in `PERIOD_VIEWS`). Pair: S5.11. Done: green.
+- [x] S5.13 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (valve: S5a/S5b).
 
 ## Phase S6: Detail, plan, payment, void, simulator, reconcile (760 lines)
 

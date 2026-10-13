@@ -393,3 +393,70 @@ Test summary: 45 tests written (17 + 24 + 4), 45 passing; full suite 52 files / 
 ### Notes
 - Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
 - Owner actions: OA-2 (run the spike on a scratch database, record the result) and OA-3 (run the migration twice on a dev database, then on live, before deploying S5+) remain open.
+
+## Batch 8: S5 (web navigation, list, loan wizard) - COMPLETE
+
+Branch `feat/debt-s5-web-list-wizard` (stacked on `feat/debt-s4b-data-layer`). Seven commits, each green on its own (tests with code):
+- `c67824b feat(debts): add debt list view model and data hook` (232)
+- `a83aaec feat(debts): add the debts list with totals, empty and error states` (329)
+- `7bbf7f6 feat(shell): add the Deudas section to navigation without the period switcher` (88)
+- `19326ee feat(debts): add the loan wizard model with terms building and validation` (349)
+- `22fa3c9 feat(debts): add the loan creation wizard with live rate echo and charges` (594)
+- `90b7789 feat(debts): create loans from the wizard with idempotent writes and retry` (252)
+- `74d204c fix(debts): keep wizard inputs when the same kind is picked again` (9)
+
+Size: 1,811 changed lines in code and tests (1,805 added / 6 deleted, 34 files; tests are 864 of them), plus about 75 lines of this note and the task ticks. The forecast was 760; the owner ceiling for the work unit is 2,000. Because the unit exceeds one PR, four stacked PR branches of at most 800 lines are proposed (commits stay consecutive):
+
+| PR sub-branch (proposed) | Commits | Lines |
+|---|---|---|
+| `feat/debt-s5a-list-nav` | `c67824b`, `a83aaec`, `7bbf7f6` | 649 |
+| `feat/debt-s5b-wizard-model` | `19326ee` | 349 |
+| `feat/debt-s5c-wizard-ui` | `22fa3c9` | 594 |
+| `feat/debt-s5d-create-flow` | `90b7789`, `74d204c` | 261 |
+
+(S5b+S5c would be 943, which is why they are not merged; S5c+S5d would be 855.) No live Appwrite access of any kind: every test mocks `src/appwrite.js`; no dev server was started.
+
+### Tasks
+- [x] S5.1/S5.2 `debtViewModel.js` (`buildDebtList`: projection per debt, totals, scope filter, archived hidden, unreadable debts flagged and kept out of the totals)
+- [x] S5.3/S5.4 `useDebtData.js` (`loading -> ready | error`, `retry`, `reload`, newest request wins)
+- [x] S5.5/S5.6 `DebtsView.jsx`, `DebtCard.jsx`, `DebtsContainer.jsx`, `debtLabels.js`
+- [x] S5.7/S5.8 `wizard/wizardModel.js` (reducer, steps per kind, presets, `toTerms`, `evaluate`, `rateEcho`)
+- [x] S5.9/S5.10 `RateField.jsx`, `wizard/DebtWizard.jsx`, `wizard/Notices.jsx`, `wizard/steps/{Kind,Basics,Rate,Plan,Charges,Review}Step.jsx`, `saveLoan.js`
+- [x] S5.11/S5.12 nav: `navItems.js`, `MoreSheet.jsx`, `Topbar.jsx`/`MobileTopBar.jsx`/`AppShell.jsx` (`showPeriod`), `FinanceShell.jsx` (lazy `DebtsContainer`, `UNSCOPED_VIEWS`)
+- [x] S5.13 REFACTOR and verify: `npm test` (58 files, 624 tests), `npm run build`, size checkpoint (above)
+
+### TDD Cycle Evidence
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| S5.1/S5.2 | `src/features/debts/debtViewModel.test.js` | Unit (pure, real core) | N/A (new) | Written first; suite failed to import `debtViewModel` | 6/6 | Two zero-rate loans with different dates; a recorded payment changes balance, next due and progress; 0% vs 2.1% MV (EA 28.32); scope filter, archived, events older than the month; unreadable terms; `system:'none'` | Renamed internal `describe` to `describeDebt` |
+| S5.3/S5.4 | `useDebtData.test.jsx` | Hook (jsdom, mocked appwrite) | N/A (new) | Written first; import failed | 5/5 | loading to ready; failure with empty rows then retry; reload keeps status `ready` (no flicker); failed reload becomes `error` with no stale rows; a slow older response is ignored | None needed |
+| S5.5/S5.6 | `DebtsView.test.jsx`, `DebtsContainer.test.jsx` (list part) | Component (RTL) | N/A (new) | Written first; import failed | 9/9 and 2/2 | Two debts with distinct figures; overdue chip and 0% label; totals equal the sum; empty state action; header action; no create action without `onAdd`; unreadable card; loading status; error panel with Reintentar and no totals or cards; container: scope filter, failure and retry | None needed |
+| S5.7/S5.8 | `wizard/wizardModel.test.js` | Unit (pure, real core) | N/A (new) | Written first; import failed | 22/22 (1 fix to my own test: an IVA charge dispatched before its fee is correctly ignored) | Steps and defaults for consumer/vehicle/family/informal/leasing/other; navigation limits; terms for 25.2% NAMV, German with principal grace, leasing balloon, family manual plan, informal `none`, ordered presets (life, fee, IVA on fee, GMF 0.4); IVA needs its fee; 5 invalid cases on the right step plus the manual-plan-below-interest message; MV and NAMV echo, custom label, usury only for the capped modality, invalid rate | Message table `CORE_ISSUES`; same-kind guard added RED-first in `74d204c` |
+| S5.9/S5.10 | `wizard/DebtWizard.test.jsx` | Component (RTL + user-event) | N/A (new) | Written first; import failed | 10/10 after 2 fixes (a core error was hidden behind a missing-field issue, so `evaluate` changed; the saving test now saves first) | 2.1% MV and 25.2% NAMV both echo 28.32% EA, custom convention; usury warning keeps Siguiente and Guardar enabled; anticipated 100% blocks with a message; negative principal; 0% French shows the first installment ($ 100.000) and zero interest before saving, then submits; failed save keeps the dialog with Reintentar and resubmits the same draft; no double submit; leasing balloon vs mortgage German; manual plan rows; charge presets with IVA gated by the fee | `missing` flag so empty required fields disable Siguiente without an alert |
+| S5.9 (writes) | `DebtsContainer.test.jsx` (create flow) | Component with a mocked port | list tests 2/2 | Written first; 5/5 failed (no create action) | 7/7 | Event `de{nonce}` / dedupe `web:{nonce}:disb` and debt `db{nonce}` with exact data, no cost row and no category call, list reloaded and `onRefresh` called once; scope mapping with the other member signed in; failed save keeps the dialog, message, toast and the unchanged list, then the retry (event 409 -> lookup) reuses the same ids and nonce; debt 409 counts as saved; an edited draft after a failure gets a new nonce | None needed |
+| S5.11/S5.12 | `Sidebar.test.jsx`, `MobileTabBar.test.jsx`, `Topbar.test.jsx`, `MobileTopBar.test.jsx`, `App.test.jsx` | Component + App integration | shell and app suites 70/70 before editing | Written first; 5/5 failed | 75/75, then the App creation test (RED: timed out because the shell did not pass `householdId`/`user`) 6/6 | Sidebar item and active state; MoreSheet item (no new tab); period switcher hidden in both bars; App: lazy load on first visit, scope control filtering, no `Periodo` group in either bar, creation through the shell with `getWorkspace` refreshed | None needed |
+
+Test summary: 65 tests written (59 under `src/features/debts`, 4 shell, 2 App); full suite 58 files / 624 tests passing (S4 baseline 52 files / 559). Pure functions created: `buildDebtList`, `wizardReducer`, `toTerms`, `evaluate`, `rateEcho`, `describeRate`, `conventionOf`, `firstDueOf`, `stepsFor`.
+
+### Work Unit Evidence
+| Evidence | Value |
+|---|---|
+| Focused test | `npx vitest run src/features/debts src/features/shell src/app`: exit 0, 14 files, 135 tests passed |
+| Runtime harness | `npm test` exit 0 (58 files, 624 tests); `npm run build` exit 0 (`DebtsContainer` is its own lazy chunk, about 61 kB with the core). The manual `npm run dev` check (open Deudas, create a loan) was not run here by instruction (no dev server) and stays with the owner or the verify phase; the create flow runs against the mocked Appwrite port and the real `planCommit`/`commitPlan`/`serializeTerms` |
+| Rollback boundary | Delete `src/features/debts/`; revert the Deudas entry in `navItems.js`/`MoreSheet.jsx`, the `showPeriod` prop in `Topbar.jsx`/`MobileTopBar.jsx`/`AppShell.jsx`, the lazy case plus `UNSCOPED_VIEWS` in `FinanceShell.jsx`, and the matching test additions. Debts already written to Appwrite stay (append-only). |
+
+### Deviations and decisions
+- **Data layer names.** S5.3 says the hook mocks `listAllRows`; it calls `listDebts()`/`listDebtEvents()` from S4 (which wrap `listAllRows`), and the tests mock those.
+- **Container props.** `DebtsContainer` receives `inScope`, `currentOwnerScope`, `scopeControl`, `householdId`, `user`, `onRefresh`, `onNotify`. `categories` (listed in S5.11) is not passed: nothing in S5 reads it (the cost category is ensured by the port in S6).
+- **Write order.** `saveLoan` writes the `disbursement` event first, then the debt row. An event without a debt is invisible; a debt without its event would be listed half-created. A 409 on the debt (same nonce, same draft) counts as saved. If the draft changed after a failed attempt, the container generates a new nonce instead of reusing the old ids (otherwise a retry would silently keep the old terms).
+- **Spec wording "2.1% monthly nominal".** 2.1% is the periodic monthly rate (M.V.), which is the one that gives about 28.32% EA; 2.1% N.M.V. would be about 2.12% EA. The tests cover M.V. 2.1 and N.M.V. 25.2 (both 28.32%). The convention select offers EA, NAMV, MV, NATV, NATA, NAMA and a custom basis, periodicity and timing.
+- **Validation UX.** Each step blocks "Siguiente" with an inline message for invalid input (negative principal, invalid anticipated rate, manual plan below the interest, bad grace, balloon or charges); empty required fields only disable the button. Review also disables saving while any issue exists. Because the steps are gated, the save button is unreachable while the data is invalid, which satisfies "save disabled with an inline message".
+- **Rate label.** `rateLabel` is used for the named conventions; for a custom convention the wizard writes its own Spanish label (for example `6% nominal bimestral anticipada ≈ 6.2% EA`) because `rateLabel` uses English words.
+- **Period switcher.** Topbar, MobileTopBar and AppShell gained an optional `showPeriod` prop (default true); only Deudas hides it. Metas keeps showing it (existing behavior, not touched).
+- **Kinds.** Wizard kinds: consumer, vehicle, mortgage, libranza, leasing (interest-only with a balloon, or French), family (French at 0% by default, or manual), informal (`system:'none'`, no rate or plan steps), other (manual plan). Card is not offered (S7). Charge `display:'bundled'` is not exposed (default itemized); presets are life insurance (`pctOutstanding`), other insurance (fixed), fee (fixed), IVA on the fee (`pctOfCharge`, needs the fee) and GMF (`pctOfSubtotal` 0.4).
+- **Usury and Ley 1555 notices** are informational (never block). The usury table still holds the single unverified entry from S1 (OA-5), so the warning says the cap is not officially verified.
+- The topbar's "Nuevo movimiento" button and search remain visible on Deudas (unchanged shell behavior).
+
+### Notes
+- `useDebtData.reload` turns a failed reload into the error state (empty rows) instead of showing the pre-save list as confirmed.
+- Owner actions still open: OA-2, OA-3 (the Deudas section needs the S4 tables on the live database before S5 is deployed), OA-5.
