@@ -156,26 +156,49 @@ export function validateEvent(input) {
 
 const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
+// Forward compatibility (AD1): a newer build may store kinds this bundle does not
+// know. Only a string kind outside EVENT_KINDS is tolerated; anything else malformed still throws.
+const isUnknownKind = (input) => isObject(input) && typeof input.kind === 'string' && !EVENT_KINDS.includes(input.kind);
+
+/**
+ * Reader used by `sortEvents`, `activeEvents` and `project`: validates every event of a
+ * known kind and sets aside the ones of an unknown kind instead of throwing. Writers keep
+ * using `validateEvent`, which stays strict. Internal: not exported by the package barrel.
+ * @param {object[]} events Stored or normalized events, any order.
+ * @returns {{ known: object[], unknown: { id: string, kind: string }[] }} `known` is normalized, in input order.
+ * @throws {ValidationError} For a malformed event of a known (or missing) kind.
+ */
+export function readEvents(events) {
+  const known = [];
+  const unknown = [];
+  for (const input of events) {
+    if (isUnknownKind(input)) unknown.push({ id: input.id ?? input.$id ?? '', kind: input.kind });
+    else known.push(validateEvent(input));
+  }
+  return { known, unknown };
+}
+
 /**
  * Chronological order: effectiveOn, then creation time, then id, so the result
- * never depends on the storage order. Accepts stored or normalized events.
+ * never depends on the storage order. Accepts stored or normalized events and
+ * skips events of an unknown kind.
  * @param {object[]} events
  * @returns {object[]} A new array of normalized events.
  */
 export function sortEvents(events) {
-  return events
-    .map(validateEvent)
-    .sort((a, b) => compareIso(a.effectiveOn, b.effectiveOn) || compareText(a.createdAt, b.createdAt) || compareText(a.id, b.id));
+  const { known } = readEvents(events);
+  return known.sort((a, b) => compareIso(a.effectiveOn, b.effectiveOn) || compareText(a.createdAt, b.createdAt) || compareText(a.id, b.id));
 }
 
 /**
  * Drops voided events and the void events themselves. A void that targets a
- * missing event or another void has no effect (voids cannot be undone).
+ * missing event, an event of an unknown kind or another void has no effect
+ * (voids cannot be undone). Events of an unknown kind are skipped.
  * @param {object[]} events
  * @returns {object[]} Normalized events in their input order.
  */
 export function activeEvents(events) {
-  const normalized = events.map(validateEvent);
+  const { known: normalized } = readEvents(events);
   const voids = normalized.filter((event) => event.kind === 'void');
   const voidIds = new Set(voids.map((event) => event.id));
   const voided = new Set(voids.map((event) => event.payload.targetEventId).filter((target) => !voidIds.has(target)));

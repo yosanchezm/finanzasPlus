@@ -237,7 +237,9 @@ describe('project: determinism', () => {
 
   it('rejects an invalid asOf or malformed events', () => {
     expect(() => project(debt(terms), [], '2026-13-01')).toThrow(ValidationError);
-    expect(() => project(debt(terms), [{ ...pay('2026-02-15', 1, 'a'), kind: 'refund' }], '2026-03-01')).toThrow(ValidationError);
+    // An unknown string kind is skipped with a notice (DL1); a malformed event still throws.
+    expect(() => project(debt(terms), [{ ...pay('2026-02-15', 1, 'a'), kind: 7 }], '2026-03-01')).toThrow(ValidationError);
+    expect(() => project(debt(terms), [pay('2026-02-15', -1, 'a')], '2026-03-01')).toThrow(ValidationError);
     expect(() => project({ $id: 'd1' }, [], '2026-03-01')).toThrow(ValidationError);
   });
 });

@@ -4,7 +4,7 @@ import { ValidationError } from '../errors.js';
 import { buildSchedule } from '../schedule/index.js';
 import { parseTerms, validateTerms } from '../terms.js';
 import { BUCKETS, emptyBuckets } from './allocate.js';
-import { activeEvents, sortEvents, validateEvent } from './events.js';
+import { activeEvents, readEvents, sortEvents } from './events.js';
 import { balanceAt, decorate, newRow, payBalanceOnly, payRows, paySplit, rowDue, rowOutstanding } from './rows.js';
 import { applyAdjustment, applyChargeChange, applyExtra, applyRateChange, applyRestructure } from './tail.js';
 
@@ -124,7 +124,12 @@ function projectLoan({ debt, terms, events, asOf }) {
 export function project(debt, events, asOf, opts = {}) {
   if (!isIsoDate(asOf)) throw new ValidationError('invalid_date', `asOf must be a real YYYY-MM-DD date, got ${String(asOf)}`);
   const terms = debtTerms(debt);
-  const dated = events.map(validateEvent).filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
+  const { known, unknown } = readEvents(events);
+  const dated = known.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
   const active = sortEvents(activeEvents(dated));
-  return (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts });
+  const projection = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts });
+  if (unknown.length === 0) return projection;
+  // Events written by a newer build are skipped, not guessed at (AD1): one notice each, whatever their date.
+  const skipped = unknown.map(({ id, kind }) => ({ code: 'unknown_event_kind', eventId: id, kind }));
+  return { ...projection, notices: [...(projection.notices ?? []), ...skipped] };
 }
