@@ -101,6 +101,8 @@ describe('finance-core sources', () => {
         'src/calendar.js',
         'src/charges.js',
         'src/errors.js',
+        'src/ledger/allocate.js',
+        'src/ledger/events.js',
         'src/legal.js',
         'src/money.js',
         'src/rates.js',
@@ -137,6 +139,7 @@ describe('public barrel (index.js)', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
         'CONVENTIONS',
+        'EVENT_KINDS',
         'PERIODICITIES',
         'SMMLV_TABLE',
         'TERMS_MAX_CHARS',
@@ -144,8 +147,10 @@ describe('public barrel (index.js)', () => {
         'TermsTooLarge',
         'USURY_TABLE',
         'ValidationError',
+        'activeEvents',
         'addDays',
         'addMonthsClamped',
+        'allocate',
         'assertMinor',
         'buildSchedule',
         'compareIso',
@@ -164,7 +169,9 @@ describe('public barrel (index.js)', () => {
         'sumMinor',
         'summarizeSchedule',
         'toEffectiveAnnual',
+        'sortEvents',
         'usuryNotice',
+        'validateEvent',
         'validateTerms',
       ].sort(),
     );

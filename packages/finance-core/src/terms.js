@@ -80,7 +80,7 @@ function normalizeCharge(charge, earlier) {
   return normalized;
 }
 
-function normalizeCharges(charges) {
+export function normalizeCharges(charges) {
   if (charges === undefined) return [];
   if (!Array.isArray(charges)) throw fail('invalid_charge', 'charges must be an array');
   const normalized = [];

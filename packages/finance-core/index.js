@@ -24,3 +24,5 @@ export { SMMLV_TABLE, USURY_TABLE, ley1555Notice, usuryNotice } from './src/lega
 export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
 export { evaluateCharges } from './src/charges.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
+export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
+export { allocate } from './src/ledger/allocate.js';
