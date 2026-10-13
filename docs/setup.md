@@ -232,7 +232,14 @@ En la consola de Appwrite:
 1. Abre **Functions → Nia → Settings**.
 2. Selecciona Node.js 16. El paquete manual actual instala `undici` durante el build y es compatible con ese runtime. Node.js 22 también funcionará si posteriormente lo habilitas.
 3. En **Execute access**, selecciona `Any` para que Telegram pueda invocar el endpoint.
-4. En el repositorio, configura como raíz de la Function la carpeta `functions/nia` y usa `index.js` como punto de entrada. El código de Nia está incluido en [functions/nia/index.js](C:/Users/User.admin/Documents/Personal/FinanzasPlus/functions/nia/index.js:1); no uses el `package.json` del frontend como raíz de la Function. Si Appwrite no permite seleccionar una subcarpeta en tu integración GitHub, usa el archivo [functions/nia.tar.gz](C:/Users/User.admin/Documents/Personal/FinanzasPlus/functions/nia.tar.gz), que contiene `index.js`, `package.json` y `README.md` en la raíz del archivo.
+4. Genera el paquete de la Function desde la raíz del repositorio y súbelo como código de la Function (carga manual de un archivo `tar.gz`), con `index.js` como punto de entrada:
+
+   ```bash
+   npm install
+   npm run package:nia
+   ```
+
+   El comando compila `functions/nia/index.js` con Vite para Node.js 16, deja el resultado en `dist-nia/` y escribe `functions/nia.tar.gz`, que contiene solo `index.js` y `package.json` en la raíz del archivo. El `package.json` generado conserva `undici` como dependencia externa con la versión exacta fijada en `functions/nia/package.json`; Appwrite la instala durante el build. El script falla si el resultado usa APIs que Node.js 16 no tiene (`findLast`, `toSorted`, `structuredClone`, entre otras). Tanto `dist-nia/` como `functions/*.tar.gz` están ignorados por Git. Vuelve a ejecutar el comando y a subir el archivo cada vez que cambie el código de Nia. No uses el `package.json` del frontend como raíz de la Function.
 5. Agrega estas variables en la Function (no en el frontend):
 
 ```env

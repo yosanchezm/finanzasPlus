@@ -109,6 +109,18 @@ docker exec edge-traefik wget -S -O- \
 
 Seleccionar el deployment anterior en Dokploy y redesplegar. DNS y edge-traefik no cambian.
 
+## 8. Nia se despliega por separado
+
+La imagen web no usa `functions/`: el `.dockerignore` excluye `functions`, `scripts`, `docs` y `dist-nia` del contexto de build. En cambio, `packages/` (código compartido que importa la web) debe seguir dentro del contexto, así que no lo agregues al `.dockerignore`.
+
+Nia es una Appwrite Function y no pasa por Dokploy. Para desplegarla o actualizarla, genera el paquete y súbelo en la consola de Appwrite como se describe en la sección 5 de [setup.md](setup.md):
+
+```bash
+npm run package:nia
+```
+
+El archivo resultante es `functions/nia.tar.gz` (ignorado por Git). Para poder volver a una versión anterior de Nia, conserva una copia del `tar.gz` antes de reemplazarlo y vuelve a subirla.
+
 ## Verificación local
 
 ```bash
