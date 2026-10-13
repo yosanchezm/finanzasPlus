@@ -19,3 +19,10 @@ export const makeEvent = (id, kind, effectiveOn, amountMinor, payload = {}) => (
 });
 
 export const makePayment = (id, effectiveOn, amountMinor = INSTALLMENT) => makeEvent(id, 'payment', effectiveOn, amountMinor);
+
+// The spec's reference loan: 10,000,000 at 24% EA over 36 months with a 10,000 fee per installment.
+// First installment 390,381 = principal 199,505 + interest 180,876 + fee 10,000 (cost 190,876).
+export const makeBigLoan = () => makeDebt({ principalMinor: 10000000 }, {
+  principalMinor: 10000000, n: 36,
+  charges: [{ id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 10000, cadence: 'per_installment' }],
+});

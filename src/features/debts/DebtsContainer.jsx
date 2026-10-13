@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { dateInputValue } from '../../shared/lib/dates';
 import { readableError } from '../../shared/lib/errors';
-import DebtDetail from './DebtDetail';
+import DebtDetailContainer from './DebtDetailContainer';
 import DebtsView from './DebtsView';
-import { buildDebtDetail } from './debtDetailModel';
 import { buildDebtList } from './debtViewModel';
+import { defaultNonce } from './nonce';
 import { saveLoan } from './saveLoan';
 import { useDebtData } from './useDebtData';
 import DebtWizard from './wizard/DebtWizard';
 
 const IDLE = { status: 'idle', error: null };
-
-// Short, lowercase and alphanumeric: it is embedded in Appwrite row ids (`db{nonce}`).
-const defaultNonce = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, '').slice(0, 20).toLowerCase();
 
 /**
  * Data container for the Deudas section: loads and projects debts, and owns the create handler.
@@ -25,7 +22,6 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
   const [creating, setCreating] = useState(null); // { nonce, signature } of the last attempt
   const [saveState, setSaveState] = useState(IDLE);
   const [openId, setOpenId] = useState(null);
-  const [repairNotice, setRepairNotice] = useState(null);
 
   const storedScope = (scope) => (scope === 'shared' ? 'shared' : scope === 'you' ? currentOwnerScope : currentOwnerScope === 'you' ? 'partner' : 'you');
 
@@ -54,33 +50,21 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
   };
 
   const openDebt = data.status === 'ready' ? data.debts.find((debt) => debt.$id === openId) : undefined;
-  const detail = useMemo(() => {
-    if (!openDebt) return undefined;
-    try {
-      return buildDebtDetail({ debt: openDebt, events: data.events.filter((event) => event.debtId === openDebt.$id), asOf: dateInputValue() });
-    } catch {
-      return null; // unreadable terms: the detail says so instead of showing guesses
-    }
-  }, [openDebt, data.events]);
-
-  // Reconcile on read (AD8): repair this debt's cost rows once per opening; a failure never blocks the screen.
-  const reconcileId = openDebt?.$id;
-  useEffect(() => {
-    if (!reconcileId) return undefined;
-    let cancelled = false;
-    setRepairNotice(null);
-    data.reconcileCosts(reconcileId).then((result) => {
-      if (cancelled || result.created + result.updated + result.removed === 0) return;
-      onNotify?.('Se actualizaron los costos financieros de esta deuda.');
-      Promise.resolve(onRefresh?.()).catch(() => {});
-    }).catch(() => {
-      if (!cancelled) setRepairNotice('No se pudieron verificar los costos financieros de esta deuda. Puedes seguir usando esta pantalla.');
-    });
-    return () => { cancelled = true; };
-  }, [reconcileId]);
-
   if (openDebt) {
-    return <DebtDetail debt={openDebt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={() => setOpenId(null)} />;
+    return (
+      <DebtDetailContainer
+        debt={openDebt}
+        events={data.events}
+        reconcileCosts={data.reconcileCosts}
+        reload={data.reload}
+        currentOwnerScope={currentOwnerScope}
+        user={user}
+        onBack={() => setOpenId(null)}
+        onRefresh={onRefresh}
+        onNotify={onNotify}
+        createNonce={createNonce}
+      />
+    );
   }
 
   const list = data.status === 'ready'
