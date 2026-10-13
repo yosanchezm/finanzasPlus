@@ -333,3 +333,63 @@ Test summary: 48 tests written (11 + 5 + 15 + 17), 48 passing; core suite 18 fil
 ### Notes
 - Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
 - Pre-existing jsdom flakiness persists under load (first full run: 2 timeouts; rerun: 514/514).
+
+## Batch 7: S4 (schema, data layer, alias) - COMPLETE except owner-gated items (OA-2, OA-3)
+
+Branch `feat/debt-s4-schema-data` (stacked on `feat/debt-s3b2-advice`). Three work-unit commits, each green on its own (tests + implementation + docs together):
+- `060a61e feat(appwrite): add additive debt schema to the migration script` (299 lines: 297 added / 2 deleted; includes the `docs/setup.md` update)
+- `a0a5978 feat(web): add @finance-core alias for the debt core` (53 lines)
+- `b9cc35f feat(web): add debt data layer and commitPlan port to the Appwrite client` (476 lines)
+
+Size: 828 changed lines summed over the three commits (826 added / 2 deleted, 8 files: `src/appwrite.js` 140, `vite.config.js` 5, `debt-schema.mjs` 85 plus migrate edits, tests 580, docs 16). The forecast was about 450 and the owner ceiling is 2,000, so the unit is well inside it. It is about 28 lines over one 800-line PR, so two stacked PRs are proposed:
+
+| PR sub-branch (proposed) | Commits | Lines |
+|---|---|---|
+| `feat/debt-s4a-schema-alias` | `060a61e`, `a0a5978` | 352 |
+| `feat/debt-s4b-data-layer` | `b9cc35f` | 476 |
+
+No live Appwrite access of any kind happened: `npm run migrate:appwrite` and `scripts/migrate-appwrite.mjs` were never executed (only `node --check` for syntax and static source reads in tests), the spike script was never run, no network calls, `.env` never read.
+
+### Tasks
+- [x] S4.1 Spike prep: SDK method availability confirmed by reading `node_modules/appwrite/types/services/tables-db.d.ts` (appwrite 26.2.0): `TablesDB.createTransaction({ttl})`, `getTransaction`, `updateTransaction({transactionId, commit, rollback})`, `deleteTransaction`, `createOperations({transactionId, operations})`, and `transactionId` on `createRow`/`getRow`/`listRows`. `scripts/spike-transactions.mjs` written (REST with an API key, because the web SDK `Client` has no `setKey`), checked with `node --check` only. It is **untracked and not committed** (stays local for the owner). Safety: it refuses to run unless `SPIKE_DATABASE_ID` starts with `scratch`, differs from `VITE_APPWRITE_DATABASE_ID`/`finanzas_plus`, and `SPIKE_CONFIRM_SCRATCH=yes` is set; all connection settings are explicit `SPIKE_*` variables. It checks: commit of two creates, a duplicate unique key rejecting the whole commit, no partial row after the rollback, and row-level team read permission on a committed row. It prints PASS / FAIL / INCONCLUSIVE.
+- [ ] S4.2 **PENDING owner action OA-2** (not run). **Decision recorded: the sequential idempotent fallback is adopted for now** (unique `dedupeKey` on `debt_events`, deterministic cost-row id `dc{eventId}`, 409 = already done, reconcile on read). S5+ are not blocked. If the owner later runs the spike and records PASS in `openspec/changes/debt-management/spike-transactions.md`, S4.8-S4.9 can be implemented in a follow-up.
+- [x] S4.3 RED `scripts/lib/debt-schema.test.js` (suite failed: `debt-schema.mjs` missing)
+- [x] S4.4 GREEN `scripts/lib/debt-schema.mjs` (`DEBT_TABLES`, `TRANSACTIONS_DEBT_PATCH`, `withDebtSchema`); `scripts/migrate-appwrite.mjs` renames its literal list to `baseTables` and builds `tables = withDebtSchema(baseTables, team)`; the create-only `ensure*` loops are untouched
+- [x] S4.5 RED `src/appwrite.test.js` (24 new tests; all 24 failed first: functions missing; the 10 existing tests stayed green)
+- [x] S4.6 GREEN `src/appwrite.js` additions: `TABLES.debts/debtEvents`, `permissions.debtRow/debtEventRow/costRow`, `listDebts`, `listDebtEvents(debtId?)`, `createDebt`, `createDebtEvent`, `findDebtEventByDedupe`, `createCostRow`, `updateCostRow`, `deleteCostRow`, `listCostRows`, `ensureCostCategory`, `debtPort()`
+- [x] S4.7 RED then GREEN `src/test/financeCoreAlias.test.js` (suite failed to resolve `@finance-core`), then the `vite.config.js` alias
+- [ ] S4.8 SKIPPED: fallback adopted pending OA-2
+- [ ] S4.9 SKIPPED: fallback adopted pending OA-2
+- [x] S4.10 Docs (neutral Spanish) in `docs/setup.md` section 3: table count updated (eleven) and a new subsection "Actualizar una base existente (gestión de deudas)": additive change, re-run `npm run migrate:appwrite` before deploying S4 or later, try it twice on a dev database first, the second run creates nothing, tables may stay unused on rollback. Matches OA-3.
+- [x] S4.11 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint (see above)
+
+### TDD Cycle Evidence
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| S4.3/S4.4 | `scripts/lib/debt-schema.test.js` | Unit + static source checks (node env; `node --check` of the migrate script via `execFileSync`, never executed) | `scripts/` suite 23/23 before touching `migrate-appwrite.mjs` (it has no tests of its own) | Written first; suite failed to import `debt-schema.mjs` | 17/17 passed | Exact column shape (type, size, required) of both tables, both index sets incl. the unique `by_dedupe`, permissions as actions (events have no update/delete), index columns exist, size budgets, transactions patch, merge: appended tables with team-qualified permissions and original order, `debtId` merged into transactions with permissions untouched, input not mutated, second merge refused, collisions on column/index refused, missing `transactions` refused, migrate source imports the schema and keeps the create-only loops, no `DELETE`, new table ids absent from the script's own ids | None needed (the merge helper was written pure from the start so the script itself stays trivial) |
+| S4.5/S4.6 | `src/appwrite.test.js` | Unit (`vi.mock('appwrite')`) + contract test against the real core | 10/10 existing tests before editing | Written first; 24/24 new tests failed (exports missing) | 34/34 passed first run | Debts/events list queries (with and without `debtId`), permissions per row type (debt read+update, event read only, cost row read+update+delete), id passthrough and generated ids differ, 409 surfaced and non-409 errors unchanged, `deleteCostRow` 404 vs 500, `findDebtEventByDedupe` hit and miss, category: folded-name hit (case, accents, spaces), create with `cf{householdId}` and exact data, 36-char cap, 409 re-read ok and 409 unexplained, other errors; `debtPort()` keys, plus `planCommit` then `commitPlan` over the mocked SDK: write order category, event, `dc{eventId}` with permissions, retry with both 409s returns the stored event and `duplicate: true`, void deletes `dcev1` and tolerates 404 | None needed |
+| S4.7 | `src/test/financeCoreAlias.test.js` | Unit (node env) + config resolution | `src/appwrite.test.js` 10/10 | Written first; suite failed to resolve `@finance-core` | 4/4 passed | Barrel identity through alias vs relative path (same function object, same key list), real core code through the alias (`rateLabel`, a 12-row 0% schedule), `resolveConfig` shows the alias for build mode pointing at `packages/finance-core`, `.dockerignore` has no `packages` pattern. One-off proof outside the repo: a Vite lib build of a file importing `@finance-core` bundled the core | None needed |
+
+Test summary: 45 tests written (17 + 24 + 4), 45 passing; full suite 52 files / 559 tests passing (S3b baseline 50 files / 514; the first full run showed 2 unrelated jsdom timeouts under load, the rerun was clean 559/559, the same pre-existing flakiness). Pure functions created: 1 (`withDebtSchema`) plus the `foldName` and `hasStatus` helpers.
+
+### Work Unit Evidence
+| Evidence | Value |
+|---|---|
+| Focused test | `npx vitest run scripts/lib/debt-schema.test.js src/appwrite.test.js src/test/financeCoreAlias.test.js`: exit 0, 3 files, 55 tests passed (17 + 34 + 4) |
+| Runtime harness | Owner-side (OA-3, not run here by rule): `npm run migrate:appwrite` twice on a dev database, the second run must create nothing. Local stand-ins: `node --check scripts/migrate-appwrite.mjs` ok; the schema merge is exercised on fixtures; the real `planCommit` then `commitPlan` flow runs over the mocked SDK; a Vite build resolved the alias. `npm test` exit 0 (52 files, 559 tests, second run); `npm run build` exit 0 (built in 3.3s) |
+| Rollback boundary | Revert the three commits: delete `scripts/lib/debt-schema.mjs` and its test, revert `scripts/migrate-appwrite.mjs` (import, `baseTables` rename, `withDebtSchema` call), the `docs/setup.md` additions, the `vite.config.js` alias, `src/test/financeCoreAlias.test.js`, the debt block appended to `src/appwrite.js` plus the `TABLES`/`permissions` entries, and the new tests in `src/appwrite.test.js`. Appwrite tables already created by OA-3 may stay unused. |
+
+### Deviations and decisions
+- **`withDebtSchema` instead of bare data.** The task says `debt-schema.mjs` is plain data. It exports plain data (`DEBT_TABLES`, `TRANSACTIONS_DEBT_PATCH`) plus one small pure helper, `withDebtSchema(tables, team)`, so the merge (append tables, qualify permissions, extend `transactions`, refuse collisions) is unit-tested without importing `migrate-appwrite.mjs` (it runs on import and calls `process.exit`). The helper has no dependency on migrate's own helper functions.
+- **Table permissions are bare actions in the schema** (`['read','create','update']`); the script qualifies them with the household team. Index `orders` are `[]`, as for the script's existing unordered indexes.
+- **`ensureCostCategory` id** is `cf{householdId}` cut to 36 characters (Appwrite's id limit), so a long household id still yields a valid, deterministic id. Color `#7A5AF8` (palette purple), icon `receipt` (an existing key), kind `need`; hardcoded in `appwrite.js` to avoid importing `lucide-react` through `shared/lib/categories.js`.
+- **Event and cost-row functions take `{ id, data }`** (the shape `planCommit` produces) and return the stored row, so `debtPort()` is a direct match for `commitPlan` with no adapter. `createDebt` takes the same shape (id optional, falls back to `ID.unique()`).
+- **No ordering queries** on `listDebts`/`listDebtEvents`: `project()` sorts events itself and cursor pagination over a non-unique ordering is avoided. `findDebtEventByDedupe` also filters by `householdId`.
+- **`updateCostRow`/`deleteCostRow`** delegate to the existing `updateTransaction`/`deleteTransaction`; the new row permissions come from `permissions.costRow` (team read, update, delete), one more key on the exported `permissions` object (additive; existing keys unchanged).
+- **Spike over REST.** The web SDK `Client` cannot carry an API key, so the spike script calls the same Transactions endpoints (`/tablesdb/transactions`, `/operations`, PATCH `commit`) with `X-Appwrite-Key`; the SDK surface was confirmed from the type definitions only. Endpoint shapes are unverified against a live server, which is what the spike is for (a wrong path would surface as INCONCLUSIVE, not as a false PASS).
+- **Alias** maps `@finance-core` to the directory `packages/finance-core` (the bare import resolves its `index.js`; deep imports like `@finance-core/src/x.js` also work). Nia keeps using relative imports (AD3).
+- S4.2, S4.8 and S4.9 stay unchecked in `tasks.md` on purpose (owner action pending / skipped), so S4 is code-complete but not "all boxes ticked".
+
+### Notes
+- Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
+- Owner actions: OA-2 (run the spike on a scratch database, record the result) and OA-3 (run the migration twice on a dev database, then on live, before deploying S5+) remain open.
