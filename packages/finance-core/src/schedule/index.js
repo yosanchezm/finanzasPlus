@@ -1,4 +1,5 @@
-import { isIsoDate, periodDates } from '../calendar.js';
+import { PERIODICITIES, isIsoDate, periodDates } from '../calendar.js';
+import { evaluateCharges } from '../charges.js';
 import { ValidationError } from '../errors.js';
 import { periodicRate } from '../rates.js';
 import { validateTerms } from '../terms.js';
@@ -7,6 +8,7 @@ import { buildFrench } from './french.js';
 import { buildGerman } from './german.js';
 import { buildInterestOnly } from './interestOnly.js';
 import { buildManual } from './manual.js';
+import { withCharges } from './row.js';
 
 const BUILDERS = {
   french: buildFrench,
@@ -17,6 +19,26 @@ const BUILDERS = {
 };
 
 const invalidOption = (message) => new ValidationError('invalid_option', message);
+
+/** Due dates of periods fromPeriod..n; manual plans carry their own dates. */
+function dueDates(terms, fromPeriod, startDate) {
+  if (terms.system === 'manual') return terms.manualPlan.slice(fromPeriod - 1).map(([dueOn]) => dueOn);
+  if (startDate !== undefined) return periodDates(startDate, terms.periodicity, terms.n - fromPeriod + 1, terms.dueDay);
+  return periodDates(terms.firstDueOn, terms.periodicity, terms.n, terms.dueDay).slice(fromPeriod - 1);
+}
+
+/** Layers the terms' charges over amortization rows; principal is left untouched. */
+function addCharges(rows, terms) {
+  const shared = {
+    originalMinor: terms.principalMinor,
+    periodsPerYear: PERIODICITIES[terms.periodicity].perYear,
+    unit: terms.roundingUnit,
+  };
+  return rows.map((row) => {
+    const { period, openingMinor, installmentMinor } = row;
+    return withCharges(row, evaluateCharges(terms.charges, { ...shared, period, openingMinor, installmentMinor }));
+  });
+}
 
 /**
  * Generates the amortization schedule for the terms. Amounts are integer pesos,
@@ -46,18 +68,44 @@ export function buildSchedule(terms, options = {}) {
   if (startDate !== undefined && !isIsoDate(startDate)) {
     throw invalidOption(`startDate must be a real YYYY-MM-DD date, got ${String(startDate)}`);
   }
-  const count = normalized.n - fromPeriod + 1;
-  let dates;
-  if (normalized.system === 'manual') dates = normalized.manualPlan.slice(fromPeriod - 1).map(([dueOn]) => dueOn);
-  else if (startDate === undefined) {
-    dates = periodDates(normalized.firstDueOn, normalized.periodicity, normalized.n, normalized.dueDay).slice(fromPeriod - 1);
-  } else dates = periodDates(startDate, normalized.periodicity, count, normalized.dueDay);
-  return BUILDERS[normalized.system]({
+  const rows = BUILDERS[normalized.system]({
     terms: normalized,
     i: periodicRate(normalized.rate, normalized.periodicity),
     unit: normalized.roundingUnit,
     balance: balanceMinor,
     fromPeriod,
-    dates,
+    dates: dueDates(normalized, fromPeriod, startDate),
   });
+  return normalized.charges.length === 0 ? rows : addCharges(rows, normalized);
+}
+
+/**
+ * Totals of a schedule, with principal kept apart from the cost of the debt.
+ * Installments are principal + interest, so `totalDueMinor` equals principal +
+ * interest + charges + taxes exactly.
+ * @param {object[]} rows ScheduleRow[]
+ * @returns {{ count: number, principalMinor: number, interestMinor: number, chargesMinor: number,
+ *   taxesMinor: number, installmentsMinor: number, totalDueMinor: number, costMinor: number }}
+ */
+export function summarizeSchedule(rows) {
+  const totals = {
+    count: rows.length,
+    principalMinor: 0,
+    interestMinor: 0,
+    chargesMinor: 0,
+    taxesMinor: 0,
+    installmentsMinor: 0,
+    totalDueMinor: 0,
+    costMinor: 0,
+  };
+  for (const row of rows) {
+    totals.principalMinor += row.principalMinor;
+    totals.interestMinor += row.interestMinor;
+    totals.chargesMinor += row.chargesMinor;
+    totals.taxesMinor += row.taxesMinor;
+    totals.installmentsMinor += row.installmentMinor;
+    totals.totalDueMinor += row.totalDueMinor;
+    totals.costMinor += row.costMinor;
+  }
+  return totals;
 }

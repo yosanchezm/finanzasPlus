@@ -42,3 +42,21 @@ export function makeRow(period, dueOn, openingMinor, interestMinor, principalMin
     closingMinor: openingMinor - principalMinor,
   };
 }
+
+/**
+ * Returns the row with its charges applied. `costMinor` is the cost of the
+ * period (interest accrued, charges and taxes); principal is never a cost.
+ * @param {object} row ScheduleRow
+ * @param {{ lines: object[], chargesMinor: number, taxesMinor: number }} evaluation
+ * @returns {object} ScheduleRow
+ */
+export function withCharges(row, { lines, chargesMinor, taxesMinor }) {
+  return {
+    ...row,
+    charges: lines,
+    chargesMinor,
+    taxesMinor,
+    totalDueMinor: row.installmentMinor + chargesMinor + taxesMinor,
+    costMinor: row.interestMinor + chargesMinor + taxesMinor,
+  };
+}

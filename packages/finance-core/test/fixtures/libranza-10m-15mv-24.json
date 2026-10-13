@@ -1,0 +1,63 @@
+{
+  "label": "Libranza 10,000,000 COP at 1.5% MV over 24 installments with life insurance, an administration fee, IVA on the fee and GMF",
+  "provenance": "Independently computed with floating-point arithmetic (round half away from zero per component). Not a bank statement: owner action OA-6 (real statements) is still open.",
+  "terms": {
+    "kind": "libranza",
+    "principalMinor": 10000000,
+    "openedOn": "2026-01-15",
+    "rate": { "value": 1.5, "basis": "effective", "periodicity": "monthly", "timing": "arrears" },
+    "system": "french",
+    "periodicity": "monthly",
+    "n": 24,
+    "firstDueOn": "2026-02-15",
+    "charges": [
+      { "id": "life", "kind": "insurance", "label": "Seguro de vida", "basis": "pctOutstanding", "value": 0.05 },
+      { "id": "fee", "kind": "fee", "label": "Administracion", "basis": "fixed", "value": 10000 },
+      { "id": "iva", "kind": "tax", "label": "IVA", "basis": "pctOfCharge", "refId": "fee", "value": 19 },
+      { "id": "gmf", "kind": "tax", "label": "GMF", "basis": "pctOfSubtotal", "value": 0.4 }
+    ]
+  },
+  "rows": {
+    "1": {
+      "openingMinor": 10000000,
+      "interestMinor": 150000,
+      "principalMinor": 349241,
+      "installmentMinor": 499241,
+      "lines": { "life": 5000, "fee": 10000, "iva": 1900, "gmf": 2065 },
+      "chargesMinor": 15000,
+      "taxesMinor": 3965,
+      "totalDueMinor": 518206,
+      "closingMinor": 9650759
+    },
+    "2": {
+      "openingMinor": 9650759,
+      "interestMinor": 144761,
+      "principalMinor": 354480,
+      "installmentMinor": 499241,
+      "lines": { "life": 4825, "fee": 10000, "iva": 1900, "gmf": 2064 },
+      "chargesMinor": 14825,
+      "taxesMinor": 3964,
+      "totalDueMinor": 518030,
+      "closingMinor": 9296279
+    },
+    "24": {
+      "openingMinor": 491862,
+      "interestMinor": 7378,
+      "principalMinor": 491862,
+      "installmentMinor": 499240,
+      "lines": { "life": 246, "fee": 10000, "iva": 1900, "gmf": 2046 },
+      "chargesMinor": 10246,
+      "taxesMinor": 3946,
+      "totalDueMinor": 513432,
+      "closingMinor": 0
+    }
+  },
+  "totals": {
+    "principalMinor": 10000000,
+    "interestMinor": 1981783,
+    "chargesMinor": 306058,
+    "taxesMinor": 94933,
+    "installmentsMinor": 11981783,
+    "totalDueMinor": 12382774
+  }
+}

@@ -99,6 +99,7 @@ describe('finance-core sources', () => {
       expect.arrayContaining([
         'index.js',
         'src/calendar.js',
+        'src/charges.js',
         'src/errors.js',
         'src/legal.js',
         'src/money.js',
@@ -150,6 +151,7 @@ describe('public barrel (index.js)', () => {
         'compareIso',
         'convertRate',
         'daysBetween',
+        'evaluateCharges',
         'isIsoDate',
         'ley1555Notice',
         'normalizeRate',
@@ -160,6 +162,7 @@ describe('public barrel (index.js)', () => {
         'roundUnit',
         'serializeTerms',
         'sumMinor',
+        'summarizeSchedule',
         'toEffectiveAnnual',
         'usuryNotice',
         'validateTerms',
