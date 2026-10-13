@@ -5,7 +5,7 @@ import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
 import { makeBigLoan, makeEvent, makePayment } from './debtFixtures';
 
-vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn() }));
+vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn(), findDebtEventByDedupe: vi.fn() }));
 
 const port = { ensureCostCategory: vi.fn(), createEvent: vi.fn(), findEventByDedupe: vi.fn(), createCostRow: vi.fn(), deleteCostRow: vi.fn() };
 const TODAY = '2026-02-05';
@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.debtPort.mockReturnValue(port);
   api.getTransactionsInRange.mockResolvedValue([]);
+  api.findDebtEventByDedupe.mockResolvedValue(null);
   port.ensureCostCategory.mockResolvedValue('cat1');
   port.createEvent.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
   port.createCostRow.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
@@ -118,20 +119,53 @@ describe('DebtDetailContainer payment flow', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('gives an edited draft a new nonce instead of reusing the failed attempt', async () => {
+  const failThenEdit = async (options = {}) => {
     port.createEvent.mockRejectedValueOnce(new Error('sin red'));
-    const createNonce = vi.fn().mockReturnValueOnce('n1').mockReturnValueOnce('n2');
-    const { user } = setup({ createNonce });
-    await openPayment(user);
-    await save(user);
+    const ctx = setup(options);
+    await openPayment(ctx.user);
+    await save(ctx.user);
     await screen.findByText('sin red');
+    await ctx.user.clear(screen.getByLabelText('Monto del pago'));
+    await ctx.user.type(screen.getByLabelText('Monto del pago'), '200000');
+    return ctx;
+  };
 
-    await user.clear(screen.getByLabelText('Monto del pago'));
-    await user.type(screen.getByLabelText('Monto del pago'), '200000');
+  it('gives an edited draft a new nonce once it is known that the failed attempt saved nothing', async () => {
+    const createNonce = vi.fn().mockReturnValueOnce('n1').mockReturnValueOnce('n2');
+    const { user } = await failThenEdit({ createNonce });
     await save(user, 'Reintentar');
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.findDebtEventByDedupe).toHaveBeenCalledWith('web:n1');
     expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.amountMinor])).toEqual([['den1', 390381], ['den2', 200000]]);
+  });
+
+  it('does not write the edited draft when the failed attempt turns out to have been saved', async () => {
+    api.findDebtEventByDedupe.mockResolvedValue({ $id: 'den1', debtId: 'd1', kind: 'payment' });
+    const { user, reload, onRefresh, onNotify } = await failThenEdit();
+    await save(user, 'Reintentar');
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenLastCalledWith('El intento anterior ya se había registrado, así que no se guardó de nuevo. Revisa el historial y registra otro pago si hace falta.');
+  });
+
+  it('keeps the same nonce and writes nothing when it cannot tell whether the failed attempt saved', async () => {
+    api.findDebtEventByDedupe.mockRejectedValueOnce(new Error('timeout'));
+    const createNonce = vi.fn().mockReturnValueOnce('n1').mockReturnValueOnce('n2');
+    const { user } = await failThenEdit({ createNonce });
+    await save(user, 'Reintentar');
+
+    expect(await screen.findByText('No pudimos confirmar si el intento anterior se guardó. Vuelve a intentarlo.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    expect(createNonce).toHaveBeenCalledTimes(1);
+
+    await save(user, 'Reintentar'); // the check works this time and finds nothing
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent.mock.calls.map(([call]) => call.id)).toEqual(['den1', 'den2']);
   });
 });
 

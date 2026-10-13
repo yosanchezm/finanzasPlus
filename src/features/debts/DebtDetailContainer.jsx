@@ -4,6 +4,7 @@ import DebtDetail from './DebtDetail';
 import PaymentDialog from './PaymentDialog';
 import PrepaymentSimulator from './PrepaymentSimulator';
 import VoidDialog from './VoidDialog';
+import { findDebtEventByDedupe } from '../../appwrite';
 import { loadCashflow } from './cashflow';
 import { buildDebtDetail } from './debtDetailModel';
 import { defaultNonce } from './nonce';
@@ -45,12 +46,16 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
   const payment = useCommitDialog({
     ...flow,
     successMessage: (draft) => (draft.kind === 'extra_payment' ? 'Abono registrado.' : 'Pago registrado.'),
+    alreadySaved: 'El intento anterior ya se había registrado, así que no se guardó de nuevo. Revisa el historial y registra otro pago si hace falta.',
+    findSaved: ({ nonce }) => findDebtEventByDedupe(`web:${nonce}`),
     save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
   });
 
   const voiding = useCommitDialog({
     ...flow,
     successMessage: () => 'Pago anulado.',
+    alreadySaved: 'La anulación ya se había registrado, así que no se guardó de nuevo.',
+    findSaved: ({ context }) => findDebtEventByDedupe(`void:${context.id}`),
     save: ({ input, nonce, context }) => saveDebtEvent({ debt, events, draft: { kind: 'void', effectiveOn: today, targetEventId: context.id, reason: input.reason }, nonce, actorId: user.$id, today }),
   });
 
