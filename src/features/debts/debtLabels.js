@@ -17,8 +17,11 @@ export const kindInfo = (kind) => DEBT_KINDS.find((item) => item.value === kind)
 
 const percent = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 });
 
+/** 28,32 for 28.32 (es-CO decimals, at most two). */
+export const formatDecimal = (value) => percent.format(value);
+
 /** "28,32 % E.A." or "Sin intereses". */
-export const formatEa = (eaPercent) => (eaPercent > 0 ? `${percent.format(eaPercent)} % E.A.` : 'Sin intereses');
+export const formatEa = (eaPercent) => (eaPercent > 0 ? `${formatDecimal(eaPercent)} % E.A.` : 'Sin intereses');
 
 /** Short date ("5 nov") of a stored YYYY-MM-DD, free of time-zone drift. */
 export const formatDueDate = (isoDate) => formatDate(`${isoDate}T12:00:00`);

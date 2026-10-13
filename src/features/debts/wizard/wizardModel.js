@@ -120,7 +120,7 @@ export function conventionOf(rate) {
   return NAMED_CONVENTIONS.find((name) => ['basis', 'periodicity', 'timing'].every((key) => CONVENTIONS[name][key] === rate[key])) ?? 'custom';
 }
 
-function describeRate(rate) {
+export function describeRate(rate) {
   if (conventionOf(rate) !== 'custom') return rateLabel(rate);
   const kind = rate.basis === 'nominal' ? 'nominal' : 'efectiva';
   return `${trimmed(rate.value)}% ${kind} ${PERIODICITY_ADJECTIVES[rate.periodicity]}${rate.timing === 'advance' ? ' anticipada' : ''} ≈ ${toEffectiveAnnual(rate).toFixed(2)}% EA`;
@@ -157,12 +157,12 @@ const GENERIC_ISSUE = { step: 'plan', message: 'Revisa el número de cuotas y la
 
 function missingFields(state) {
   const issues = [];
-  if (!state.name.trim()) issues.push({ step: 'basics', message: 'Escribe un nombre para la deuda.' });
-  if (!String(state.principal).trim()) issues.push({ step: 'basics', message: 'Escribe el monto del préstamo.' });
-  if (String(state.rate.value).trim() === '') issues.push({ step: 'rate', message: 'Escribe la tasa de interés (0 si no cobra intereses).' });
+  if (!state.name.trim()) issues.push({ step: 'basics', message: 'Escribe un nombre para la deuda.', missing: true });
+  if (!String(state.principal).trim()) issues.push({ step: 'basics', message: 'Escribe el monto del préstamo.', missing: true });
+  if (String(state.rate.value).trim() === '') issues.push({ step: 'rate', message: 'Escribe la tasa de interés (0 si no cobra intereses).', missing: true });
   for (const preset of CHARGE_PRESETS) {
     if (preset.key in state.charges && !String(state.charges[preset.key]).trim()) {
-      issues.push({ step: 'charges', message: `Escribe el valor de “${preset.label}” o quítalo.` });
+      issues.push({ step: 'charges', message: `Escribe el valor de “${preset.label}” o quítalo.`, missing: true });
     }
   }
   return issues;
@@ -175,15 +175,17 @@ function missingFields(state) {
  */
 export function evaluate(state) {
   const issues = missingFields(state);
-  if (issues.length) return { issues };
   try {
     const terms = toTerms(state);
+    if (issues.length) return { issues };
     const schedule = terms.system === 'none' ? [] : buildSchedule(terms);
     const summary = schedule.length ? { ...summarizeSchedule(schedule), firstDueOn: schedule[0].dueOn, firstDueMinor: schedule[0].totalDueMinor } : null;
     const notices = [usuryNotice(terms.rate, usuryModality(terms.kind), terms.openedOn), ley1555Notice(terms, terms.openedOn)].filter(Boolean);
     return { issues: [], terms, summary, notices };
   } catch (error) {
     const [step, message] = CORE_ISSUES[error?.code] ?? [];
-    return { issues: [message ? { step, message } : GENERIC_ISSUE] };
+    const found = message ? { step, message } : GENERIC_ISSUE;
+    // A field that is still empty explains its own step better than the core's complaint about it.
+    return { issues: issues.some((issue) => issue.step === found.step) ? issues : [...issues, found] };
   }
 }
