@@ -1,4 +1,5 @@
 import { roundUnit } from '../money.js';
+import { buildGraceRows } from './grace.js';
 import { interestFor, makeRow } from './row.js';
 
 /**
@@ -11,20 +12,23 @@ import { interestFor, makeRow } from './row.js';
 export const levelPayment = (balance, i, count) => (i === 0 ? balance / count : (balance * i) / (1 - (1 + i) ** -count));
 
 /**
- * French system: a fixed installment (principal + interest) every period; the
- * last row absorbs the rounding residue.
- * @param {{ balance: number, i: number, unit: number, dates: string[], fromPeriod: number }} ctx
+ * French system: after any grace, a fixed installment (principal + interest)
+ * every period; the last row absorbs the rounding residue.
+ * @param {{ terms: object, balance: number, i: number, unit: number, dates: string[], fromPeriod: number }} ctx
  * @returns {object[]} ScheduleRow[]
  */
-export function buildFrench({ balance, i, unit, dates, fromPeriod }) {
-  const count = dates.length;
-  const installment = roundUnit(levelPayment(balance, i, count), unit);
-  const rows = [];
-  let opening = balance;
+export function buildFrench(ctx) {
+  const { i, unit, dates, fromPeriod } = ctx;
+  const grace = buildGraceRows(ctx);
+  const count = dates.length - grace.consumed;
+  const installment = roundUnit(levelPayment(grace.balance, i, count), unit);
+  const rows = grace.rows;
+  let opening = grace.balance;
   for (let index = 0; index < count; index += 1) {
+    const at = grace.consumed + index;
     const interest = interestFor(opening, i, unit);
     const principal = index === count - 1 ? opening : Math.min(Math.max(installment - interest, 0), opening);
-    rows.push(makeRow(fromPeriod + index, dates[index], opening, interest, principal));
+    rows.push(makeRow(fromPeriod + at, dates[at], opening, interest, principal));
     opening -= principal;
   }
   return rows;

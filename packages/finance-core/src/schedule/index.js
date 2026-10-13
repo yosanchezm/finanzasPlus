@@ -2,9 +2,19 @@ import { isIsoDate, periodDates } from '../calendar.js';
 import { ValidationError } from '../errors.js';
 import { periodicRate } from '../rates.js';
 import { validateTerms } from '../terms.js';
+import { buildBullet } from './bullet.js';
 import { buildFrench } from './french.js';
+import { buildGerman } from './german.js';
+import { buildInterestOnly } from './interestOnly.js';
+import { buildManual } from './manual.js';
 
-const BUILDERS = { french: buildFrench };
+const BUILDERS = {
+  french: buildFrench,
+  german: buildGerman,
+  bullet: buildBullet,
+  interest_only: buildInterestOnly,
+  manual: buildManual,
+};
 
 const invalidOption = (message) => new ValidationError('invalid_option', message);
 
@@ -17,7 +27,8 @@ const invalidOption = (message) => new ValidationError('invalid_option', message
  * payment) on the original calendar:
  * - `fromPeriod`: number of the first row to generate (default 1).
  * - `balanceMinor`: opening balance of that row (default `terms.principalMinor`).
- * - `startDate`: due date of that row (default: the original calendar's date).
+ * - `startDate`: due date of that row (default: the original calendar's date);
+ *   ignored for manual plans, whose dates are explicit.
  * @param {object} terms DebtTerms; validated here.
  * @param {{ fromPeriod?: number, balanceMinor?: number, startDate?: string }} [options]
  * @returns {object[]} ScheduleRow[]; empty for a balance-only (`system: 'none'`) debt.
@@ -35,15 +46,13 @@ export function buildSchedule(terms, options = {}) {
   if (startDate !== undefined && !isIsoDate(startDate)) {
     throw invalidOption(`startDate must be a real YYYY-MM-DD date, got ${String(startDate)}`);
   }
-  const build = BUILDERS[normalized.system];
-  if (!build) throw new ValidationError('unsupported_system', `no schedule builder for ${normalized.system}`);
-
   const count = normalized.n - fromPeriod + 1;
-  const dates =
-    startDate === undefined
-      ? periodDates(normalized.firstDueOn, normalized.periodicity, normalized.n, normalized.dueDay).slice(fromPeriod - 1)
-      : periodDates(startDate, normalized.periodicity, count, normalized.dueDay);
-  return build({
+  let dates;
+  if (normalized.system === 'manual') dates = normalized.manualPlan.slice(fromPeriod - 1).map(([dueOn]) => dueOn);
+  else if (startDate === undefined) {
+    dates = periodDates(normalized.firstDueOn, normalized.periodicity, normalized.n, normalized.dueDay).slice(fromPeriod - 1);
+  } else dates = periodDates(startDate, normalized.periodicity, count, normalized.dueDay);
+  return BUILDERS[normalized.system]({
     terms: normalized,
     i: periodicRate(normalized.rate, normalized.periodicity),
     unit: normalized.roundingUnit,
