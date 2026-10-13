@@ -4,6 +4,8 @@ node_modules
 **/node_modules
 dist
 **/dist
+dist-nia
+**/dist-nia
 .env
 .env.*
 **/.env

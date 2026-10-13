@@ -1,0 +1,11 @@
+{
+  "name": "finanzas-plus-nia",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "undici": "5.28.5"
+  }
+}

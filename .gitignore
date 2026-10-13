@@ -7,3 +7,6 @@ dist/
 
 # Manual deployment packages for the Nia function.
 functions/*.tar.gz
+
+# Output of `npm run package:nia` (bundle staged before it is archived).
+dist-nia/
