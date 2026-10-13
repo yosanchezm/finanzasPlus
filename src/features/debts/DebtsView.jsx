@@ -33,7 +33,7 @@ function LoadingBlock() {
 }
 
 /** Presentational list of debts with totals; loading, failure and empty states included. */
-export default function DebtsView({ status, items, totals, currentOwnerScope, scopeControl, onAdd, onRetry }) {
+export default function DebtsView({ status, items, totals, currentOwnerScope, scopeControl, onAdd, onOpen, onRetry }) {
   const actions = (scopeControl || onAdd) && (
     <>
       {scopeControl}
@@ -53,7 +53,7 @@ export default function DebtsView({ status, items, totals, currentOwnerScope, sc
       <>
         <Totals totals={totals} />
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-4">
-          {items.map((item) => <DebtCard key={item.id} item={item} currentOwnerScope={currentOwnerScope} />)}
+          {items.map((item) => <DebtCard key={item.id} item={item} currentOwnerScope={currentOwnerScope} onOpen={onOpen} />)}
         </div>
       </>
     );

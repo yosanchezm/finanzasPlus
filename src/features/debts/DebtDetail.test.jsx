@@ -1,0 +1,82 @@
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import DebtDetail from './DebtDetail';
+import { buildDebtDetail } from './debtDetailModel';
+import { makeDebt, makeEvent, makePayment } from './debtFixtures';
+
+const DISBURSEMENT = makeEvent('e0', 'disbursement', '2026-01-05', 1000000);
+const THREE_PAYMENTS = [DISBURSEMENT, makePayment('e1', '2026-02-05'), makePayment('e2', '2026-03-05'), makePayment('e3', '2026-04-05')];
+const detailOf = (events, asOf, debt = makeDebt()) => buildDebtDetail({ debt, events, asOf });
+const renderDetail = (props = {}) => {
+  const debt = props.debt ?? makeDebt();
+  return render(<DebtDetail debt={debt} detail={props.detail === undefined ? detailOf(THREE_PAYMENTS, '2026-04-20', debt) : props.detail} currentOwnerScope="you" onBack={vi.fn()} {...props} />);
+};
+
+describe('DebtDetail', () => {
+  it('shows the state, the real cost, the plan and the history of a loan with 3 payments', () => {
+    renderDetail();
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Crédito de consumo' })).toBeInTheDocument();
+    const state = screen.getByRole('region', { name: 'Estado de la deuda' });
+    expect(within(state).getByText(/^\$ 7\d\d\.\d{3}$/)).toBeInTheDocument(); // balance after 3 paid installments
+    expect(within(state).getByText('$ 93.453')).toBeInTheDocument(); // next installment
+    expect(within(state).getByText('5 may')).toBeInTheDocument();
+    expect(within(state).getByText('24 % E.A.')).toBeInTheDocument();
+    expect(within(state).getByText('9')).toBeInTheDocument(); // installments left
+
+    const cost = screen.getByRole('region', { name: 'Costo real del crédito' });
+    expect(within(cost).getByText('Intereses')).toBeInTheDocument();
+    expect(within(cost).getByText('Costo total')).toBeInTheDocument();
+
+    const rows = within(screen.getByRole('table')).getAllByRole('row');
+    expect(rows).toHaveLength(13);
+    expect(within(rows[1]).getByText('Pagada')).toBeInTheDocument();
+    expect(within(rows[4]).getByText('Próxima')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Historial' })).getAllByRole('listitem')).toHaveLength(4);
+  });
+
+  it('calls out an overdue amount', () => {
+    renderDetail({ detail: detailOf([DISBURSEMENT], '2026-03-20') });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tienes $ 186.906 vencidos');
+    expect(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByText('Vencida')).toBeInTheDocument();
+  });
+
+  it('explains a balance-only debt instead of showing an empty plan', () => {
+    const informal = makeDebt({}, { system: 'none', n: undefined, firstDueOn: undefined, periodicity: undefined, rate: { convention: 'ZERO' } });
+    renderDetail({ debt: informal, detail: detailOf([DISBURSEMENT], '2026-02-01', informal) });
+
+    expect(screen.getByText('Esta deuda no tiene plan de cuotas: solo se lleva el saldo.')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('shows the repair notice without hiding anything, and the back action works', async () => {
+    const onBack = vi.fn();
+    renderDetail({ onBack, notice: 'No se pudieron verificar los costos financieros.' });
+
+    expect(screen.getByRole('status')).toHaveTextContent('No se pudieron verificar los costos financieros.');
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Volver a deudas' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers payment and simulation only when the container wires them', async () => {
+    const onPay = vi.fn();
+    const { unmount } = renderDetail();
+    expect(screen.queryByRole('button', { name: 'Registrar pago' })).not.toBeInTheDocument();
+    unmount();
+
+    renderDetail({ onPay, onSimulate: vi.fn() });
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar pago' }));
+    expect(onPay).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Simular abono' })).toBeInTheDocument();
+  });
+
+  it('reports a debt it cannot read', () => {
+    renderDetail({ detail: null });
+
+    expect(screen.getByText('No se pudo leer esta deuda.')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+});

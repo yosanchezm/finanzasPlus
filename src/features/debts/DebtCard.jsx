@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { formatMoney, formatPercent } from '../../shared/lib/format';
 import { Card } from '../../shared/ui/Card';
+import { focusRing } from '../../shared/ui/cn';
 import { Chip, OwnerChip } from '../../shared/ui/Chip';
 import { IconTile } from '../../shared/ui/IconTile';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
@@ -15,17 +16,22 @@ function Fact({ label, children }) {
   );
 }
 
-export default function DebtCard({ item, currentOwnerScope }) {
+/** `onOpen(id)` makes the whole card open the detail (the name is the real, focusable button). */
+export default function DebtCard({ item, currentOwnerScope, onOpen }) {
   const titleId = useId();
   const { label, icon } = kindInfo(item.kind);
   const { nextDue } = item;
 
   return (
-    <Card as="article" aria-labelledby={titleId} className="flex flex-col gap-4">
+    <Card as="article" aria-labelledby={titleId} className={`flex flex-col gap-4 ${onOpen ? 'relative hover:border-border-strong' : ''}`}>
       <div className="flex items-start gap-3">
         <IconTile icon={icon} size={40} className="rounded-[10px]" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h2 id={titleId} className="truncate text-base font-semibold text-ink">{item.name}</h2>
+          <h2 id={titleId} className="truncate text-base font-semibold text-ink">
+            {onOpen ? (
+              <button type="button" onClick={() => onOpen(item.id)} className={`max-w-full truncate rounded-xs text-left after:absolute after:inset-0 after:content-[''] ${focusRing}`}>{item.name}</button>
+            ) : item.name}
+          </h2>
           <span className="truncate text-[13px] text-ink-faint">{item.lender || label}</span>
         </div>
         <OwnerChip ownerScope={item.ownerScope} currentOwnerScope={currentOwnerScope} />

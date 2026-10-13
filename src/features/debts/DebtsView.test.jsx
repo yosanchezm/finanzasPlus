@@ -15,8 +15,8 @@ const ITEMS = [
 const TOTALS = { count: 2, balanceMinor: 9600000, installmentsMinor: 550000, nextDueOn: '2026-10-20' };
 
 const renderView = (props = {}) => {
-  const handlers = { onAdd: vi.fn(), onRetry: vi.fn() };
-  render(<DebtsView status="ready" items={ITEMS} totals={TOTALS} currentOwnerScope="you" {...handlers} {...props} />);
+  const handlers = { onAdd: vi.fn(), onRetry: vi.fn(), ...props };
+  render(<DebtsView status="ready" items={ITEMS} totals={TOTALS} currentOwnerScope="you" {...handlers} />);
   return { ...handlers, user: userEvent.setup() };
 };
 
@@ -41,6 +41,20 @@ describe('DebtsView', () => {
     expect(within(card).getByText('Sin intereses')).toBeInTheDocument();
     expect(within(card).getByText('Compartido')).toBeInTheDocument();
     expect(within(screen.getByRole('article', { name: 'Libre inversión' })).queryByText('Vencida')).not.toBeInTheDocument();
+  });
+
+  it('opens the detail of the debt whose name is picked', async () => {
+    const { user, onOpen } = renderView({ onOpen: vi.fn() });
+
+    await user.click(within(screen.getByRole('article', { name: 'Préstamo de mamá' })).getByRole('button', { name: 'Préstamo de mamá' }));
+
+    expect(onOpen).toHaveBeenCalledWith('d2');
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the card plain without an open handler', () => {
+    renderView();
+    expect(within(screen.getByRole('article', { name: 'Libre inversión' })).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('shows totals that equal the sum of the debts', () => {

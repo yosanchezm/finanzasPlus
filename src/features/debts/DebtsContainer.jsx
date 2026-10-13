@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { dateInputValue } from '../../shared/lib/dates';
 import { readableError } from '../../shared/lib/errors';
+import DebtDetail from './DebtDetail';
 import DebtsView from './DebtsView';
+import { buildDebtDetail } from './debtDetailModel';
 import { buildDebtList } from './debtViewModel';
 import { saveLoan } from './saveLoan';
 import { useDebtData } from './useDebtData';
@@ -22,6 +24,8 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
   const data = useDebtData();
   const [creating, setCreating] = useState(null); // { nonce, signature } of the last attempt
   const [saveState, setSaveState] = useState(IDLE);
+  const [openId, setOpenId] = useState(null);
+  const [repairNotice, setRepairNotice] = useState(null);
 
   const storedScope = (scope) => (scope === 'shared' ? 'shared' : scope === 'you' ? currentOwnerScope : currentOwnerScope === 'you' ? 'partner' : 'you');
 
@@ -49,6 +53,36 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
     onNotify?.('Deuda registrada.');
   };
 
+  const openDebt = data.status === 'ready' ? data.debts.find((debt) => debt.$id === openId) : undefined;
+  const detail = useMemo(() => {
+    if (!openDebt) return undefined;
+    try {
+      return buildDebtDetail({ debt: openDebt, events: data.events.filter((event) => event.debtId === openDebt.$id), asOf: dateInputValue() });
+    } catch {
+      return null; // unreadable terms: the detail says so instead of showing guesses
+    }
+  }, [openDebt, data.events]);
+
+  // Reconcile on read (AD8): repair this debt's cost rows once per opening; a failure never blocks the screen.
+  const reconcileId = openDebt?.$id;
+  useEffect(() => {
+    if (!reconcileId) return undefined;
+    let cancelled = false;
+    setRepairNotice(null);
+    data.reconcileCosts(reconcileId).then((result) => {
+      if (cancelled || result.created + result.updated + result.removed === 0) return;
+      onNotify?.('Se actualizaron los costos financieros de esta deuda.');
+      Promise.resolve(onRefresh?.()).catch(() => {});
+    }).catch(() => {
+      if (!cancelled) setRepairNotice('No se pudieron verificar los costos financieros de esta deuda. Puedes seguir usando esta pantalla.');
+    });
+    return () => { cancelled = true; };
+  }, [reconcileId]);
+
+  if (openDebt) {
+    return <DebtDetail debt={openDebt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={() => setOpenId(null)} />;
+  }
+
   const list = data.status === 'ready'
     ? buildDebtList({ debts: data.debts, events: data.events, asOf: dateInputValue(), inScope })
     : { items: [], totals: undefined };
@@ -62,6 +96,7 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
         currentOwnerScope={currentOwnerScope}
         scopeControl={scopeControl}
         onAdd={openCreate}
+        onOpen={setOpenId}
         onRetry={data.retry}
       />
       {creating && <DebtWizard saveState={saveState} onSubmit={create} onClose={() => setCreating(null)} />}

@@ -5,8 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
 import { dateInputValue } from '../../shared/lib/dates';
 import DebtsContainer from './DebtsContainer';
+import { makeDebt, makeEvent, makePayment } from './debtFixtures';
 
-vi.mock('../../appwrite', () => ({ listDebts: vi.fn(), listDebtEvents: vi.fn(), createDebt: vi.fn(), debtPort: vi.fn() }));
+vi.mock('../../appwrite', () => ({
+  listDebts: vi.fn(), listDebtEvents: vi.fn(), createDebt: vi.fn(), debtPort: vi.fn(),
+  listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
+}));
 
 const port = { ensureCostCategory: vi.fn(), createEvent: vi.fn(), findEventByDedupe: vi.fn(), createCostRow: vi.fn(), deleteCostRow: vi.fn() };
 
@@ -27,6 +31,8 @@ beforeEach(() => {
   api.listDebtEvents.mockResolvedValue([]);
   api.createDebt.mockResolvedValue({});
   api.debtPort.mockReturnValue(port);
+  api.listCostRows.mockResolvedValue([]);
+  api.ensureCostCategory.mockResolvedValue('cat1');
   port.createEvent.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
 });
 
@@ -153,5 +159,58 @@ describe('DebtsContainer create flow', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(api.createDebt.mock.calls.map(([call]) => call.id)).toEqual(['dbn1', 'dbn2']);
     expect(port.createEvent.mock.calls.map(([call]) => call.data.amountMinor)).toEqual([500000, 600000]);
+  });
+});
+
+describe('DebtsContainer detail', () => {
+  const EVENTS = [makeEvent('e0', 'disbursement', '2026-01-05', 1000000), makePayment('e1', '2026-02-05')];
+  const setup = async () => {
+    api.listDebts.mockResolvedValue([makeDebt()]);
+    api.listDebtEvents.mockResolvedValue(EVENTS);
+    const props = { inScope, currentOwnerScope: 'you', householdId: 'h1', user: { $id: 'u1' }, onRefresh: vi.fn(), onNotify: vi.fn() };
+    render(<DebtsContainer {...props} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Crédito de consumo' }));
+    return { ...props, user };
+  };
+
+  it('opens the detail with the projected plan and returns to the list', async () => {
+    const { user } = await setup();
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Crédito de consumo' })).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(13);
+    expect(within(screen.getByRole('region', { name: 'Historial' })).getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.queryByRole('region', { name: 'Totales de deudas' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Volver a deudas' }));
+    expect(await screen.findByRole('region', { name: 'Totales de deudas' })).toBeInTheDocument();
+  });
+
+  it('repairs a missing cost row on open, tells the user and refreshes the month figures', async () => {
+    const { onNotify, onRefresh } = await setup();
+
+    await waitFor(() => expect(api.createCostRow).toHaveBeenCalledTimes(1));
+    expect(api.createCostRow).toHaveBeenCalledWith({ id: 'dce1', data: expect.objectContaining({ amountMinor: 18088, categoryId: 'cat1' }) });
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith('Se actualizaron los costos financieros de esta deuda.'));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when every cost row is already right', async () => {
+    api.listCostRows.mockResolvedValue([{ $id: 'dce1', debtId: 'd1', source: 'debt', amountMinor: 18088 }]);
+    const { onNotify, onRefresh } = await setup();
+
+    await waitFor(() => expect(api.listCostRows).toHaveBeenCalledWith('d1'));
+    expect(api.createCostRow).not.toHaveBeenCalled();
+    expect(onNotify).not.toHaveBeenCalled();
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows a non-blocking notice when the repair fails and keeps the detail usable', async () => {
+    api.listCostRows.mockRejectedValue(new Error('sin red'));
+    await setup();
+
+    expect(await screen.findByRole('status')).toHaveTextContent('No se pudieron verificar los costos financieros de esta deuda.');
+    expect(screen.getByRole('table')).toBeInTheDocument();
   });
 });
