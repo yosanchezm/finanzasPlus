@@ -139,11 +139,11 @@ Capabilities: nia-in-repo-packaging. Nothing past S0a.1 runs until the owner con
 
 ## Phase S3b: Prepayment and advice (600 lines)
 
-- [ ] S3b.1 RED: `test/prepay/simulate.test.js`, `compare.test.js`: French 10,000,000 at 24% EA, 36 months, after 12 payments, extra 2,000,000 (reduce term: fewer installments, same installment; reduce installment: same term, lower installment; interest saved reduce_term >= reduce_installment, also over 200 seeded cases); advance saves 0; extra above balance caps at full payoff with no negative balance; inputs not mutated (read-only); 0% debt saves 0; `prepaymentPenaltyPct` informational, default 0. Reqs: DPA-1. Pair: S3b.2. Done: fails.
-- [ ] S3b.2 GREEN: `src/prepay/simulate.js`, `compare.js`. Pair: S3b.1. Done: green.
-- [ ] S3b.3 RED: `test/advice/advice.test.js`: truth table (default reduce_term; tight margin -> reduce_installment citing margin/ratio; card 35% EA vs loan 18% -> avalanche; 0% -> liquidity_only with no savings claim; tight and higher-rate -> reduce_installment with reason `higher_rate_debt`; gap 0 means strictly higher; thresholds configurable via `ADVICE_DEFAULTS`); `buildFacts` contains every number the rendered summary shows plus a reason code per signal; mortgage Ley 1555 notice with `asOf` and the simulation is still produced. Reqs: DPA-2, DPA-3, DPA-4. Pair: S3b.4. Done: fails.
-- [ ] S3b.4 GREEN: `src/advice/advice.js`, `facts.js`. Pair: S3b.3. Done: green.
-- [ ] S3b.5 REFACTOR and size checkpoint: barrel exports, `npm test`.
+- [x] S3b.1 RED: `test/prepay/simulate.test.js`, `compare.test.js`: French 10,000,000 at 24% EA, 36 months, after 12 payments, extra 2,000,000 (reduce term: fewer installments, same installment; reduce installment: same term, lower installment; interest saved reduce_term >= reduce_installment, also over 200 seeded cases); advance saves 0; extra above balance caps at full payoff with no negative balance; inputs not mutated (read-only); 0% debt saves 0; `prepaymentPenaltyPct` informational, default 0. Reqs: DPA-1. Pair: S3b.2. Done: fails.
+- [x] S3b.2 GREEN: `src/prepay/simulate.js`, `compare.js`. Pair: S3b.1. Done: green.
+- [x] S3b.3 RED: `test/advice/advice.test.js`: truth table (default reduce_term; tight margin -> reduce_installment citing margin/ratio; card 35% EA vs loan 18% -> avalanche; 0% -> liquidity_only with no savings claim; tight and higher-rate -> reduce_installment with reason `higher_rate_debt`; gap 0 means strictly higher; thresholds configurable via `ADVICE_DEFAULTS`); `buildFacts` contains every number the rendered summary shows plus a reason code per signal; mortgage Ley 1555 notice with `asOf` and the simulation is still produced. Reqs: DPA-2, DPA-3, DPA-4. Pair: S3b.4. Done: fails.
+- [x] S3b.4 GREEN: `src/advice/advice.js`, `facts.js`. Pair: S3b.3. Done: green.
+- [x] S3b.5 REFACTOR and size checkpoint: barrel exports, `npm test`.
 
 ## Phase S4: Schema, data layer, alias (about 450 lines)
 

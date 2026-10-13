@@ -279,3 +279,57 @@ Test summary: 98 tests written (11 + 12 + 22 + 28 + 20 + 5), 98 passing; core su
 ### Notes
 - The projector registry accepts any kind; S7 will register `card`. The loan projector is used for every other kind.
 - Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
+
+## Batch 6: S3b (prepayment simulation, comparison, advice, facts) - COMPLETE
+
+Branch `feat/debt-s3b-advice` (stacked on `feat/debt-s3a4-commit`). Three work-unit commits, each green on its own (tests + implementation + barrel together):
+- `3779010 feat(finance-core): simulate and compare prepayment strategies` (353 lines)
+- `f643b86 feat(finance-core): add deterministic prepayment advice with Ley 1555 notice` (239 lines)
+- `e5d5a21 feat(finance-core): add structured advice facts and deterministic summary` (240 lines: 238 added / 2 deleted)
+
+Size: 830 changed lines summed over the three commits (828 net against the S3a head, 11 files: src about 316, tests about 480, barrel and test helper about 32). The forecast was 600 and the owner ceiling is 2,000, so the unit is well inside it. The whole unit is about 30 lines over one 800-line PR, so the proposed grouping is two stacked PRs:
+
+| PR sub-branch (proposed) | Commits | Lines |
+|---|---|---|
+| `feat/debt-s3b1-prepay-simulation` | `3779010` | 353 |
+| `feat/debt-s3b2-advice` | `f643b86`, `e5d5a21` | 479 |
+
+### Tasks
+- [x] S3b.1 RED `test/prepay/simulate.test.js`, `compare.test.js` (suites failed: modules missing)
+- [x] S3b.2 GREEN `src/prepay/simulate.js` (`simulateExtra`), `compare.js` (`compareStrategies`)
+- [x] S3b.3 RED `test/advice/advice.test.js`, `facts.test.js` (suites failed: modules missing)
+- [x] S3b.4 GREEN `src/advice/advice.js` (`ADVICE_DEFAULTS`, `advise`), `facts.js` (`buildFacts`, `renderSummary`)
+- [x] S3b.5 REFACTOR and size checkpoint: barrel exports (`simulateExtra`, `compareStrategies`, `ADVICE_DEFAULTS`, `advise`, `buildFacts`, `renderSummary`), exact-keys test and source list updated RED-first in each commit, `npm test`, `npm run build`
+
+### TDD Cycle Evidence
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| S3b.1/S3b.2 (simulate) | `packages/finance-core/test/prepay/simulate.test.js` (+ `test/helpers/loans.js`) | Unit (node env) | Core suite 253/253 before touching the barrel | Written first; suite failed to import `simulate.js` | 11/11 passed | Spec 0% fixture under the three strategies (8 x 100,000; 11 x 72,727; advance), French 10M/24%/36 after 12 payments with +2,000,000 (term shrinks and installment holds; term stays and installment drops; term saves more than installment, advance 0; remaining interest drops by exactly the saving), charges/taxes savings with a `pctOutstanding` insurance, payoff cap for each strategy (applied 1,100,000, surplus 3,900,000, balance 0), frozen inputs, penalty 2% vs default 0 with identical savings, 4 validation errors | None needed |
+| S3b.1/S3b.2 (compare) | `test/prepay/compare.test.js` | Unit + seeded property (200 cases) | Core suite 264/264 | Written first; suite failed to import `compare.js` | 5/5 passed | French fixture, 0% (equal savings, different shape), German (identical plus `strategies_identical` note), frozen inputs, 200 seeded French loans (10% at 0%): reduce_term saved >= reduce_installment >= 0, advance exactly 0, balance after = before - extra, more than 150 cases with positive savings | Barrel RED first (exact-keys test failed), then exports |
+| S3b.3/S3b.4 (advice) | `test/advice/advice.test.js` | Unit (truth table) | Core suite 269/269 | Written first; suite failed to import `advice.js` | 15/15 passed (2 failures were a fixture error: a 2M extra on the 1.1M family loan is a payoff, so the strategies were identical; fixed the test, not the code) | Default, tight margin (cites margin), installment ratio (cites ratio), card 35% vs loan 18% (avalanche names the card), 0% (liquidity, no savings claim), 0% plus higher-rate debt (still a reason), tight plus higher-rate (liquidity wins, debt listed), unknown cash flow, identical strategies, gap 0 means strictly higher (equal EA vs +0.01), configurable gap/margin/ratio incl. exactly-at-threshold, invalid thresholds, Ley 1555 (mortgage: notice with asOf, simulation untouched; consumer: none) | Barrel RED first |
+| S3b.3/S3b.4 (facts) | `test/advice/facts.test.js` | Unit | Core suite 284/284 | Written first; suite failed to import `facts.js` | 17/17 passed after fixing 3 test/wording issues (wrong EA literal in my fixture, wrong key name, and the 0% sentence contained "saved") | Raw numbers and pre-formatted text, one reason code per signal in 5 scenarios, target debt and rate, notice outside the numbers, determinism and frozen input, completeness check across 8 scenarios (every number token of the summary exists in facts; a negative control proves the check can fail), verdict wording, 0% claims no savings, payoff and penalty lines only when they apply | `advise` attaches `facts`; barrel RED first |
+
+Test summary: 48 tests written (11 + 5 + 15 + 17), 48 passing; core suite 18 files / 300 tests; full suite 50 files / 514 tests passing (S3a baseline 46 files / 467). The first full run showed 2 unrelated jsdom timeouts under load, the rerun was clean 514/514 (the same pre-existing flakiness as earlier batches). Pure functions created: 5 public (`simulateExtra`, `compareStrategies`, `advise`, `buildFacts`, `renderSummary`) plus the internal `snapshot`, `evaluateSignals`, `signalReasons`, `decide`, `figures`, `reasonLine`, `strategyLines`.
+
+### Work Unit Evidence
+| Evidence | Value |
+|---|---|
+| Focused test | `npx vitest run packages/finance-core/test/prepay packages/finance-core/test/advice`: exit 0, 4 files, 48 tests passed (`npx vitest run packages/finance-core`: 18 files, 300 tests) |
+| Runtime harness | N/A: pure functions with no runtime boundary; the spec fixtures (0% 1,200,000 x 12 and French 10M at 24% EA) and the 200-case seeded property are the harness. `npm test` exit 0 (50 files, 514 tests); `npm run build` exit 0 |
+| Rollback boundary | Delete `packages/finance-core/src/prepay/`, `src/advice/`, `test/prepay/`, `test/advice/`, `test/helpers/loans.js`, the six S3b exports in `index.js` and the S3b entries of the barrel/source lists in `test/node16.test.js` (nothing outside `packages/finance-core/` imports them yet) |
+
+### Deviations and decisions
+- **Raw signals, not booleans, go into `advise`.** Design: `advise(comparison, signals, thresholds)` with `cashflowSignals` (S9) producing `tightMargin`/`higherRateDebt`. Here `advise` takes raw figures (`{avgIncomeMinor, avgExpenseMinor, installmentMinor?, otherDebts: [{id, name, eaPercent}]}`) and applies the thresholds itself, so the rules (tight margin by ratio or by installment-to-income, strictly-higher EA with the gap) live in one tested place. `installmentMinor` defaults to the installment before the extra. Consequence for S9: `cashflowSignals` only needs to produce those averages and the other debts; the derived booleans are in `advice.signals`. Thresholds: `ADVICE_DEFAULTS` `{tightMarginRatio: 0.10, maxInstallmentToIncome: 0.30, higherRateGapPct: 0}`, overridable per call and validated (`invalid_thresholds`).
+- **Boundaries are strict**: margin exactly at the threshold is not tight; installment ratio exactly at the maximum is not tight; an EA equal to this debt's (gap 0) is not "higher". Unknown averages give `tightMargin: null` (treated as not tight, reason `cashflow_unknown`); known income of 0 with a positive installment is tight (installment ratio).
+- **Simulation semantics.** `simulateExtra(debt, events, {amountMinor, strategy, on})` replays `project()` at `on` with and without a hypothetical `extra_payment` (id `simulation:extra`, `createdAt` `9999-12-31T23:59:59.999Z` so it sorts last on its day). Savings are lifetime (paid + remaining) interest and charges+taxes, so the installments the extra pays first (already due) do not inflate the saving. `before`/`after` snapshots: balance, remaining periods, next installment still to pay (principal + interest, first open row due after `on`) with its date, last due date, remaining interest, remaining charges+taxes. Extra fields: `appliedMinor`, `extraPrincipalMinor`, `surplusMinor`, `paidOff`, `eaPercent`, `kind`, `system`, `penaltyPct`, `penaltyMinor` (penalty = pct of the extra principal, of the applied amount for advance; informational, savings are not reduced by it).
+- **`compareStrategies` result**: `{on, amountMinor, kind, system, eaPercent, reduceTerm, reduceInstallment, advance, identical, notes}`. For non-French systems (and for a full payoff) both reduce strategies come out the same: `identical: true` and a `strategies_identical` note, surfaced as a reason code by `advise`, so no UI presents two fake options. 0% French loans are not identical (different term and installment) but both save 0.
+- **Verdicts**: `reduce_term`, `reduce_installment`, `avalanche` (with `targetDebt` = highest-EA debt above this one), `liquidity_only` (`claimsSavings: false`). Reasons: `default`, `zero_rate`, `tight_margin`, `installment_ratio`, `higher_rate_debt`, `cashflow_unknown`, `strategies_identical`, each carrying the numbers behind it. Precedence exactly as designed (0% > tight margin > higher-rate debt > default); with both 2 and 3 true the verdict is `reduce_installment` and `higher_rate_debt` stays in `reasons`.
+- **Facts shape**: `{asOf, verdict, claimsSavings, identical, paidOff, reasonCodes, targetDebt, higherRateDebt, numbers, text, notices}`. `numbers` and `text` are flat maps with the same keys (for example `reduceTerm.interestSaved`); money text uses `.` as thousands separator (`2.000.000`), percentages up to 2 decimals (`28.32%`), shares of income as percent. Dates only exist as text. The Ley 1555 notice is carried in `notices` (code, asOf, message) and is not part of the numbers; its message contains "Ley 1555", which S9's number guard must allow (or strip) when it scans a paraphrase.
+- **`renderSummary(facts)`** (not in the design file table): a deterministic English summary built only from `facts` values; it is how "every number the rendered summary shows is in facts" is made testable in S3b. Nia and the web can localise by reusing the same values; it is also a valid fallback template.
+- **`advise` attaches `facts`** (spec: advice returns `facts`). `buildFacts(advice)` is also exported and accepts the advice without the `facts` field.
+- Test helper `test/helpers/loans.js` (compact fixtures: `french`, `interestFree`, `debt`, `ev`, `onTime`, `deepFreeze`) is shared by the S3b tests; the older S3a tests keep their own inline helpers (not refactored).
+- Language: code, comments, tests and the summary text are English; no `Object.hasOwn`, array `.at(`, `findLast`, `toSorted`, `structuredClone` or `groupBy` (the node16 scan covers the new files).
+
+### Notes
+- Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
+- Pre-existing jsdom flakiness persists under load (first full run: 2 timeouts; rerun: 514/514).
