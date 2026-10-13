@@ -62,7 +62,7 @@ Antes de iniciar sesión, agrega `localhost` como plataforma Web en **Appwrite �
 
 ## 3. Migrar la base de datos
 
-La migración crea una base TablesDB, nueve tablas, columnas, índices y un bucket privado para recibos. Es idempotente: si una tabla ya existe, la conserva y no la borra. Para Appwrite self-hosted 1.8.1 usa el tipo `string`, que es el endpoint disponible en esa versión; no cambies el script a `varchar`.
+La migración crea una base TablesDB, once tablas (las nueve originales más `debts` y `debt_events`), columnas, índices y un bucket privado para recibos. Es idempotente: si una tabla ya existe, la conserva y no la borra. Para Appwrite self-hosted 1.8.1 usa el tipo `string`, que es el endpoint disponible en esa versión; no cambies el script a `varchar`.
 
 Antes de ejecutar:
 
@@ -76,6 +76,20 @@ npm run migrate:appwrite
 ```
 
 La API key no debe ser la clave pública del frontend ni una clave compartida en Telegram. Si tu base de datos ya existe con otro ID, usa ese mismo ID en `VITE_APPWRITE_DATABASE_ID`.
+
+### Actualizar una base existente (gestión de deudas)
+
+La gestión de deudas agrega dos tablas nuevas (`debts` y `debt_events`) y una columna opcional `debtId` con su índice `by_household_debt` en `transactions`. Los cambios son aditivos: no se modifica ni se elimina ninguna columna, índice ni fila existente.
+
+Antes de desplegar esta versión o una posterior, vuelve a ejecutar la migración contra la base existente:
+
+```bash
+npm run migrate:appwrite
+```
+
+- Se recomienda probarla primero dos veces en una base de desarrollo: la segunda ejecución solo debe mostrar recursos existentes y no crear nada.
+- El índice único `by_dedupe` de `debt_events` evita registrar dos veces el mismo evento.
+- Si necesitas revertir el código, las tablas nuevas pueden quedar sin uso; no es necesario eliminarlas.
 
 Después de la migración, crea una fila inicial en `households` desde la consola con `name`, `currency`, `timezone` y el `$id` del usuario propietario en `ownerId`. Copia el `$id` de esa fila en `HOUSEHOLD_ID`. El `HOUSEHOLD_TEAM_ID` y el `HOUSEHOLD_ID` son cosas diferentes: el primero identifica al equipo; el segundo identifica la fila concreta del hogar.
 

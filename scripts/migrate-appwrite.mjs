@@ -5,6 +5,8 @@
  * existing tables/columns/indexes, so it is safe to run more than once.
  */
 
+import { withDebtSchema } from './lib/debt-schema.mjs';
+
 const endpoint = (process.env.VITE_APPWRITE_ENDPOINT || '').replace(/\/$/, '');
 const projectId = process.env.VITE_APPWRITE_PROJECT_ID;
 const databaseId = process.env.VITE_APPWRITE_DATABASE_ID || 'finanzas_plus';
@@ -26,7 +28,7 @@ if (missing.length) {
 
 const team = (action) => `${action}("team:${teamId}")`;
 
-const tables = [
+const baseTables = [
   {
     id: 'households', name: 'Hogares', rowSecurity: true,
     permissions: [team('read'), team('create'), team('update')],
@@ -124,6 +126,10 @@ const tables = [
     indexes: [index('by_household_channel_chat', 'unique', ['householdId', 'channel', 'externalChatId'])],
   },
 ];
+
+// Debt management (additive): the debts and debt_events tables plus transactions.debtId.
+// The ensure* loops below only create what is missing, which keeps reruns a no-op.
+const tables = withDebtSchema(baseTables, team);
 
 // Appwrite 1.8.x self-hosted exposes the legacy `string` column endpoint.
 // `varchar` is documented for newer API versions but returns 404 on 1.8.1.
