@@ -151,3 +151,66 @@ Test summary: 82 tests written (13 + 24 + 24 + 13 + 8), 82 passing; full suite 3
 ### Notes
 - Date range: `isIsoDate` accepts years 1000..9999 only (4-digit years below 1000 would be misread by `Date.UTC`).
 - `rounded + 0` in `roundUnit` is deliberate (turns -0 into 0, tested).
+
+## Batch 4: S2 (terms, amortization schedules, charges) - COMPLETE
+
+Branch `feat/debt-s2-schedules` (stacked on `feat/debt-s1c-legal-barrel`). Four work-unit commits, each green on its own (tests + implementation together):
+- `fd6e9a5 feat(finance-core): add debt terms validation, serialization and versioning` (484 lines)
+- `fff96e2 feat(finance-core): add French amortization schedule` (292 lines)
+- `146bdf0 feat(finance-core): add German, bullet, interest-only and manual systems with grace periods` (463 lines)
+- `d96d40c feat(finance-core): add per-installment charges, taxes and real-cost totals` (476 lines)
+
+Size: 1,715 changed lines summed over the four commits (1,656 added / 1 deleted net against the S1 head, 19 files: src+barrel 670, tests 900, fixtures 86). The forecast was 740, so the 800-line budget is exceeded by the work unit as a whole; the owner-approved policy (work unit up to 2000 lines, stacked PRs of at most 800) is used. Proposed stacked PR grouping (the orchestrator creates the branches):
+
+| PR sub-branch (proposed) | Commits | Lines |
+|---|---|---|
+| `feat/debt-s2a-terms-french` | `fd6e9a5`, `fff96e2` | 776 |
+| `feat/debt-s2b-systems-grace` | `146bdf0` | 463 |
+| `feat/debt-s2c-charges` | `d96d40c` | 476 |
+
+Merging B and C into one PR would be 939 lines (over 800), hence three PRs. The design's pre-declared S2a/S2b valve (terms + French/German + totals vs the rest) was not used because it does not fit the final code layout.
+
+### Tasks
+- [x] S2.1 RED `test/terms.test.js` (suite failed: `src/terms.js` missing)
+- [x] S2.2 GREEN `src/terms.js` (+ `TermsTooLarge` in `src/errors.js`)
+- [x] S2.3 RED `test/schedule.french.test.js` + `test/fixtures/french-10m-24ea-36.json` (suite failed: `src/schedule/index.js` missing)
+- [x] S2.4 GREEN `src/schedule/index.js` (`buildSchedule`), `french.js`, `row.js`
+- [x] S2.5 RED `test/schedule.systems.test.js` (18/18 failed first: builders for the other systems missing)
+- [x] S2.6 GREEN `german.js`, `bullet.js`, `interestOnly.js`, `manual.js`, `grace.js`; French now delegates grace to `grace.js`
+- [x] S2.7 RED `test/charges.test.js` + `test/fixtures/libranza-10m-15mv-24.json` (suite failed: `src/charges.js` missing)
+- [x] S2.8 GREEN `src/charges.js` (`evaluateCharges`), charges integrated into rows, `summarizeSchedule`
+- [x] S2.9 REFACTOR and size checkpoint: `schedule/index.js` split into `dueDates` and `addCharges` helpers, barrel exports, barrel exact-keys test, `npm test`, `npm run build`
+
+### TDD Cycle Evidence
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| S2.1/S2.2 | `packages/finance-core/test/terms.test.js` | Unit (node env) | Existing core suite 82/82 before touching `errors.js` and the barrel | Written first; suite failed to import `terms.js` | 18/18 passed | Defaults vs explicit values, balance-only debt, manual-plan derivation; rejection groups (principal, anticipated rate on `rate` and `lateRate`, dates, kind/system/periodicity/n, schema version, grace, balloon, manual plan), charge normalisation and 7 malformed-charge cases, 120-row manual plan fits vs 400 rows `TermsTooLarge`, round trip, v0 -> v1 migration, future schema, bad JSON | None needed; barrel RED first (exact-keys test failed), then exports |
+| S2.3/S2.4 | `test/schedule.french.test.js` + `fixtures/french-10m-24ea-36.json` | Unit + golden fixture | 100/100 (core suite) | Written first; suite failed to import `schedule/index.js` | 16/16 passed first run | Canonical 10M/24% EA/36 (rows 1, 2, 35, 36 and totals vs the fixture, spec bounds +/-1 and <=36), 0% loan, quarterly, anticipated monthly, rounding unit 100, month-end anchor, single installment, `fromPeriod`/`balanceMinor`/`startDate` rebuild, no rows for `system:'none'`, invalid options | Dispatch separated from the builder; barrel RED first |
+| S2.5/S2.6 | `test/schedule.systems.test.js` | Unit + seeded property (200 cases) | 116/116 (core suite) | Written first; 18/18 failed (builders missing) | 19/19 passed (135/135 core) | German (even and uneven split, monotonicity), bullet (n=3, n=1, 0%), interest-only (default balloon, 5M balloon, partial amortization above the balloon), manual (plan, overshoot, interest split, below-interest error, rebuild, startDate ignored), grace (total, principal-only, German, 0%, rebuilt tail), property 200 cases = 40 per system asserting sums, closing 0, whole numbers, non-negative balances/interest/installments, non-negative principal outside capitalizing rows. Mutation check: breaking the interest-only residual made 4 tests fail, then reverted | `french.js` now uses `buildGraceRows`; the `unsupported_system` branch was removed once all builders existed |
+| S2.7/S2.8 | `test/charges.test.js` + `fixtures/libranza-10m-15mv-24.json` | Unit + golden fixture + seeded property (200 cases) | 135/135 (core suite) | Written first; suite failed to import `charges.js` | 20/20 passed first run (155/155 core) | GMF 1,600 on 400,000; IVA 1,900 on a 10,000 fee (11,900 together); evaluation order independent of listed order (GMF 1,648 on 411,900); all six bases; rounding unit; annual 600,000 for periods 1 and 13 (range 1-24 on 36 months), annual on quarterly periodicity and with an anchor, once, ranges; pctOfCharge skipped when its reference is not billed; libranza rows 1, 2, 24 and totals vs fixture; charges never change principal; bundled = itemized totals; charges billed during total grace; `summarizeSchedule` on the fixture and on `[]`; reconciliation over 200 seeded schedules (4 systems, random charge sets) | Extracted `dueDates` and `addCharges`; barrel RED first |
+
+Test summary: 73 tests written (18 + 16 + 19 + 20), 73 passing; core suite 9 files / 155 tests; full suite 41 files / 369 tests passing (S1 baseline 37 files / 296; the first full run showed 2 unrelated jsdom timeouts under load, the rerun was clean 369/369, the same pre-existing flakiness as earlier batches). Pure functions created: 16 (`validateTerms`, `serializeTerms`, `parseTerms`, `buildSchedule`, `summarizeSchedule`, `evaluateCharges`, `levelPayment`, `interestFor`, `makeRow`, `withCharges`, `buildFrench`, `buildGerman`, `buildBullet`, `buildInterestOnly`, `buildManual`, `buildGraceRows`).
+
+### Work Unit Evidence
+| Evidence | Value |
+|---|---|
+| Focused test | `npx vitest run packages/finance-core/test/schedule.french.test.js packages/finance-core/test/schedule.systems.test.js packages/finance-core/test/charges.test.js packages/finance-core/test/terms.test.js`: exit 0, 4 files, 73 tests passed (`npx vitest run packages/finance-core`: 9 files, 155 tests) |
+| Runtime harness | N/A: pure functions with no runtime boundary; golden fixtures (French canonical, libranza with insurance + fee + IVA + GMF) and the seeded property tests (200 cases for the systems, 200 for the charge totals) are the harness. `npm test` exit 0 (41 files, 369 tests); `npm run build` exit 0 |
+| Rollback boundary | Delete `packages/finance-core/src/terms.js`, `src/schedule/`, `src/charges.js`, the `TermsTooLarge` class in `src/errors.js`, the S2 exports in `index.js`, the S2 test files and `test/fixtures/`, and the S2 entries of the barrel/scan lists in `test/node16.test.js` (nothing outside `packages/finance-core/` imports them yet) |
+
+### Deviations and decisions
+- **Negative principal for capitalized interest.** Total grace rows and non-final bullet rows have `principalMinor = -interest`, `installmentMinor = 0` and `closing = opening + interest`. This is the only way to satisfy at once "principal sums to P", "balance after grace exceeds P" and "final balance 0". The task's "integers >= 0" property therefore holds for principal everywhere except in capitalizing rows; the property test encodes that. `interestMinor` on such a row is the interest accrued (not paid); `costMinor` is the cost of the period (interest accrued + charges + taxes).
+- **Bullet** is modelled as a single payment at maturity with interest capitalized every period (compound); n=1 is principal plus one period of interest.
+- **Interest-only with balloon**: the balloon defaults to the whole principal; any amount above the balloon is amortized in equal shares over periods 1..n-1 with the rounding residue in period n-1, so the last principal is exactly the balloon. A balloon is only accepted for `interest_only` (`balloon_unsupported` otherwise; French/German leasing with a residual value is not modelled in S2).
+- **Grace** is accepted for French and German only (`grace_unsupported` for the rest); it is counted on absolute period numbers so rebuilt tails stay consistent; `periods` must be below `n`.
+- **Manual plan**: tuple amounts are the planned installment (principal + interest); interest accrues at the periodic rate for the debt's periodicity on the balance; the last row settles the remainder and principal never exceeds the balance. A non-final amount below the accrued interest throws `manual_plan_below_interest` from `buildSchedule`. `n` and `firstDueOn` are derived from the plan; `startDate` is ignored for manual plans.
+- **`buildSchedule` options**: `fromPeriod` (first row to build), `balanceMinor` (its opening balance), `startDate` (its due date). Charges use absolute period numbers.
+- **Charges**: `anchorMonth` from the design's Charge shape is not implemented (no spec scenario needs it); annual cadence is anchored on `fromPeriod`. `pctOfCharge` may only reference an earlier, non-`pctOfSubtotal` charge (validated; keeps evaluation acyclic). The subtotal for `pctOfSubtotal` is the installment plus all charges and taxes from the first two groups, so GMF applies to IVA too. `fixed` charges are exact pesos (not rounded to the unit); percentage charges round to `roundingUnit`. Zero-amount lines are omitted. Each charge line also carries `display` so presentation can bundle or itemize; totals are identical either way.
+- **Row shape additions**: `costMinor` (interest + charges + taxes) beyond the design's `ScheduleRow`; `summarizeSchedule` returns `{count, principalMinor, interestMinor, chargesMinor, taxesMinor, installmentsMinor, totalDueMinor, costMinor}`; `totalDueMinor` reconciles exactly (not just +/-1) with principal + interest + charges + taxes.
+- **Terms**: `validateTerms` returns a normalized copy and never mutates its input; `TermsTooLarge` extends `ValidationError` (code `terms_too_large`); `parseTerms` treats a document without `schemaVersion` as version 0 and migrates it. `periodicity` is required except for `system:'none'`. `principalMinor` must be positive except for kind `card`. Kinds accepted: consumer, vehicle, libranza, mortgage, leasing, family, informal, card, other. `card` (S7) is only checked to be an object.
+- **Public barrel** now also exports `TermsTooLarge`, `TERMS_SCHEMA_VERSION`, `TERMS_MAX_CHARS`, `validateTerms`, `serializeTerms`, `parseTerms`, `buildSchedule`, `summarizeSchedule`, `evaluateCharges`; the exact-keys test in `test/node16.test.js` was updated first (RED) in each commit.
+- The golden fixtures are independently computed (floating-point reference, half away from zero per component) and labelled as such; OA-6 (real statements) is still open.
+
+### Notes
+- Git warns about LF-to-CRLF conversion on every add (autocrlf); blobs are normalized, nothing to do.
+- Authored review size excluding fixtures: PR A 753, PR B 463, PR C 413.
