@@ -3,7 +3,7 @@ import { CommitError } from '@finance-core';
 import { readableError } from '../../shared/lib/errors';
 
 const IDLE = { status: 'idle', error: null, locked: false };
-const PARTIAL = 'El movimiento se guardó, pero falta registrar su gasto financiero. Pulsa Reintentar para completarlo.';
+const PARTIAL = 'El movimiento se guardó, pero falta actualizar su gasto financiero. Pulsa Reintentar para completarlo.';
 
 /**
  * State machine of a dialog that writes through `commitPlan` (no optimistic updates).

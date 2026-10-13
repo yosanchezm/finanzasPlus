@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { dateInputValue } from '../../shared/lib/dates';
 import DebtDetail from './DebtDetail';
 import PaymentDialog from './PaymentDialog';
+import VoidDialog from './VoidDialog';
 import { buildDebtDetail } from './debtDetailModel';
 import { defaultNonce } from './nonce';
 import { saveDebtEvent } from './saveDebtEvent';
@@ -44,9 +45,15 @@ export default function DebtDetailContainer({ debt, events: allEvents, reconcile
     save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
   });
 
+  const voiding = useCommitDialog({
+    ...flow,
+    successMessage: () => 'Pago anulado.',
+    save: ({ input, nonce, context }) => saveDebtEvent({ debt, events, draft: { kind: 'void', effectiveOn: today, targetEventId: context.id, reason: input.reason }, nonce, actorId: user.$id, today }),
+  });
+
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={onBack} onPay={detail ? () => payment.open() : undefined} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onVoid={voiding.open} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}
@@ -59,6 +66,9 @@ export default function DebtDetailContainer({ debt, events: allEvents, reconcile
           onSubmit={payment.submit}
           onClose={payment.close}
         />
+      )}
+      {voiding.dialog && (
+        <VoidDialog entry={voiding.dialog.context} saveState={voiding.saveState} onConfirm={(reason) => voiding.submit({ reason })} onClose={voiding.close} />
       )}
     </>
   );

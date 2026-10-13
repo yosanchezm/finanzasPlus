@@ -32,6 +32,17 @@ describe('buildDebtDetail', () => {
     expect(history[2]).toMatchObject({ kind: 'disbursement', canVoid: false });
   });
 
+  it('returns the balance and the plan to their earlier values once the payment is voided', () => {
+    const before = buildDebtDetail({ debt: makeDebt(), events: [disbursement, makePayment('e1', '2026-02-05')], asOf: '2026-02-10' });
+    const voided = buildDebtDetail({ debt: makeDebt(), events: [disbursement, makePayment('e1', '2026-02-05'), makeEvent('v1', 'void', '2026-02-06', 0, { targetEventId: 'e1', reason: 'x' })], asOf: '2026-02-10' });
+    const never = buildDebtDetail({ debt: makeDebt(), events: [disbursement], asOf: '2026-02-10' });
+
+    expect(before.projection.balanceMinor).toBeLessThan(never.projection.balanceMinor);
+    expect(voided.projection.balanceMinor).toBe(never.projection.balanceMinor);
+    expect(voided.projection.plan.map((row) => row.status)).toEqual(never.projection.plan.map((row) => row.status));
+    expect(voided.cost.paidMinor).toBe(0);
+  });
+
   it('keeps the plan empty for a balance-only debt', () => {
     const informal = makeDebt({}, { system: 'none', n: undefined, firstDueOn: undefined, periodicity: undefined, rate: { convention: 'ZERO' } });
     const { projection, cost } = buildDebtDetail({ debt: informal, events: [disbursement], asOf: '2026-02-01' });

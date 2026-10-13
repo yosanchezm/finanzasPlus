@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
-import { makeBigLoan, makeEvent } from './debtFixtures';
+import { makeBigLoan, makeEvent, makePayment } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({ debtPort: vi.fn() }));
 
@@ -90,7 +90,7 @@ describe('DebtDetailContainer payment flow', () => {
     await openPayment(user);
     await save(user);
 
-    expect(await screen.findByText('El movimiento se guardó, pero falta registrar su gasto financiero. Pulsa Reintentar para completarlo.')).toBeInTheDocument();
+    expect(await screen.findByText('El movimiento se guardó, pero falta actualizar su gasto financiero. Pulsa Reintentar para completarlo.')).toBeInTheDocument();
     expect(screen.getByLabelText('Monto del pago')).toBeDisabled();
     expect(reload).not.toHaveBeenCalled();
 
@@ -109,7 +109,7 @@ describe('DebtDetailContainer payment flow', () => {
     const { user, reload } = setup();
     await openPayment(user);
     await save(user);
-    await screen.findByText(/falta registrar su gasto financiero/);
+    await screen.findByText(/falta actualizar su gasto financiero/);
 
     await user.click(screen.getByRole('button', { name: 'Cerrar' }));
 
@@ -131,5 +131,56 @@ describe('DebtDetailContainer payment flow', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.amountMinor])).toEqual([['den1', 390381], ['den2', 200000]]);
+  });
+});
+
+describe('DebtDetailContainer void flow', () => {
+  const PAID = [...EVENTS, makePayment('e1', TODAY, 390381)];
+  const openVoid = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Anular pago del 5 feb' }));
+    return screen.getByRole('alertdialog');
+  };
+
+  it('asks for confirmation, then appends the void event and deletes the cost row', async () => {
+    const { user, reload, onRefresh, onNotify } = setup({ events: PAID });
+    const dialog = await openVoid(user);
+    expect(within(dialog).getByText('¿Anular este pago?')).toBeInTheDocument();
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before confirming
+    await user.type(within(dialog).getByLabelText('Motivo (opcional)'), 'Registrado dos veces');
+    await user.click(within(dialog).getByRole('button', { name: 'Anular pago' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('dvn1');
+    expect(data).toMatchObject({ kind: 'void', dedupeKey: 'void:e1', amountMinor: 0, debtId: 'd1' });
+    expect(JSON.parse(data.payloadJson)).toEqual({ targetEventId: 'e1', reason: 'Registrado dos veces' });
+    expect(port.deleteCostRow).toHaveBeenCalledWith('dce1');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith('Pago anulado.');
+  });
+
+  it('leaves everything unchanged when the void fails, and the retry repeats the same ids', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, reload } = setup({ events: PAID });
+    const dialog = await openVoid(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Anular pago' }));
+
+    expect(await within(screen.getByRole('alertdialog')).findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(port.deleteCostRow).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(port.createEvent.mock.calls.map(([call]) => call.id)).toEqual(['dvn1', 'dvn1']);
+    expect(port.deleteCostRow).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no void action for a payment that is already voided', () => {
+    const voided = [...PAID, makeEvent('v1', 'void', TODAY, 0, { targetEventId: 'e1', reason: 'x' })];
+    setup({ events: voided });
+
+    expect(screen.queryByRole('button', { name: /Anular/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Anulado')).toBeInTheDocument();
   });
 });
