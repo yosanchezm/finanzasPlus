@@ -99,6 +99,7 @@ describe('finance-core sources', () => {
       expect.arrayContaining([
         'index.js',
         'src/advice/advice.js',
+        'src/advice/facts.js',
         'src/calendar.js',
         'src/charges.js',
         'src/errors.js',
@@ -162,6 +163,7 @@ describe('public barrel (index.js)', () => {
         'advise',
         'allocate',
         'assertMinor',
+        'buildFacts',
         'buildSchedule',
         'commitPlan',
         'compareIso',
@@ -179,6 +181,7 @@ describe('public barrel (index.js)', () => {
         'project',
         'rateLabel',
         'registerProjector',
+        'renderSummary',
         'roundUnit',
         'serializeTerms',
         'simulateExtra',

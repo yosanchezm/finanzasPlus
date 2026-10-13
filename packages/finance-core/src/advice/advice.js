@@ -1,5 +1,6 @@
 import { ValidationError } from '../errors.js';
 import { ley1555Notice } from '../legal.js';
+import { buildFacts } from './facts.js';
 
 // Deterministic prepayment verdict (DPA-2). No model is involved: the same
 // comparison, cash-flow figures and thresholds always give the same answer.
@@ -88,7 +89,7 @@ function decide(zeroRate, signals, reasons) {
  * @param {{ avgIncomeMinor?: number, avgExpenseMinor?: number, installmentMinor?: number,
  *   otherDebts?: { id: string, name: string, eaPercent: number }[] }} [signals] 3-month averages and the other active debts.
  * @param {Partial<typeof ADVICE_DEFAULTS>} [thresholdOverrides]
- * @returns {object} `{ verdict, claimsSavings, targetDebt, reasons, signals, thresholds, notices, comparison }`
+ * @returns {object} `{ verdict, claimsSavings, targetDebt, reasons, signals, thresholds, notices, comparison, facts }`
  * @throws {ValidationError}
  */
 export function advise(comparison, signals = {}, thresholdOverrides = {}) {
@@ -100,7 +101,7 @@ export function advise(comparison, signals = {}, thresholdOverrides = {}) {
   if (evaluated.tightMargin === null) reasons.push({ code: 'cashflow_unknown' });
   for (const note of comparison.notes) reasons.push({ code: note.code, system: note.system, paidOff: note.paidOff });
   const notice = ley1555Notice({ kind: comparison.kind }, comparison.on);
-  return {
+  const advice = {
     verdict: decision.verdict,
     claimsSavings: !zeroRate,
     targetDebt: decision.verdict === 'avalanche' ? evaluated.higherRateDebts[0] : null,
@@ -110,4 +111,5 @@ export function advise(comparison, signals = {}, thresholdOverrides = {}) {
     notices: notice ? [notice] : [],
     comparison,
   };
+  return { ...advice, facts: buildFacts(advice) };
 }

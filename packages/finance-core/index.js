@@ -31,3 +31,4 @@ export { commitPlan, planCommit } from './src/ledger/commit.js';
 export { simulateExtra } from './src/prepay/simulate.js';
 export { compareStrategies } from './src/prepay/compare.js';
 export { ADVICE_DEFAULTS, advise } from './src/advice/advice.js';
+export { buildFacts, renderSummary } from './src/advice/facts.js';
