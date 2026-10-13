@@ -1,7 +1,7 @@
 import { activeEvents, project, sortEvents } from '@finance-core';
 
-// Only money events that wrote a cost row can be voided from the history.
-const VOIDABLE = ['payment', 'extra_payment'];
+// Payments and the card's statements and purchases can be voided from the history (the other kinds change the plan).
+const VOIDABLE = ['payment', 'extra_payment', 'charge', 'adjustment'];
 
 /**
  * Pure view model of one debt: the projection (rendered as is), the real cost over the whole
@@ -24,6 +24,7 @@ export function buildDebtDetail({ debt, events, asOf }) {
       kind: event.kind,
       effectiveOn: event.effectiveOn,
       amountMinor: event.amountMinor,
+      statedBalanceMinor: event.payload.balanceMinor ?? null,
       source: event.source,
       strategy: event.payload.strategy ?? null,
       voided,

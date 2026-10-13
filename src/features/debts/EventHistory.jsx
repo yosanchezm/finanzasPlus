@@ -11,8 +11,8 @@ const KIND_LABELS = {
   rate_change: 'Cambio de tasa',
   charge_change: 'Cambio de cargos',
   restructure: 'Reestructuración',
-  adjustment: 'Ajuste',
-  charge: 'Cargo',
+  adjustment: 'Extracto',
+  charge: 'Compra',
 };
 const STRATEGY_LABELS = { reduce_term: 'reducir plazo', reduce_installment: 'reducir cuota', advance_installments: 'adelantar cuotas' };
 
@@ -37,7 +37,7 @@ export default function EventHistory({ history, onVoid }) {
             {entry.costMinor > 0 && <span className="text-[13px] text-ink-muted tabular-nums">Costo financiero {formatMoney(entry.costMinor)}</span>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className={`text-sm font-semibold tabular-nums ${entry.voided ? 'text-ink-faint line-through' : 'text-ink'}`}>{formatMoney(entry.amountMinor)}</span>
+            <span className={`text-sm font-semibold tabular-nums ${entry.voided ? 'text-ink-faint line-through' : 'text-ink'}`}>{formatMoney(entry.statedBalanceMinor ?? entry.amountMinor)}</span>
             {entry.canVoid && (
               <Button variant="ghost" size="icon" aria-label={`Anular ${labelOf(entry).toLowerCase()} del ${formatDueDate(entry.effectiveOn)}`} onClick={() => onVoid(entry)}>
                 <Ban size={16} aria-hidden="true" />

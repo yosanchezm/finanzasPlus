@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { dateInputValue } from '../../shared/lib/dates';
+import { ChargeDialog, StatementDialog } from './CardDialogs';
 import DebtDetail from './DebtDetail';
 import PaymentDialog from './PaymentDialog';
 import PrepaymentSimulator from './PrepaymentSimulator';
@@ -51,6 +52,18 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
     save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
   });
 
+  // Statements and purchases are plain events (no expense row), written like a payment: same nonce, same ids on retry.
+  const eventWriter = (message, alreadySaved) => ({
+    ...flow,
+    successMessage: () => message,
+    alreadySaved,
+    findSaved: ({ nonce }) => findDebtEventByDedupe(`web:${nonce}`),
+    save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
+  });
+  const statement = useCommitDialog(eventWriter('Extracto registrado.', 'El extracto ya se había registrado, así que no se guardó de nuevo.'));
+  const purchase = useCommitDialog(eventWriter('Compra registrada.', 'La compra ya se había registrado, así que no se guardó de nuevo.'));
+  const isCard = Boolean(detail?.projection.card);
+
   const voiding = useCommitDialog({
     ...flow,
     successMessage: () => 'Pago anulado.',
@@ -67,7 +80,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}
@@ -80,6 +93,12 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
           onSubmit={payment.submit}
           onClose={payment.close}
         />
+      )}
+      {statement.dialog && detail && (
+        <StatementDialog debt={debt} events={events} projection={detail.projection} actorId={user.$id} today={today} saveState={statement.saveState} onSubmit={statement.submit} onClose={statement.close} />
+      )}
+      {purchase.dialog && detail && (
+        <ChargeDialog debt={debt} events={events} actorId={user.$id} today={today} saveState={purchase.saveState} onSubmit={purchase.submit} onClose={purchase.close} />
       )}
       {simulator && detail && (
         <PrepaymentSimulator

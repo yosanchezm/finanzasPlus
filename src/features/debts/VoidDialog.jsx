@@ -5,6 +5,8 @@ import { DialogClose, DialogContent, DialogDescription, DialogRoot, DialogTitle 
 import { TextField } from '../../shared/ui/TextField';
 import { formatDueDate } from './debtLabels';
 
+const LABELS = { extra_payment: 'abono extra', charge: 'compra', adjustment: 'extracto' };
+
 /**
  * Confirmation to void a payment: it stays in the history as "Anulado", the balance goes back to what it was
  * and its expense in "Costos financieros" is removed. Nothing is written until the user confirms.
@@ -13,7 +15,7 @@ import { formatDueDate } from './debtLabels';
 export default function VoidDialog({ entry, saveState, onConfirm, onClose }) {
   const [reason, setReason] = useState('');
   const saving = saveState.status === 'saving';
-  const label = entry.kind === 'extra_payment' ? 'abono extra' : 'pago';
+  const label = LABELS[entry.kind] ?? 'pago';
 
   return (
     <DialogRoot open onOpenChange={(open) => { if (!open) onClose(); }}>
