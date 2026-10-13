@@ -7,6 +7,7 @@ import { Card, CardHeader } from '../../shared/ui/Card';
 import { Chip, OwnerChip } from '../../shared/ui/Chip';
 import { PageHeader } from '../../shared/ui/PageHeader';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
+import CardPanel from './CardPanel';
 import EventHistory from './EventHistory';
 import PlanTable from './PlanTable';
 import { formatDueDate, formatEa, kindInfo } from './debtLabels';
@@ -35,7 +36,7 @@ function Section({ title, children }) {
  * the projection it is given and nothing else (no optimistic figures). `detail` is `buildDebtDetail(...)`
  * or null when the stored terms cannot be read. Actions only appear when their handler is passed.
  */
-export default function DebtDetail({ debt, detail, currentOwnerScope, notice, onBack, onPay, onSimulate, onVoid }) {
+export default function DebtDetail({ debt, detail, currentOwnerScope, notice, onBack, onPay, onSimulate, onVoid, onStatement, onCharge }) {
   const { label } = kindInfo(debt.kind);
   const back = <Button variant="ghost" onClick={onBack} className="self-start"><ArrowLeft size={16} aria-hidden="true" />Volver a deudas</Button>;
 
@@ -44,14 +45,16 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, on
   }
 
   const { projection, history, cost } = detail;
-  const { nextDue, plan } = projection;
+  const { nextDue, plan, card } = projection;
   const hasPlan = plan.length > 0;
   const open = projection.balanceMinor > 0;
   const rate = formatEa(toEffectiveAnnual(projection.terms.rate));
   const progress = debt.principalMinor > 0 ? Math.max(0, Math.min(100, ((debt.principalMinor - projection.balanceMinor) / debt.principalMinor) * 100)) : 0;
-  const actions = (onPay || onSimulate) && (
+  const actions = (onPay || onSimulate || onStatement || onCharge) && (
     <>
-      {onSimulate && hasPlan && open && <Button variant="secondary" onClick={onSimulate}><Calculator size={16} aria-hidden="true" />Simular abono</Button>}
+      {onStatement && <Button variant="secondary" onClick={onStatement}>Registrar extracto</Button>}
+      {onCharge && <Button variant="secondary" onClick={onCharge}>Registrar compra</Button>}
+      {onSimulate && !card && hasPlan && open && <Button variant="secondary" onClick={onSimulate}><Calculator size={16} aria-hidden="true" />Simular abono</Button>}
       {onPay && <Button onClick={onPay} disabled={!open}><Wallet size={16} aria-hidden="true" />Registrar pago</Button>}
     </>
   );
@@ -70,24 +73,26 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, on
       <Section title="Estado de la deuda">
         <div className="grid grid-cols-1 gap-4 min-[560px]:grid-cols-2 lg:grid-cols-4">
           <Figure label="Saldo" emphasis>{formatMoney(projection.balanceMinor)}</Figure>
-          <Figure label="Próxima cuota">
+          <Figure label={card ? 'Pago mínimo' : 'Próxima cuota'}>
             {nextDue ? (
               <>
                 <span>{formatMoney(nextDue.outstandingMinor)}</span>
                 <span className="text-sm font-medium text-ink-muted">{formatDueDate(nextDue.dueOn)}</span>
-                {nextDue.status === 'pastDue' && <Chip tone="danger">Vencida</Chip>}
+                {nextDue.status === 'pastDue' && <Chip tone="danger">{card ? 'Vencido' : 'Vencida'}</Chip>}
               </>
-            ) : 'Sin cuota pendiente'}
+            ) : card ? 'Sin pago mínimo pendiente' : 'Sin cuota pendiente'}
           </Figure>
           <Figure label="Tasa">{rate}</Figure>
-          {hasPlan
+          {card ? <Figure label="Pago total del extracto">{formatMoney(card.payInFullMinor)}</Figure> : hasPlan
             ? <Figure label="Cuotas restantes"><span>{projection.remainingPeriods}</span></Figure>
             : <Figure label="Dueño"><OwnerChip ownerScope={debt.ownerScope} currentOwnerScope={currentOwnerScope} /></Figure>}
         </div>
-        <div className="flex flex-col gap-1.5">
-          <ProgressBar value={progress} />
-          <span className="text-[13px] text-ink-muted tabular-nums">Pagado {formatPercent(progress)}</span>
-        </div>
+        {!card && (
+          <div className="flex flex-col gap-1.5">
+            <ProgressBar value={progress} />
+            <span className="text-[13px] text-ink-muted tabular-nums">Pagado {formatPercent(progress)}</span>
+          </div>
+        )}
       </Section>
 
       {hasPlan && (
@@ -102,9 +107,13 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, on
         </Section>
       )}
 
-      <Section title="Plan de pagos">
-        {hasPlan ? <PlanTable plan={plan} /> : <p className="text-sm text-ink-muted">Esta deuda no tiene plan de cuotas: solo se lleva el saldo.</p>}
-      </Section>
+      {card ? (
+        <Section title="Tu tarjeta"><CardPanel projection={projection} /></Section>
+      ) : (
+        <Section title="Plan de pagos">
+          {hasPlan ? <PlanTable plan={plan} /> : <p className="text-sm text-ink-muted">Esta deuda no tiene plan de cuotas: solo se lleva el saldo.</p>}
+        </Section>
+      )}
 
       <Section title="Historial">
         <EventHistory history={history} onVoid={onVoid} />

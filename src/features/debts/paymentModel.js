@@ -21,7 +21,8 @@ export const dueNow = (projection) => projection.plan
 /**
  * Pure preview of a payment form. Nothing is written: the split comes from `planCommit` (the same
  * plan the save will run), so what the dialog shows is what gets stored.
- * An amount above `dueMinor` on a debt with a plan is an extra payment and needs a strategy.
+ * An amount above `dueMinor` on a debt with a plan is an extra payment and needs a strategy;
+ * on a card (`projection.card`) any amount is a plain payment: `dueMinor` is the minimum and the rest pays down the balance.
  * @param {{ debt: object, events: object[], projection: object, actorId: string, today: string,
  *   amount: string, effectiveOn: string, strategy: (string | null) }} input
  * @returns {{ dueMinor: number, requiresStrategy: boolean, issue: (string | null), draft: (object | null),
@@ -35,7 +36,7 @@ export function previewPayment({ debt, events, projection, actorId, today, amoun
   if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) return { ...none, issue: MESSAGES.invalid_amount };
   if (!isIsoDate(effectiveOn)) return { ...none, issue: 'Elige una fecha válida.' };
 
-  const requiresStrategy = projection.plan.length > 0 && amountMinor > dueMinor;
+  const requiresStrategy = !projection.card && projection.plan.length > 0 && amountMinor > dueMinor;
   if (requiresStrategy && !strategy) return { ...none, requiresStrategy, issue: 'Elige cómo aplicar el abono extra.' };
   const draft = requiresStrategy
     ? { kind: 'extra_payment', effectiveOn, amountMinor, strategy }

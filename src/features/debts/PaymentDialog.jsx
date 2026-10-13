@@ -29,7 +29,8 @@ function Line({ label, value, strong = false }) {
  */
 export default function PaymentDialog({ debt, events, projection, actorId, today, initial, saveState, onSubmit, onClose }) {
   const strategyLabelId = useId();
-  const [amount, setAmount] = useState(String(initial?.amountMinor ?? (dueNow(projection) || projection.balanceMinor)));
+  const { card } = projection;
+  const [amount, setAmount] = useState(String(initial?.amountMinor ?? card?.payInFullMinor ?? (dueNow(projection) || projection.balanceMinor)));
   const [effectiveOn, setEffectiveOn] = useState(today);
   const [strategy, setStrategy] = useState(initial?.strategy ?? null);
   const result = useMemo(
@@ -51,7 +52,7 @@ export default function PaymentDialog({ debt, events, projection, actorId, today
     <DialogRoot open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent variant="center" aria-describedby={undefined}>
         <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
-          <DialogHeader title="Registrar pago" description={`${debt.name}. Lo que debes ahora: ${formatMoney(result.dueMinor)}.`} />
+          <DialogHeader title="Registrar pago" description={card ? `${debt.name}. Pago mínimo: ${formatMoney(result.dueMinor)}. Pago total del extracto: ${formatMoney(card.payInFullMinor)}.` : `${debt.name}. Lo que debes ahora: ${formatMoney(result.dueMinor)}.`} />
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
               <TextField label="Monto del pago" type="number" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={frozen} inputClassName="tabular-nums" />

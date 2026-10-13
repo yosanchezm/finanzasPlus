@@ -26,3 +26,23 @@ export const makeBigLoan = () => makeDebt({ principalMinor: 10000000 }, {
   principalMinor: 10000000, n: 36,
   charges: [{ id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 10000, cadence: 'per_installment' }],
 });
+
+// The core's independent card fixture: 28% EA, statement day 15, due day 30, 500,000 revolving, a 1,200,000 purchase in
+// 12 installments at 0%, and a 9,000 fee plus IVA. Statement 1 (2026-04-15): minimum 146,102, pay in full 621,102.
+export const CARD_TERMS = {
+  kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly',
+  rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' },
+  charges: [
+    { id: 'mgmt_fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 9000 },
+    { id: 'mgmt_iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'mgmt_fee', value: 19 },
+  ],
+  card: {
+    statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 },
+    deferred: [{ id: 'nevera', label: 'Nevera', principalMinor: 1200000, n: 12, rate: { convention: 'ZERO' } }],
+  },
+};
+
+export const makeCard = (overrides = {}) => ({
+  $id: 'c1', householdId: 'h1', name: 'Visa Gold', lender: 'Banco Andino', kind: 'card', ownerScope: 'you', status: 'active', currency: 'COP',
+  principalMinor: 500000, openedOn: '2026-04-01', termsVersion: 1, actorId: 'u1', termsJson: serializeTerms(CARD_TERMS), ...overrides,
+});
