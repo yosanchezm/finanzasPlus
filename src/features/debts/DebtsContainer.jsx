@@ -49,12 +49,18 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
     onNotify?.('Deuda registrada.');
   };
 
+  const list = data.status === 'ready'
+    ? buildDebtList({ debts: data.debts, events: data.events, asOf: dateInputValue(), inScope })
+    : { items: [], totals: undefined };
+
   const openDebt = data.status === 'ready' ? data.debts.find((debt) => debt.$id === openId) : undefined;
   if (openDebt) {
     return (
       <DebtDetailContainer
         debt={openDebt}
         events={data.events}
+        otherDebts={list.items.filter((item) => !item.unreadable && item.id !== openDebt.$id && item.balanceMinor > 0).map((item) => ({ id: item.id, name: item.name, eaPercent: item.eaPercent }))}
+        inScope={inScope}
         reconcileCosts={data.reconcileCosts}
         reload={data.reload}
         currentOwnerScope={currentOwnerScope}
@@ -66,10 +72,6 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
       />
     );
   }
-
-  const list = data.status === 'ready'
-    ? buildDebtList({ debts: data.debts, events: data.events, asOf: dateInputValue(), inScope })
-    : { items: [], totals: undefined };
 
   return (
     <>

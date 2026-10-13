@@ -5,7 +5,7 @@ import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
 import { makeBigLoan, makeEvent, makePayment } from './debtFixtures';
 
-vi.mock('../../appwrite', () => ({ debtPort: vi.fn() }));
+vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn() }));
 
 const port = { ensureCostCategory: vi.fn(), createEvent: vi.fn(), findEventByDedupe: vi.fn(), createCostRow: vi.fn(), deleteCostRow: vi.fn() };
 const TODAY = '2026-02-05';
@@ -29,6 +29,7 @@ const save = (user, name = 'Registrar pago') => user.click(within(screen.getByRo
 beforeEach(() => {
   vi.clearAllMocks();
   api.debtPort.mockReturnValue(port);
+  api.getTransactionsInRange.mockResolvedValue([]);
   port.ensureCostCategory.mockResolvedValue('cat1');
   port.createEvent.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
   port.createCostRow.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
@@ -182,5 +183,43 @@ describe('DebtDetailContainer void flow', () => {
 
     expect(screen.queryByRole('button', { name: /Anular/ })).not.toBeInTheDocument();
     expect(screen.getByText('Anulado')).toBeInTheDocument();
+  });
+});
+
+describe('DebtDetailContainer simulator', () => {
+  const simulate = async (user, amount = '2000000') => {
+    await user.click(screen.getByRole('button', { name: 'Simular abono' }));
+    await user.type(within(screen.getByRole('dialog')).getByLabelText('Monto del abono'), amount);
+  };
+
+  it('simulates without writing and hands the amount and strategy to the payment form', async () => {
+    const { user } = setup();
+    await simulate(user);
+    expect(await screen.findByRole('region', { name: 'Recomendación' })).toBeInTheDocument();
+    expect(api.getTransactionsInRange).toHaveBeenCalledTimes(1);
+    expect(port.createEvent).not.toHaveBeenCalled();
+
+    await user.click(within(screen.getByRole('article', { name: 'Reducir plazo' })).getByRole('button', { name: 'Registrar como abono' }));
+
+    expect(screen.queryByLabelText('Monto del abono')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Monto del pago')).toHaveValue(2000000);
+    expect(screen.getByRole('radio', { name: /Reducir plazo/ })).toBeChecked();
+    await save(user, 'Registrar abono');
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ kind: 'extra_payment', amountMinor: 2000000 });
+    expect(JSON.parse(data.payloadJson)).toEqual({ strategy: 'reduce_term' });
+  });
+
+  it('uses the last three months of income and expenses once they load', async () => {
+    api.getTransactionsInRange.mockResolvedValue([
+      { type: 'income', amountMinor: 3000000, occurredAt: '2026-01-10T12:00:00', ownerScope: 'you' },
+      { type: 'expense', amountMinor: 2850000, occurredAt: '2026-01-12T12:00:00', ownerScope: 'you' },
+    ]);
+    const { user } = setup({ today: '2026-02-05' });
+    await simulate(user);
+
+    expect(await screen.findByText(/Tu margen mensual promedio es \$ 50\.000/)).toBeInTheDocument();
   });
 });

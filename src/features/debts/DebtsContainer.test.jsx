@@ -9,7 +9,7 @@ import { makeDebt, makeEvent, makePayment } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({
   listDebts: vi.fn(), listDebtEvents: vi.fn(), createDebt: vi.fn(), debtPort: vi.fn(),
-  listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
+  getTransactionsInRange: vi.fn(), listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
 }));
 
 const port = { ensureCostCategory: vi.fn(), createEvent: vi.fn(), findEventByDedupe: vi.fn(), createCostRow: vi.fn(), deleteCostRow: vi.fn() };
@@ -32,6 +32,7 @@ beforeEach(() => {
   api.createDebt.mockResolvedValue({});
   api.debtPort.mockReturnValue(port);
   api.listCostRows.mockResolvedValue([]);
+  api.getTransactionsInRange.mockResolvedValue([]);
   api.ensureCostCategory.mockResolvedValue('cat1');
   port.createEvent.mockImplementation(async ({ id, data }) => ({ $id: id, ...data }));
 });
@@ -212,5 +213,20 @@ describe('DebtsContainer detail', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('No se pudieron verificar los costos financieros de esta deuda.');
     expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+
+  it('passes the other debts to the simulator so a pricier one is recommended first', async () => {
+    const card = makeDebt({ $id: 'd2', name: 'Tarjeta Visa' }, { rate: { value: 40, basis: 'effective', periodicity: 'annual', timing: 'arrears' } });
+    api.listDebts.mockResolvedValue([makeDebt(), card]);
+    api.listDebtEvents.mockResolvedValue(EVENTS);
+    render(<DebtsContainer inScope={inScope} currentOwnerScope="you" householdId="h1" user={{ $id: 'u1' }} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Crédito de consumo' }));
+    await user.click(await screen.findByRole('button', { name: 'Simular abono' }));
+    await user.type(screen.getByLabelText('Monto del abono'), '200000');
+
+    const verdict = await screen.findByRole('region', { name: 'Recomendación' });
+    expect(within(verdict).getByText('Pagar primero la deuda más cara')).toBeInTheDocument();
+    expect(within(verdict).getByText(/Tarjeta Visa/)).toBeInTheDocument();
   });
 });
