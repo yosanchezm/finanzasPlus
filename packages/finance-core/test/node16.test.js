@@ -102,6 +102,7 @@ describe('finance-core sources', () => {
         'src/charges.js',
         'src/errors.js',
         'src/ledger/allocate.js',
+        'src/ledger/commit.js',
         'src/ledger/events.js',
         'src/ledger/project.js',
         'src/ledger/rows.js',
@@ -142,6 +143,7 @@ describe('public barrel (index.js)', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
         'CONVENTIONS',
+        'CommitError',
         'EVENT_KINDS',
         'PERIODICITIES',
         'SMMLV_TABLE',
@@ -156,6 +158,7 @@ describe('public barrel (index.js)', () => {
         'allocate',
         'assertMinor',
         'buildSchedule',
+        'commitPlan',
         'compareIso',
         'convertRate',
         'daysBetween',
@@ -166,6 +169,7 @@ describe('public barrel (index.js)', () => {
         'parseTerms',
         'periodDates',
         'periodicRate',
+        'planCommit',
         'project',
         'rateLabel',
         'registerProjector',

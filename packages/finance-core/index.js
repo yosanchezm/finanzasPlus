@@ -1,7 +1,7 @@
 // Public API of the finance core: pure, dependency-free ESM that runs in the
 // browser and on Node 16 (the Appwrite Function runtime). Import from here;
 // anything not re-exported below is internal.
-export { TermsTooLarge, ValidationError } from './src/errors.js';
+export { CommitError, TermsTooLarge, ValidationError } from './src/errors.js';
 export { assertMinor, roundUnit, sumMinor } from './src/money.js';
 export {
   PERIODICITIES,
@@ -27,3 +27,4 @@ export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
 export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
 export { allocate } from './src/ledger/allocate.js';
 export { project, registerProjector } from './src/ledger/project.js';
+export { commitPlan, planCommit } from './src/ledger/commit.js';
