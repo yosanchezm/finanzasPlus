@@ -37,7 +37,7 @@ rules:
     - Group by phase; keep each chained slice within the 800-line review budget.
   apply:
     - Strict TDD: write a failing Vitest test first, then implement, then refactor.
-    - functions/nia is in scope (owner intent: Nia is part of this project, deployed only as a tar.gz). Until the nested .git/gitlink is resolved, never delete or rewrite functions/nia/.git without explicit owner confirmation.
+    - functions/nia is plain files in this repository (nested repo removed in debt-management S0a; backup at C:/Users/User.admin/backups/finanzasplus-nia-git-20261012). Package it with `npm run package:nia`.
   verify:
     - Run `npm test`; `npm run build` for build sanity.
   archive:
