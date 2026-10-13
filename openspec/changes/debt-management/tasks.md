@@ -102,16 +102,16 @@ Capabilities: nia-in-repo-packaging. Nothing past S0a.1 runs until the owner con
 
 ## Phase S1: Core foundation (520 lines)
 
-- [ ] S1.1 RED: `packages/finance-core/test/money.test.js`: `roundUnit` half away from zero (including negatives and unit 100), `sumMinor`, `assertMinor` rejects non-integers/NaN. Reqs: DAS-1 (AD5). Pair: S1.2. Done: fails.
-- [ ] S1.2 GREEN: `packages/finance-core/src/money.js`. Pair: S1.1. Done: green.
-- [ ] S1.3 RED: `test/calendar.test.js`: `isIsoDate`, `addDays`, `addMonthsClamped` (2026-01-31 -> 2026-02-28 -> 2026-03-31, leap-year 02-29), `periodDates` for weekly, biweekly (14 days), monthly, bimonthly, quarterly, semiannual, annual, `daysBetween`, `compareIso`; `Date.UTC` only. Reqs: IRC-3. Pair: S1.4. Done: fails.
-- [ ] S1.4 GREEN: `src/calendar.js`. Pair: S1.3. Done: green.
-- [ ] S1.5 RED: `test/rates.test.js` plus helper `test/helpers/prng.js` (`mulberry32`, 10 lines): 24% EA monthly i within 1e-6 and round trip 1e-9; 2.1% MV and 25.2% NAMV both give about 28.32% EA; 2% monthly anticipated i = 0.02/0.98 and `(1-ia)^-m - 1`; interest-free (ZERO) gives 0/0; seeded 0-60% round trip over every convention, periodicity and timing within 1e-9; anticipated 100%, negative or non-finite throws a typed validation error and returns no number; `rateLabel` -> `"2.1% MV ≈ 28.32% EA"`. Reqs: IRC-1, IRC-2. Pair: S1.6. Done: fails.
-- [ ] S1.6 GREEN: `src/rates.js` (`CONVENTIONS`, `normalizeRate`, `periodicRate`, `toEffectiveAnnual`, `convertRate`, `rateLabel`). Pair: S1.5. Done: green.
-- [ ] S1.7 RED: `test/legal.test.js` (tables injected): 30% EA vs a 28.59% consumer cap as of 2026-10 returns a warning with cap and `asOf`; no cap entry returns no warning and does not throw; below cap none; `ley1555Notice` for a mortgage says scope is unverified and includes `asOf`; notices never block. Reqs: IRC-4, DPA-4. Pair: S1.8. Done: fails.
-- [ ] S1.8 GREEN: `src/legal.js` with `USURY_TABLE`/`SMMLV_TABLE` filled from OA-5 (empty or marked placeholder otherwise). Pair: S1.7. Done: green.
-- [ ] S1.9 RED: `test/node16.test.js` (node environment): scan every `packages/finance-core/**/*.js` for `findLast`, `toSorted`, `toReversed`, `structuredClone`, `Object.groupBy`, array `.at(`, regex `v` flag; barrel test that `index.js` exports the public API only. Reqs: NIP-3 (Node16 safety). Pair: S1.10. Done: fails (barrel missing).
-- [ ] S1.10 GREEN and REFACTOR: `packages/finance-core/index.js` barrel; size checkpoint; `npm test`. Pair: S1.9. Done: green.
+- [x] S1.1 RED: `packages/finance-core/test/money.test.js`: `roundUnit` half away from zero (including negatives and unit 100), `sumMinor`, `assertMinor` rejects non-integers/NaN. Reqs: DAS-1 (AD5). Pair: S1.2. Done: fails.
+- [x] S1.2 GREEN: `packages/finance-core/src/money.js`. Pair: S1.1. Done: green.
+- [x] S1.3 RED: `test/calendar.test.js`: `isIsoDate`, `addDays`, `addMonthsClamped` (2026-01-31 -> 2026-02-28 -> 2026-03-31, leap-year 02-29), `periodDates` for weekly, biweekly (14 days), monthly, bimonthly, quarterly, semiannual, annual, `daysBetween`, `compareIso`; `Date.UTC` only. Reqs: IRC-3. Pair: S1.4. Done: fails.
+- [x] S1.4 GREEN: `src/calendar.js`. Pair: S1.3. Done: green.
+- [x] S1.5 RED: `test/rates.test.js` plus helper `test/helpers/prng.js` (`mulberry32`, 10 lines): 24% EA monthly i within 1e-6 and round trip 1e-9; 2.1% MV and 25.2% NAMV both give about 28.32% EA; 2% monthly anticipated i = 0.02/0.98 and `(1-ia)^-m - 1`; interest-free (ZERO) gives 0/0; seeded 0-60% round trip over every convention, periodicity and timing within 1e-9; anticipated 100%, negative or non-finite throws a typed validation error and returns no number; `rateLabel` -> `"2.1% MV ≈ 28.32% EA"`. Reqs: IRC-1, IRC-2. Pair: S1.6. Done: fails.
+- [x] S1.6 GREEN: `src/rates.js` (`CONVENTIONS`, `normalizeRate`, `periodicRate`, `toEffectiveAnnual`, `convertRate`, `rateLabel`). Pair: S1.5. Done: green.
+- [x] S1.7 RED: `test/legal.test.js` (tables injected): 30% EA vs a 28.59% consumer cap as of 2026-10 returns a warning with cap and `asOf`; no cap entry returns no warning and does not throw; below cap none; `ley1555Notice` for a mortgage says scope is unverified and includes `asOf`; notices never block. Reqs: IRC-4, DPA-4. Pair: S1.8. Done: fails.
+- [x] S1.8 GREEN: `src/legal.js` with `USURY_TABLE`/`SMMLV_TABLE` filled from OA-5 (empty or marked placeholder otherwise). Pair: S1.7. Done: green.
+- [x] S1.9 RED: `test/node16.test.js` (node environment): scan every `packages/finance-core/**/*.js` for `findLast`, `toSorted`, `toReversed`, `structuredClone`, `Object.groupBy`, array `.at(`, regex `v` flag; barrel test that `index.js` exports the public API only. Reqs: NIP-3 (Node16 safety). Pair: S1.10. Done: fails (barrel missing).
+- [x] S1.10 GREEN and REFACTOR: `packages/finance-core/index.js` barrel; size checkpoint; `npm test`. Pair: S1.9. Done: green.
 
 ## Phase S2: Terms, schedules, charges (740 lines)
 

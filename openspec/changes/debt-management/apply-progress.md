@@ -96,3 +96,58 @@ Test summary: 20 tests written (8 tar + 12 packaging); full suite 32 files / 214
 - `npm run package:nia` regenerated the local, untracked `functions/nia.tar.gz` (OA-4: owner uploads it after merge). `functions/nia-deploy.tar.gz` is untouched.
 - Pre-existing flakiness persists: the first full-suite run of the session hit 2 jsdom timeouts under load; the rerun passed 194/194.
 - The Node version used here is 24; the Node 16 guarantees come from the Vite `target`, the API scan and the static `node:`/`undici` import check, not from executing on Node 16.
+
+## Batch 3: S1 (core foundation: money, calendar, rates, legal) - COMPLETE
+
+Branch `feat/debt-s1-core-rates` (stacked on `feat/debt-s0b-nia-packaging`). Commits (each one a green, reviewable work unit):
+- `98e3dc8 feat(finance-core): add money and calendar primitives` (505 lines)
+- `7113c15 feat(finance-core): add interest rate conversion` (431 lines)
+- `4328929 feat(finance-core): add legal notices, public barrel and Node 16 guard` (406 lines)
+
+Size: 1,342 added / 0 deleted lines across 12 files (src 485, barrel 23, tests 834). The forecast was 520, so the 800-line slice budget is exceeded by about 540 lines. The design lists no overflow valve for S1; the three commits above are natural cut points (505 / 431 / 406, each under 800) if the orchestrator or owner prefers stacked sub-slices S1a/S1b/S1c over a `size:exception`. Decision pending (not taken here).
+
+### Tasks
+- [x] S1.1 RED `packages/finance-core/test/money.test.js` (suite failed: `src/errors.js` missing)
+- [x] S1.2 GREEN `src/money.js` (+ `src/errors.js` with `ValidationError`)
+- [x] S1.3 RED `test/calendar.test.js` (suite failed: `src/calendar.js` missing)
+- [x] S1.4 GREEN `src/calendar.js`
+- [x] S1.5 RED `test/rates.test.js` + `test/helpers/prng.js` (suite failed: `src/rates.js` missing)
+- [x] S1.6 GREEN `src/rates.js`
+- [x] S1.7 RED `test/legal.test.js` (suite failed: `src/legal.js` missing)
+- [x] S1.8 GREEN `src/legal.js`; `USURY_TABLE` holds the single known consumer cap (28.59% EA, 2026-10-01..2026-10-31, secondary source, `verified:false`); `SMMLV_TABLE` empty placeholder (OA-5 still open)
+- [x] S1.9 RED `test/node16.test.js` (suite failed: `index.js` barrel missing)
+- [x] S1.10 GREEN and REFACTOR `index.js` barrel; size checkpoint run (see above); full `npm test`
+
+### TDD Cycle Evidence
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| S1.1/S1.2 | `packages/finance-core/test/money.test.js` | Unit (node env) | N/A (new) | Written first; suite failed to import `errors.js` | 13/13 passed | Positive and negative halves, unit 1 and 100, -0 normalisation, integer/NaN/Infinity/string/2^60 rejections, empty vs non-empty sums, error code and field label | None needed |
+| S1.3/S1.4 | `test/calendar.test.js` | Unit (node env) | N/A (new) | Written first; suite failed to import `calendar.js` | 23/23 passed | Leap and non-leap clamps, anchor-day recovery (02-28 -> 03-31), year rollover both directions, all 7 periodicities, 36-period schedule, invalid inputs | Extracted `hasPeriodicity` (own-key check, replaces `Object.hasOwn` which is Node 16.9+); added a test for it afterwards (24/24) |
+| S1.5/S1.6 | `test/rates.test.js` + `test/helpers/prng.js` | Unit + seeded property (node env) | N/A (new) | Written first; suite failed to import `rates.js` | 24/24 passed | Spec scenarios (24% EA -> 0.0180875824835107, 2.1% MV and 25.2% NAMV -> 28.3243% EA, 2% monthly anticipated = 0.02/0.98, ZERO -> 0/0), invalid anticipated 100%/150%/nominal-equivalent, negatives/NaN/Infinity/strings, 6x6x25 = 900 convention round trips and 2x7x2x20 = 560 basis/periodicity/timing round trips within 1e-9 (case counts asserted) | None needed |
+| S1.7/S1.8 | `test/legal.test.js` | Unit (node env, tables injected) | N/A (new) | Written first; suite failed to import `legal.js` | 13/13 passed | Above/below/at cap, validity window boundaries (10-31 vs 11-01), no cap entry, bad input never throws, unverified flag, shipped table defaults, mortgage vs consumer/card Ley 1555 | None needed |
+| S1.9/S1.10 | `test/node16.test.js` | Static scan + barrel (node env) | N/A (new) | Written first; suite failed to import `index.js` | 8/8 passed | Scanner self-checks (11 positives, regex-v positives, clean negatives), real sources scanned (file list asserted, not empty), import specifiers all relative with `.js`, exact barrel key list. Mutation check: a temporary `src/zz_tmp.js` containing `.at(-1)` and `findLast` made the scan test fail, then was deleted | None needed |
+
+Test summary: 82 tests written (13 + 24 + 24 + 13 + 8), 82 passing; full suite 37 files / 296 tests passing (baseline after S0b: 32 files / 214). Pure functions created: 17 (3 money, 7 calendar incl. `hasPeriodicity`, 5 rates, 2 legal) plus the `mulberry32` test helper.
+
+### Work Unit Evidence
+| Evidence | Value |
+|---|---|
+| Focused test | `npx vitest run packages/finance-core`: exit 0, 5 files, 82 tests passed |
+| Runtime harness | N/A: pure functions with no runtime boundary; the seeded property tests (1,460 round-trip cases) are the harness. `npm test` exit 0 (37 files, 296 tests; two earlier full runs showed 3 and then 1 unrelated jsdom timeouts under load, rerun clean); `npm run build` exit 0 |
+| Rollback boundary | Delete `packages/finance-core/` (12 files; nothing else in the repo imports it yet) |
+
+### Deviations and decisions
+- Added `src/errors.js` (`ValidationError` with a stable `code`): not in the design's file table, but the spec requires a "typed validation error" and every module needs it. Exported from the barrel.
+- Rate model: `Rate = {value, basis, periodicity, timing}` exactly as designed. `effective` + non-annual periodicity is the per-period rate (so `2.1% MV` is `{2.1, effective, monthly, arrears}` and `2% monthly anticipated` is `{2, effective, monthly, advance}`); `nominal` is the annual rate compounded `periodicity` times a year (NAMV, NATV, NATA, NAMA). Interest-free (ZERO) is the rate 0% EA, so no extra basis value was added.
+- Units: `periodicRate` returns a fraction (0.018 = 1.8%); `toEffectiveAnnual` and `convertRate().value` use percent units like `Rate.value`. Documented in JSDoc.
+- Weekly = 52 and biweekly = 26 periods per year for rate compounding, while biweekly dates are 14 days apart (design open question on `semimonthly` unchanged).
+- `normalizeRate` also accepts `{convention, value}`; `convertRate` accepts a convention name or `{basis, periodicity, timing}`; `usuryNotice(rate, modality, asOf, {usuryTable})` takes an optional injected table (design signature plus a fourth options argument). Notices never throw: invalid rate, invalid `asOf` or missing cap all return `null`.
+- Notice `message` strings are English; the structured fields (`code`, `capEA`, `asOf`, `verified`, `scopeVerified`) are the contract and UIs can localise by `code`.
+- `periodDates` takes an optional fourth `anchorDay` argument. `PERIODICITIES` (with `perYear`) is exported from the barrel.
+- Node16 scan: scans production sources (`index.js`, `src/**`), not `test/` (the tests must name the forbidden APIs). It is a superset of the S1.9 list: also `findLastIndex`, `toSpliced`, `.with(`, `Map.groupBy`, `Object.hasOwn`. Extra check: every import in the core is relative with an explicit `.js` extension (dependency-free, browser-safe).
+- Vitest needed no config change: the default include already discovers `packages/**/*.test.js`. All finance-core tests carry `// @vitest-environment node` (pure code, no DOM).
+- OA-5 is still open: only the single secondary-source consumer cap is shipped (`verified:false`); `SMMLV_TABLE` is an empty placeholder and nothing reads it yet.
+
+### Notes
+- Date range: `isIsoDate` accepts years 1000..9999 only (4-digit years below 1000 would be misread by `Date.UTC`).
+- `rounded + 0` in `roundUnit` is deliberate (turns -0 into 0, tested).
