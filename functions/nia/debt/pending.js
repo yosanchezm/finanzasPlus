@@ -47,6 +47,11 @@ export function pickKeyboard(debts) {
   return debts.slice(0, MAX_PICK_BUTTONS).map((debt) => [button(String(debt.name).slice(0, 40), `nia:pick:${debt.$id}`)]);
 }
 
+/** Same buttons and callbacks as the other Nia confirmations. */
+export function confirmKeyboard() {
+  return [[button('Confirmar', 'nia:confirm'), button('Editar', 'nia:edit'), button('Cancelar', 'nia:cancel')]];
+}
+
 export function strategyKeyboard() {
   return STRATEGIES.map((strategy) => [button(STRATEGY_LABELS[strategy], `nia:strat:${strategy}`)]);
 }
