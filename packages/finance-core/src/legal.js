@@ -22,8 +22,9 @@ export const USURY_TABLE = Object.freeze([
     validFrom: '2026-10-01',
     validTo: '2026-10-31',
     capEA: 28.59,
-    source: 'Secondary source: news report citing Superfinanciera (not the official certificate)',
-    verified: false,
+    // Usury = 1.5 x the certified bancario corriente rate (IBC 19.06% EA, Superfinanciera Resolución 1472 de 2026).
+    source: 'Superfinanciera Resolución 1472 de 2026: IBC consumo y ordinario 19.06% EA x 1.5',
+    verified: true,
   }),
 ]);
 
@@ -31,11 +32,17 @@ export const USURY_TABLE = Object.freeze([
  * Monthly minimum wage (SMMLV) by year, maintained by hand.
  * Entry shape: { year, valueMinor, source, verified }.
  *
- * PLACEHOLDER (OA-5): intentionally empty until the owner supplies official
- * values. Nothing reads it yet; it is exported so the table has one home when
- * Ley 1555 scope checks need it.
+ * Nothing reads it yet; it is exported so the table has one home when
+ * Ley 1555 scope checks (880 SMMLV) need it.
  */
-export const SMMLV_TABLE = Object.freeze([]);
+export const SMMLV_TABLE = Object.freeze([
+  Object.freeze({
+    year: 2026,
+    valueMinor: 1750905,
+    source: 'Decreto 1469 de 2025 (value kept by Decreto 0159 de 2026)',
+    verified: true,
+  }),
+]);
 
 /**
  * Warns when a rate's EA exceeds the usury cap in force on `asOf`.

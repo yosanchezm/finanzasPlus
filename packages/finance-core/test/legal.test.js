@@ -67,28 +67,29 @@ describe('usuryNotice', () => {
 });
 
 describe('shipped tables', () => {
-  it('holds the single known consumer cap, marked unverified, for October 2026', () => {
+  it('holds the October 2026 consumer cap derived from the certified IBC (1.5 x 19.06% EA)', () => {
     expect(USURY_TABLE).toHaveLength(1);
     expect(USURY_TABLE[0]).toMatchObject({
       modality: 'consumer',
       validFrom: '2026-10-01',
       validTo: '2026-10-31',
       capEA: 28.59,
-      verified: false,
+      verified: true,
     });
     expect(typeof USURY_TABLE[0].source).toBe('string');
     expect(USURY_TABLE[0].source.length).toBeGreaterThan(10);
   });
 
   it('uses the shipped cap by default and warns for 30% EA in October 2026', () => {
-    expect(usuryNotice(ea(30), 'consumer', '2026-10-12')).toMatchObject({ capEA: 28.59, verified: false });
+    expect(usuryNotice(ea(30), 'consumer', '2026-10-12')).toMatchObject({ capEA: 28.59, verified: true });
     expect(usuryNotice(ea(24), 'consumer', '2026-10-12')).toBeNull();
     expect(usuryNotice(ea(30), 'consumer', '2026-09-30')).toBeNull();
   });
 
-  it('ships an empty SMMLV table until the owner supplies official values', () => {
-    expect(Array.isArray(SMMLV_TABLE)).toBe(true);
-    expect(SMMLV_TABLE).toHaveLength(0);
+  it('ships the 2026 SMMLV (Decreto 1469 de 2025) in whole pesos', () => {
+    expect(SMMLV_TABLE).toHaveLength(1);
+    expect(SMMLV_TABLE[0]).toMatchObject({ year: 2026, valueMinor: 1750905, verified: true });
+    expect(SMMLV_TABLE[0].source.length).toBeGreaterThan(10);
   });
 });
 
