@@ -1,7 +1,7 @@
 // Public API of the finance core: pure, dependency-free ESM that runs in the
 // browser and on Node 16 (the Appwrite Function runtime). Import from here;
 // anything not re-exported below is internal.
-export { ValidationError } from './src/errors.js';
+export { TermsTooLarge, ValidationError } from './src/errors.js';
 export { assertMinor, roundUnit, sumMinor } from './src/money.js';
 export {
   PERIODICITIES,
@@ -21,3 +21,4 @@ export {
   toEffectiveAnnual,
 } from './src/rates.js';
 export { SMMLV_TABLE, USURY_TABLE, ley1555Notice, usuryNotice } from './src/legal.js';
+export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, parseTerms, serializeTerms, validateTerms } from './src/terms.js';

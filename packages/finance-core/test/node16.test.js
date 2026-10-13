@@ -103,6 +103,7 @@ describe('finance-core sources', () => {
         'src/legal.js',
         'src/money.js',
         'src/rates.js',
+        'src/terms.js',
       ]),
     );
   });
@@ -129,6 +130,9 @@ describe('public barrel (index.js)', () => {
         'CONVENTIONS',
         'PERIODICITIES',
         'SMMLV_TABLE',
+        'TERMS_MAX_CHARS',
+        'TERMS_SCHEMA_VERSION',
+        'TermsTooLarge',
         'USURY_TABLE',
         'ValidationError',
         'addDays',
@@ -140,13 +144,16 @@ describe('public barrel (index.js)', () => {
         'isIsoDate',
         'ley1555Notice',
         'normalizeRate',
+        'parseTerms',
         'periodDates',
         'periodicRate',
         'rateLabel',
         'roundUnit',
+        'serializeTerms',
         'sumMinor',
         'toEffectiveAnnual',
         'usuryNotice',
+        'validateTerms',
       ].sort(),
     );
   });

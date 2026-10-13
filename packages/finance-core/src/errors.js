@@ -13,3 +13,12 @@ export class ValidationError extends Error {
     this.code = code;
   }
 }
+
+/** Serialized terms would not fit the 8000-character `termsJson` column. */
+export class TermsTooLarge extends ValidationError {
+  /** @param {string} message Human-readable detail. */
+  constructor(message) {
+    super('terms_too_large', message);
+    this.name = 'TermsTooLarge';
+  }
+}
