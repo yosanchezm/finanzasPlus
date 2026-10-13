@@ -19,7 +19,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay', awaiting: 'confirm'|'pick'|'strategy'|'convention',
+ * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -54,6 +54,11 @@ export function confirmKeyboard() {
 
 export function strategyKeyboard() {
   return STRATEGIES.map((strategy) => [button(STRATEGY_LABELS[strategy], `nia:strat:${strategy}`)]);
+}
+
+/** The single button under a simulation: it becomes a payment preview with the simulated strategy. */
+export function simulateKeyboard() {
+  return [[button('Registrar este abono', 'nia:simpay')]];
 }
 
 export function conventionKeyboard() {

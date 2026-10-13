@@ -1,24 +1,29 @@
-import { ValidationError, commitPlan, planCommit, project, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { ValidationError, advise, commitPlan, compareStrategies, planCommit, project, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
-import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, parseCallback, pickKeyboard, strategyKeyboard } from './pending.js';
+import { guardParaphrase } from './guard.js';
+import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
-import { clampTelegram, listReply } from './replies.js';
+import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
 // Debt flow of Nia (NDA-1, NDA-3, NDA-4). The model only extracts; every number comes
 // from the shared core and every write needs a confirmation. All I/O goes through
 // the injected `deps`, so the flow runs in tests without network:
 //   deps = { listRows(table, where), createRow(table, { id, data }), deleteRow(table, id),
 //            gemini(prompt), sendMessage(chatId, text, keyboard), saveSession(chatId, actorId, status, pending, history),
-//            now(), ids: { pending() }, config: { householdId, timezone, currency } }
+//            now(), ids: { pending() }, cashflowRows({ from, to }),
+//            config: { householdId, timezone, currency, webUrl?, adviceThresholds?, paraphraseTimeoutMs? } }
 // `createRow` rejects with `status: 409` when the id or a unique key already exists.
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification' };
+const PARAPHRASE_TIMEOUT_MS = 8000;
 
-const WEB_ONLY = 'Simular abonos y pedir una recomendación todavía no está disponible por Telegram. Puedes hacerlo en la web, en la sección Deudas.';
+const CARDS_WEB = 'Simular y recomendar abonos aplica a préstamos con plan de cuotas; todavía no está disponible para tarjetas (ni en la web).';
+const ASK_EXTRA = '¿Cuánto quieres abonar? Escríbeme el monto en pesos.';
 const PROBLEMS = {
   negative_amount: 'El monto no puede ser negativo. Escríbelo de nuevo, por ejemplo: “pagué 500.000 al carro”.',
   invalid_amount: 'No entendí el monto. Escríbelo en pesos y sin decimales.',
@@ -83,16 +88,23 @@ async function summaries(deps, debts, asOf) {
       const projection = project(debt, events.filter((event) => event.debtId === debt.$id), asOf);
       const { nextDue } = projection;
       return {
+        id: debt.$id,
         name: debt.name,
+        ownerScope: debt.ownerScope,
         balanceMinor: projection.balanceMinor,
         pastDueMinor: projection.pastDueMinor,
         nextDue: nextDue ? { dueOn: nextDue.dueOn, amountMinor: nextDue.outstandingMinor } : null,
         eaPercent: toEffectiveAnnual(projection.terms.rate),
       };
     } catch {
-      return { name: debt.name, unreadable: true };
+      return { id: debt.$id, name: debt.name, ownerScope: debt.ownerScope, unreadable: true };
     }
   });
+}
+
+/** Code-computed summaries of every non-archived debt: what the list, the advice and the analysis snapshot show. */
+export async function debtSummaries(deps) {
+  return summaries(deps, await loadDebts(deps), today(deps));
 }
 
 async function finishCreate(deps, ctx, id, create) {
@@ -129,15 +141,88 @@ async function continuePay(deps, ctx, id, debt, draft) {
   return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
 }
 
+// Finds the debt a request is about: a match runs at once, otherwise the user picks with buttons.
+async function withDebt(deps, ctx, { debtRef }, debts, { action, draft, question }, run) {
+  const found = findDebt(debts, debtRef);
+  if (found.match) return run(deps.ids.pending(), found.match);
+  const options = found.candidates || debts.filter((debt) => debt.status === 'active').slice(0, MAX_CANDIDATES);
+  if (options.length === 0) return inform(deps, ctx, 'No tienes deudas registradas todavía. Puedes crear una escribiéndome los datos del préstamo.');
+  const pending = buildPending({ id: deps.ids.pending(), action, awaiting: 'pick', candidates: options.map((debt) => debt.$id), draft });
+  return say(deps, ctx, { text: question, keyboard: pickKeyboard(options), status: STATUS.pick, pending });
+}
+
 async function startPay(deps, ctx, request, debts) {
   if (request.amountMinor === null) return inform(deps, ctx, '¿Cuánto pagaste? Escríbeme el monto en pesos.');
   const draft = { amountMinor: request.amountMinor, effectiveOn: request.paidOn, ...(request.strategy ? { strategy: request.strategy } : {}) };
-  const found = findDebt(debts, request.debtRef);
-  if (found.match) return continuePay(deps, ctx, deps.ids.pending(), found.match, draft);
-  const options = found.candidates || debts.filter((debt) => debt.status === 'active').slice(0, MAX_CANDIDATES);
-  if (options.length === 0) return inform(deps, ctx, 'No tienes deudas registradas todavía. Puedes crear una escribiéndome los datos del préstamo.');
-  const pending = buildPending({ id: deps.ids.pending(), action: 'pay', awaiting: 'pick', candidates: options.map((debt) => debt.$id), draft });
-  return say(deps, ctx, { text: '¿A cuál deuda corresponde el pago?', keyboard: pickKeyboard(options), status: STATUS.pick, pending });
+  return withDebt(deps, ctx, request, debts, { action: 'pay', draft, question: '¿A cuál deuda corresponde el pago?' }, (id, debt) => continuePay(deps, ctx, id, debt, draft));
+}
+
+async function startAnalysis(deps, ctx, request, debts) {
+  if (request.extraMinor === null) return inform(deps, ctx, ASK_EXTRA);
+  const draft = { amountMinor: request.extraMinor, ...(request.strategy ? { strategy: request.strategy } : {}) };
+  const question = request.action === 'simulate' ? '¿A cuál deuda quieres simular el abono?' : '¿Sobre cuál deuda quieres la recomendación?';
+  return withDebt(deps, ctx, request, debts, { action: request.action, draft, question }, (id, debt) => runAnalysis(deps, ctx, request.action, id, debt, draft, debts));
+}
+
+// Simulate (NDA-5): the core compares the strategies and nothing is written. The session keeps what the
+// nia:simpay button needs to turn the simulation into a payment.
+async function simulate(deps, ctx, id, debt, draft, events) {
+  const asOf = today(deps);
+  const strategy = draft.strategy || 'reduce_term';
+  const comparison = compareStrategies(debt, events, { amountMinor: draft.amountMinor, on: asOf });
+  const eventCtx = { eventId: eventIdOf({ id }), dedupeKey: dedupeKeyOf({ id }), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf };
+  const { projection } = planCommit(debt, events, { kind: 'extra_payment', effectiveOn: asOf, amountMinor: draft.amountMinor, strategy }, eventCtx);
+  const text = simulateReply({ name: debt.name, comparison, strategy, plan: projection.plan, webUrl: deps.config.webUrl });
+  const pending = buildPending({ id, action: 'simulate', awaiting: 'simpay', debtId: debt.$id, draft: { amountMinor: draft.amountMinor, strategy } });
+  return say(deps, ctx, { text, keyboard: simulateKeyboard(), status: STATUS.simpay, pending });
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('paraphrase timeout')), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Gemini only rewords the facts (AD11). A failure, a timeout or a number that is not in the facts all mean null.
+async function paraphrase(deps, facts, name) {
+  try {
+    const raw = await withTimeout(deps.gemini(paraphrasePrompt(facts, name)), deps.config.paraphraseTimeoutMs || PARAPHRASE_TIMEOUT_MS);
+    return guardParaphrase(raw && raw.reply, facts, [name]);
+  } catch {
+    return null;
+  }
+}
+
+async function cashflowRows(deps, asOf) {
+  try {
+    return await deps.cashflowRows(cashflowWindow(asOf));
+  } catch {
+    return []; // unknown cash flow: the advice says so instead of guessing
+  }
+}
+
+// Advise (NDA-5, NDA-6, DPA-2, DPA-3): compareStrategies + cash flow -> advise -> facts -> paraphrase -> guard -> template.
+async function adviseOn(deps, ctx, debt, draft, events, debts) {
+  const asOf = today(deps);
+  const inScope = inScopeFor(debt.ownerScope);
+  const comparison = compareStrategies(debt, events, { amountMinor: draft.amountMinor, on: asOf });
+  const otherDebts = (await summaries(deps, debts, asOf))
+    .filter((item) => !item.unreadable && item.id !== debt.$id && item.balanceMinor > 0 && inScope(item))
+    .map(({ id, name, eaPercent }) => ({ id, name, eaPercent }));
+  const signals = cashflowSignals({ rows: await cashflowRows(deps, asOf), today: asOf, timezone: deps.config.timezone, inScope, otherDebts });
+  const { facts } = advise(comparison, signals, deps.config.adviceThresholds || {});
+  return inform(deps, ctx, (await paraphrase(deps, facts, debt.name)) || adviseReply(facts, debt.name));
+}
+
+async function runAnalysis(deps, ctx, action, id, debt, draft, debts) {
+  if (debt.kind === 'card') return inform(deps, ctx, CARDS_WEB);
+  const events = await loadEvents(deps, debt.$id);
+  try {
+    return await (action === 'simulate' ? simulate(deps, ctx, id, debt, draft, events) : adviseOn(deps, ctx, debt, draft, events, debts));
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return inform(deps, ctx, describeCoreError(error));
+  }
 }
 
 /**
@@ -158,11 +243,11 @@ export async function handleDebt(deps, ctx) {
     if (request.missingFields.length) return inform(deps, ctx, `Para registrar la deuda necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
     return finishCreate(deps, ctx, deps.ids.pending(), request.create);
   }
-  return inform(deps, ctx, WEB_ONLY);
+  return startAnalysis(deps, ctx, request, debts);
 }
 
 /**
- * `nia:pick:`, `nia:strat:`, `nia:conv:` and `nia:simpay` buttons.
+ * `nia:pick:`, `nia:strat:`, `nia:conv:` and `nia:simpay` buttons (`simpay` turns the last simulation into a payment preview).
  * @param {object} deps
  * @param {{ chatId: string, actorId: string, profile: object, history: object[], pending: (object | null) }} ctx `pending` is the session's pending payload.
  * @param {string} data The callback data.
@@ -170,16 +255,19 @@ export async function handleDebt(deps, ctx) {
 export async function handleDebtCallback(deps, ctx, data) {
   const action = parseCallback(data);
   if (!action) return undefined;
-  if (action.type === 'simpay') return notify(deps, ctx, WEB_ONLY);
   const { pending } = ctx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention' }[action.type];
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay' }[action.type];
   if (pending.awaiting !== stage) return notify(deps, ctx, 'Esa opción ya no aplica a la solicitud actual.');
   if (action.type === 'convention') return finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, action.value));
   if (action.type === 'pick' && !pending.candidates.includes(action.value)) return notify(deps, ctx, 'Esa deuda no es una de las opciones. Elige una de la lista o escríbeme de nuevo.');
-  const debt = (await loadDebts(deps)).find((item) => item.$id === (action.type === 'pick' ? action.value : pending.debtId));
+  const debts = await loadDebts(deps);
+  const debt = debts.find((item) => item.$id === (action.type === 'pick' ? action.value : pending.debtId));
   if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
-  return continuePay(deps, ctx, pending.id, debt, action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : pending.draft);
+  if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
+  // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
+  const draft = action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : action.type === 'simpay' ? { ...pending.draft, effectiveOn: today(deps) } : pending.draft;
+  return continuePay(deps, ctx, pending.id, debt, draft);
 }
 
 async function commitPay(deps, ctx, pending, asOf) {

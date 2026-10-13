@@ -174,8 +174,10 @@ export function normaliseDebtExtraction(raw, { today }) {
     if (amountMinor === undefined) missingFields.push('amount');
     result.amountMinor = amountMinor ?? null;
     if (result.paidOn > today) problems.push('future_date');
-  } else if (action === 'simulate') {
-    result.extraMinor = isPositiveInteger(input.extraMinor) ? input.extraMinor : null;
+  } else if (action === 'simulate' || action === 'advise') {
+    // The extra amount may arrive as extraMinor or, like a payment, as amountMinor.
+    const given = [input.extraMinor, input.amountMinor].find(isPositiveInteger);
+    result.extraMinor = given === undefined ? null : given;
   } else if (action === 'create') {
     Object.assign(result, readCreate(input, today, missingFields, problems));
   }

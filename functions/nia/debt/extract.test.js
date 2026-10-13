@@ -92,9 +92,16 @@ describe('normaliseDebtExtraction: pay', () => {
     expect(norm(null).action).toBe('list');
   });
 
-  it('keeps the other actions for later slices', () => {
+  it('reads the extra amount of a simulation or an advice request, from extraMinor or amountMinor', () => {
     expect(norm({ action: 'simulate', extraMinor: 2000000 })).toMatchObject({ action: 'simulate', extraMinor: 2000000 });
-    expect(norm({ action: 'advise' }).action).toBe('advise');
+    expect(norm({ action: 'advise', extraMinor: 500000 })).toMatchObject({ action: 'advise', extraMinor: 500000 });
+    expect(norm({ action: 'advise', amountMinor: 750000 })).toMatchObject({ action: 'advise', extraMinor: 750000 });
+    expect(norm({ action: 'simulate', extraMinor: 100, amountMinor: 200 }).extraMinor).toBe(100);
+    expect(norm({ action: 'advise' })).toMatchObject({ action: 'advise', extraMinor: null });
+  });
+
+  it('treats a negative, zero or fractional extra amount as not given', () => {
+    for (const extraMinor of [-5, 0, 1.5, '2000000']) expect(norm({ action: 'simulate', extraMinor }).extraMinor).toBeNull();
   });
 });
 

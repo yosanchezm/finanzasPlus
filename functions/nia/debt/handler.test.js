@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { serializeTerms } from '../../../packages/finance-core/index.js';
-import { confirmDebt, handleDebt, handleDebtCallback } from './handler.js';
+import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback } from './handler.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
 const ACTOR = 'telegram:1';
@@ -11,14 +11,20 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const debtRow = (id, name, extra = {}) => ({ $id: id, householdId: 'h1', name, kind: 'vehicle', ownerScope: 'shared', status: 'active', lender: '', termsJson: serializeTerms(loanTerms), ...extra });
 const disbursement = (debtId) => ({ $id: `e-${debtId}`, debtId, householdId: 'h1', kind: 'disbursement', effectiveOn: '2026-09-10', amountMinor: 10000000, payloadJson: '{}', actorId: ACTOR, source: 'telegram', dedupeKey: `seed:${debtId}`, $createdAt: '2026-09-10T12:00:00.000Z' });
 
-function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [] } = {}) {
+function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [], cashflow = [], config = {} } = {}) {
   const tables = { debts: [...debts], debt_events: debts.map((debt) => disbursement(debt.$id)), transactions: [], categories: [...categories] };
   const sent = [];
   const sessions = [];
   const prompts = [];
+  const windows = [];
   const conflict = () => Object.assign(new Error('conflict'), { status: 409 });
   const deps = {
-    config: { householdId: 'h1', timezone: 'America/Bogota', currency: 'COP' },
+    config: { householdId: 'h1', timezone: 'America/Bogota', currency: 'COP', ...config },
+    cashflowRows: async (window) => {
+      windows.push(window);
+      if (cashflow instanceof Error) throw cashflow;
+      return cashflow;
+    },
     now: () => new Date('2026-10-13T15:00:00Z'),
     ids: { pending: () => 'p1' },
     listRows: async (table, where) => tables[table].filter((row) => Object.entries(where).every(([key, value]) => row[key] === value)),
@@ -29,11 +35,17 @@ function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [],
       return row;
     },
     deleteRow: async (table, id) => { tables[table] = tables[table].filter((row) => row.$id !== id); },
-    gemini: async (prompt) => { prompts.push(prompt); return answers.shift(); },
+    gemini: async (prompt) => {
+      prompts.push(prompt);
+      const answer = answers.shift();
+      if (answer instanceof Error) throw answer;
+      if (typeof answer === 'function') return answer(prompt);
+      return answer === 'hang' ? new Promise(() => {}) : answer;
+    },
     sendMessage: async (chatId, text, keyboard) => { sent.push({ chatId, text: plain(text), keyboard }); },
     saveSession: async (chatId, actorId, status, pending, history) => { sessions.push({ status, pending, history }); },
   };
-  return { deps, tables, sent, sessions, prompts, lastPending: () => sessions[sessions.length - 1].pending };
+  return { deps, tables, sent, sessions, prompts, windows, lastPending: () => sessions[sessions.length - 1].pending };
 }
 
 const profile = { ownerScope: 'you', appwriteUserId: ACTOR, alias: 'Camilo' };
@@ -268,12 +280,282 @@ describe('list and later actions', () => {
     expect(w.tables.debt_events).toHaveLength(1);
   });
 
-  it('sends simulate and advise to the web for now', async () => {
-    const w = world({ answers: [{ action: 'simulate', extraMinor: 2000000 }, { action: 'advise' }] });
-    await handleDebt(w.deps, ctx());
-    await handleDebt(w.deps, ctx());
-    await handleDebtCallback(w.deps, ctx(), 'nia:simpay');
+});
 
-    expect(w.sent.map((message) => message.text.includes('web'))).toEqual([true, true, true]);
+
+// Cash flow: July, August and September 2026 are the 3 full months before "today" (2026-10-13).
+const flow = (type, amountMinor, month, ownerScope = 'shared') => ({ type, amountMinor, occurredAt: `2026-${month}-15T15:00:00.000Z`, ownerScope });
+const quarter = (income, expense) => ['07', '08', '09'].flatMap((month) => [flow('income', income, month), flow('expense', expense, month)]);
+const factsIn = (prompt) => JSON.parse(prompt.split('Hechos:\n')[1]);
+const faithful = (prompt) => {
+  const { text } = factsIn(prompt);
+  return { reply: `Con un abono de $ ${text.amount} tu tasa es ${text.ea} y te quedarían ${text['reduceTerm.periods']} cuotas.` };
+};
+const invented = { reply: 'Ahorrarías un 42% de intereses.' }; // rejected by the guard: the template is sent
+const asked = (extra = {}) => ({ action: 'advise', debtRef: 'vehiculo', extraMinor: 2000000, ...extra });
+
+describe('simulate', () => {
+  it('is read-only: compares the strategies, offers nia:simpay and remembers the amount and strategy', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo', extraMinor: 2000000 }] });
+    await handleDebt(w.deps, ctx({ text: 'simula un abono de 2 millones al carro' }));
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Simulación de abono extra a Crédito Vehículo');
+    expect(w.sent[0].text).toContain('Abono: $ 2.000.000 el 2026-10-13');
+    expect(w.sent[0].text).toMatch(/• Reducir plazo: \d+ cuotas de \$ [\d.]+ · ahorras/);
+    expect(w.sent[0].text.length).toBeLessThanOrEqual(4096);
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:simpay']);
+    expect(w.lastPending()).toEqual({ kind: 'debt', v: 1, id: 'p1', action: 'simulate', awaiting: 'simpay', debtId: 'd1', draft: { amountMinor: 2000000, strategy: 'reduce_term' } });
+    expect(w.sessions[0].status).toBe('awaiting_clarification');
+    expect(w.tables.debt_events).toHaveLength(1);
+    expect(costRows(w)).toHaveLength(0);
+    expect(w.prompts).toHaveLength(1); // the extraction only: a simulation needs no paraphrase
+  });
+
+  it('uses the strategy the user asked for, and the web link when one is configured', async () => {
+    const mortgage = debtRow('d1', 'Hipoteca', { kind: 'mortgage', termsJson: serializeTerms({ ...loanTerms, kind: 'mortgage', principalMinor: 200000000, n: 360 }) });
+    const w = world({ debts: [mortgage], answers: [{ action: 'simulate', extraMinor: 5000000, strategy: 'reduce_installment' }], config: { webUrl: 'https://finanzas.example.com' } });
+    w.tables.debt_events = [{ ...disbursement('d1'), amountMinor: 200000000 }];
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Próximas cuotas (reducir cuota)');
+    expect(w.sent[0].text).toMatch(/cuotas más\. Plan completo: https:\/\/finanzas\.example\.com/);
+    expect(w.sent[0].text.length).toBeLessThanOrEqual(4096);
+    expect(w.lastPending().draft).toEqual({ amountMinor: 5000000, strategy: 'reduce_installment' });
+  });
+
+  it('asks for the amount when it is missing', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo' }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Cuánto quieres abonar');
+    expect(w.sent[0].keyboard).toBeUndefined();
+  });
+
+  it('asks which debt first when several match, then simulates the chosen one', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [{ action: 'simulate', debtRef: 'banco', extraMinor: 2000000 }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:pick:d1', 'nia:pick:d2']);
+    expect(w.lastPending()).toMatchObject({ action: 'simulate', awaiting: 'pick', draft: { amountMinor: 2000000 } });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:d2');
+    expect(w.sent[1].text).toContain('Simulación de abono extra a Moto');
+    expect(w.lastPending()).toMatchObject({ action: 'simulate', awaiting: 'simpay', debtId: 'd2' });
+  });
+
+  it('says politely that cards are not simulated (nor on the web) and keeps the pending request', async () => {
+    const w = world({ debts: [debtRow('d1', 'Visa', { kind: 'card' })], answers: [{ action: 'simulate', debtRef: 'visa', extraMinor: 100000 }] });
+    const previous = { kind: 'debt', v: 1, id: 'old', awaiting: 'confirm' };
+    await handleDebt(w.deps, ctx({ previous, sessionStatus: 'awaiting_confirmation' }));
+
+    expect(w.sent[0].text).toMatch(/préstamos/);
+    expect(w.sent[0].text).toMatch(/tarjetas/);
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0]).toMatchObject({ status: 'awaiting_confirmation', pending: previous });
+  });
+
+  it('reports identical strategies honestly on a debt whose system keeps its term', async () => {
+    const german = debtRow('d1', 'Crédito Alemán', { termsJson: serializeTerms({ ...loanTerms, system: 'german' }) });
+    const w = world({ debts: [german], answers: [{ action: 'simulate', extraMinor: 2000000 }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Reducir plazo o cuota (mismo resultado)');
+  });
+
+  it('explains a debt whose terms cannot be read instead of failing', async () => {
+    const w = world({ debts: [debtRow('d1', 'Rota', { termsJson: '{bad' })], answers: [{ action: 'simulate', extraMinor: 2000000 }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('No pude leer los términos');
+  });
+});
+
+describe('nia:simpay', () => {
+  const simulated = async (w) => { await handleDebt(w.deps, ctx()); return w.lastPending(); };
+  const extras = (w) => w.tables.debt_events.filter((event) => event.kind === 'extra_payment');
+
+  it('turns a simulation into a pending extra payment with the chosen strategy and writes only after Confirm', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo', extraMinor: 2000000, strategy: 'reduce_installment' }] });
+    const pending = await simulated(w);
+    await handleDebtCallback(w.deps, ctx({ pending }), 'nia:simpay');
+
+    expect(w.sent[1].text).toContain('Estrategia: reducir cuota');
+    expect(buttons(w.sent[1].keyboard)).toContain('nia:confirm');
+    expect(w.lastPending()).toMatchObject({ action: 'pay', awaiting: 'confirm', debtId: 'd1', draft: { kind: 'extra_payment', effectiveOn: '2026-10-13', amountMinor: 2000000, strategy: 'reduce_installment' } });
+    expect(extras(w)).toHaveLength(0);
+
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(extras(w)).toEqual([expect.objectContaining({ $id: 'dep1', debtId: 'd1', amountMinor: 2000000, dedupeKey: 'debt:p1', source: 'telegram' })]);
+    expect(costRows(w)).toHaveLength(1);
+    expect(w.sent[3].text).toContain('ya estaba registrado');
+  });
+
+  it('writes one event even if the button is tapped twice on the same simulation and both previews are confirmed', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo', extraMinor: 2000000 }] });
+    const pending = await simulated(w);
+    await handleDebtCallback(w.deps, ctx({ pending }), 'nia:simpay');
+    const first = w.lastPending();
+    await handleDebtCallback(w.deps, ctx({ pending }), 'nia:simpay');
+    await Promise.all([confirmDebt(w.deps, ctx(), first), confirmDebt(w.deps, ctx(), w.lastPending())]);
+
+    expect(extras(w)).toHaveLength(1);
+    expect(costRows(w)).toHaveLength(1);
+  });
+
+  it('answers that the option no longer applies once the payment preview is on screen', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo', extraMinor: 2000000 }] });
+    await handleDebtCallback(w.deps, ctx({ pending: await simulated(w) }), 'nia:simpay');
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:simpay');
+
+    expect(w.sent[2].text).toContain('ya no aplica');
+    expect(extras(w)).toHaveLength(0);
+  });
+
+  it('records an amount below what is due as a plain payment (no strategy needed)', async () => {
+    const w = world({ answers: [{ action: 'simulate', debtRef: 'vehiculo', extraMinor: 300000 }] });
+    await handleDebtCallback(w.deps, ctx({ pending: await simulated(w) }), 'nia:simpay');
+
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { kind: 'payment', amountMinor: 300000 } });
+  });
+
+  it('does nothing without a simulation or after the payment was registered', async () => {
+    const w = world({ answers: [] });
+    await handleDebtCallback(w.deps, ctx({ pending: null }), 'nia:simpay');
+    await handleDebtCallback(w.deps, ctx({ pending: { kind: 'debt', v: 1, id: 'p1', action: 'pay', done: true } }), 'nia:simpay');
+
+    expect(w.sent.map((message) => message.text)).toEqual(['No tengo una solicitud de deuda pendiente.', 'No tengo una solicitud de deuda pendiente.']);
+    expect(w.sessions).toHaveLength(0);
+  });
+});
+
+describe('advise', () => {
+  const adviseWorld = (answers, extra = {}) => world({ answers: [asked(), ...answers], cashflow: quarter(8000000, 3000000), ...extra });
+
+  it('compares, reads the cash flow, decides in code and sends a faithful paraphrase of the facts', async () => {
+    const previous = { kind: 'debt', v: 1, id: 'old', awaiting: 'confirm' };
+    const w = adviseWorld([faithful]);
+    await handleDebt(w.deps, ctx({ previous, sessionStatus: 'awaiting_confirmation' }));
+    const facts = factsIn(w.prompts[1]);
+
+    expect(w.prompts[1]).toContain('Crédito Vehículo');
+    expect(facts).toMatchObject({ verdict: 'reduce_term', claimsSavings: true, text: { income: '8.000.000', expense: '3.000.000', margin: '5.000.000' } });
+    expect(w.prompts[1]).not.toContain('"numbers"');
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toBe(`Con un abono de $ ${facts.text.amount} tu tasa es ${facts.text.ea} y te quedarían ${facts.text['reduceTerm.periods']} cuotas.`);
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0]).toMatchObject({ status: 'awaiting_confirmation', pending: previous });
+    expect(w.windows).toHaveLength(1);
+    expect(w.windows[0].from < '2026-07-01T05:00:00.000Z' && w.windows[0].to > '2026-10-01T05:00:00.000Z').toBe(true);
+    expect(w.tables.debt_events).toHaveLength(1);
+    expect(costRows(w)).toHaveLength(0);
+  });
+
+  it('sends the deterministic template when the paraphrase invents a number (42%)', async () => {
+    const w = adviseWorld([{ reply: 'Ahorrarías un 42% de intereses con este abono.' }]);
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Recomendación para un abono de $ 2.000.000');
+    expect(w.sent[0].text).toContain('Te conviene reducir el plazo');
+    expect(w.sent[0].text).not.toContain('42%');
+  });
+
+  it.each([
+    ['Gemini fails', new Error('boom')],
+    ['Gemini answers no JSON', null],
+    ['the reply is not text', { reply: 12345 }],
+    ['the reply is empty', { reply: '   ' }],
+    ['the reply is over 4096 characters', { reply: 'a'.repeat(4097) }],
+  ])('falls back to the template and still completes when %s', async (_name, answer) => {
+    const w = adviseWorld([answer]);
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Recomendación para un abono');
+  });
+
+  it('falls back to the template when Gemini does not answer in time', async () => {
+    const w = adviseWorld(['hang'], { config: { paraphraseTimeoutMs: 20 } });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Recomendación para un abono');
+  });
+
+  it('a tight margin leads to reduce installment and the facts cite it', async () => {
+    const w = adviseWorld([invented], { cashflow: quarter(6000000, 5700000) });
+    await handleDebt(w.deps, ctx());
+
+    expect(factsIn(w.prompts[1])).toMatchObject({ verdict: 'reduce_installment', reasonCodes: ['tight_margin'], text: { margin: '300.000' } });
+    expect(w.sent[0].text).toContain('reducir la cuota');
+  });
+
+  it('another debt with a higher EA wins avalanche; archived, unreadable and out-of-scope debts do not count', async () => {
+    const pricier = (id, name, extra = {}) => debtRow(id, name, { termsJson: serializeTerms({ ...loanTerms, rate: { convention: 'EA', value: 35 } }), ...extra });
+    const debts = [debtRow('d1', 'Crédito Vehículo', { ownerScope: 'you' }), pricier('d2', 'Tarjeta Oro'), pricier('d3', 'Vieja', { status: 'archived' }), pricier('d4', 'Ajena', { ownerScope: 'partner' }), debtRow('d5', 'Rota', { termsJson: '{bad' })];
+    const w = adviseWorld([invented], { debts });
+    await handleDebt(w.deps, ctx());
+    const facts = factsIn(w.prompts[1]);
+
+    expect(facts).toMatchObject({ verdict: 'avalanche', targetDebt: { id: 'd2', name: 'Tarjeta Oro' }, higherRateDebt: { id: 'd2' } });
+    expect(w.sent[0].text).toContain('pagar primero Tarjeta Oro');
+
+    const alone = adviseWorld([invented], { debts: [debtRow('d1', 'Crédito Vehículo', { ownerScope: 'you' }), pricier('d4', 'Ajena', { ownerScope: 'partner' })] });
+    await handleDebt(alone.deps, ctx());
+    expect(factsIn(alone.prompts[1]).verdict).toBe('reduce_term');
+  });
+
+  it('treats an unavailable cash-flow query as unknown and still advises', async () => {
+    const w = adviseWorld([invented], { cashflow: new Error('appwrite down') });
+    await handleDebt(w.deps, ctx());
+
+    expect(factsIn(w.prompts[1]).reasonCodes).toContain('cashflow_unknown');
+    expect(w.sent[0].text).toContain('No hay suficientes ingresos registrados');
+  });
+
+  it('uses the configured thresholds', async () => {
+    const w = adviseWorld([invented], { cashflow: quarter(6000000, 5000000), config: { adviceThresholds: { tightMarginRatio: 0.2 } } });
+    await handleDebt(w.deps, ctx());
+
+    expect(factsIn(w.prompts[1]).verdict).toBe('reduce_installment');
+  });
+
+  it('asks for the amount when it is missing', async () => {
+    const w = world({ answers: [{ action: 'advise', debtRef: 'vehiculo' }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Cuánto quieres abonar');
+    expect(w.windows).toHaveLength(0);
+  });
+
+  it('points cards to the loans without calling Gemini again', async () => {
+    const w = world({ debts: [debtRow('d1', 'Visa', { kind: 'card' })], answers: [asked({ debtRef: 'visa' })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toMatch(/préstamos/);
+    expect(w.prompts).toHaveLength(1);
+  });
+
+  it('picks the debt first when several match, then advises on the chosen one', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [asked({ debtRef: 'banco' }), invented], cashflow: quarter(8000000, 3000000) });
+    await handleDebt(w.deps, ctx());
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:d2');
+
+    expect(w.sent[1].text).toContain('Recomendación para un abono de $ 2.000.000 a Moto');
+  });
+});
+
+describe('debtSummaries (the code-computed figures behind the analysis snapshot)', () => {
+  it('returns balance, next due and EA per debt, flags unreadable ones and skips archived ones', async () => {
+    const w = world({ debts: [debtRow('d1', 'Crédito Vehículo', { ownerScope: 'you' }), debtRow('d2', 'Rota', { termsJson: '{bad' }), debtRow('d3', 'Vieja', { status: 'archived' })] });
+    const items = await debtSummaries(w.deps);
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ id: 'd1', name: 'Crédito Vehículo', ownerScope: 'you', balanceMinor: 10000000, pastDueMinor: 380381, nextDue: { dueOn: '2026-10-10', amountMinor: 380381 } });
+    expect(items[0].eaPercent).toBeCloseTo(24, 6);
+    expect(items[1]).toEqual({ id: 'd2', name: 'Rota', ownerScope: 'shared', unreadable: true });
   });
 });

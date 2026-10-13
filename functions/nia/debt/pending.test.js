@@ -9,6 +9,7 @@ import {
   eventIdOf,
   parseCallback,
   pickKeyboard,
+  simulateKeyboard,
   strategyKeyboard,
 } from './pending.js';
 
@@ -16,6 +17,13 @@ const bytes = (value) => Buffer.byteLength(value, 'utf8');
 const allButtons = (keyboard) => keyboard.flat();
 
 describe('buildPending', () => {
+  it('accepts a simulation that waits for the simpay button, still compact', () => {
+    const pending = buildPending({ id: 'p1', action: 'simulate', awaiting: 'simpay', debtId: 'd1', draft: { amountMinor: 2000000, strategy: 'reduce_term' } });
+
+    expect(pending).toEqual({ kind: 'debt', v: 1, id: 'p1', action: 'simulate', awaiting: 'simpay', debtId: 'd1', draft: { amountMinor: 2000000, strategy: 'reduce_term' } });
+    expect(bytes(JSON.stringify(pending))).toBeLessThan(300);
+  });
+
   const pay = {
     id: 'a1b2c3d4e5f6a7b8c9d0e1f2',
     action: 'pay',
@@ -92,6 +100,10 @@ describe('keyboards', () => {
     const data = allButtons(conventionKeyboard()).map((button) => button.callback_data);
 
     expect(data).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+  });
+
+  it('offers one button to turn a simulation into a payment', () => {
+    expect(allButtons(simulateKeyboard())).toEqual([{ text: 'Registrar este abono', callback_data: 'nia:simpay' }]);
   });
 });
 
