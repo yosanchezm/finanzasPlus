@@ -163,6 +163,7 @@ describe('public barrel (index.js)', () => {
         'advise',
         'allocate',
         'assertMinor',
+        'buildCostRow',
         'buildFacts',
         'buildSchedule',
         'commitPlan',

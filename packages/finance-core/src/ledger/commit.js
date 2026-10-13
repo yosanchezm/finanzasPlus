@@ -28,7 +28,15 @@ function checkContext(debt, ctx) {
   if (!SOURCES.includes(ctx.source)) throw invalid(`ctx.source must be one of ${SOURCES.join(', ')}`);
 }
 
-function costRowFor(debt, event, costMinor) {
+/**
+ * The expense row that carries only the cost of one payment event (never its principal).
+ * `categoryId` stays null: the writer fills it once the category exists.
+ * @param {object} debt A `debts` row.
+ * @param {{ id: string, effectiveOn: string, actorId: string }} event A normalized event.
+ * @param {number} costMinor
+ * @returns {{ id: string, data: object }}
+ */
+export function buildCostRow(debt, event, costMinor) {
   const { id, effectiveOn } = event;
   return {
     id: `dc${id}`,
@@ -97,7 +105,7 @@ export function planCommit(debt, events, draft, ctx) {
       id: candidate.id,
       data: { householdId: debt.householdId, debtId, kind, effectiveOn, amountMinor, payloadJson, actorId: ctx.actorId, source: ctx.source, dedupeKey },
     },
-    costRow: costMinor > 0 ? costRowFor(debt, candidate, costMinor) : null,
+    costRow: costMinor > 0 ? buildCostRow(debt, candidate, costMinor) : null,
     costMinor,
     allocation,
     deleteCostRowId,
