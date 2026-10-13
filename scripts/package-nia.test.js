@@ -145,6 +145,12 @@ describe('packageNia (CLI, --out redirected to a temp dir)', () => {
     expect(importSpecifiers(bundle).filter((specifier) => specifier.startsWith('.') || specifier.includes('packages'))).toEqual([]);
   });
 
+  it('inlines the advice pipeline: strategies, verdict, cash flow and the numeric guard', () => {
+    for (const name of ['compareStrategies', 'advise', 'cashflowSignals', 'guardParaphrase', 'simulateReply', 'adviseReply']) {
+      expect(bundle, name).toMatch(new RegExp(`function ${name}\\(`));
+    }
+  });
+
   it('keeps the debt modules free of APIs newer than Node 16.0 (array .at, Object.hasOwn)', () => {
     const dir = resolve(root, 'functions/nia/debt');
     const sources = readdirSync(dir).filter((name) => name.endsWith('.js') && !name.endsWith('.test.js'));

@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Blob } from 'node:buffer';
 import undici from 'undici';
-import { confirmDebt, handleDebt, handleDebtCallback } from './debt/handler.js';
+import { parseThresholds } from './debt/cashflow.js';
+import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
 
@@ -20,6 +21,8 @@ const config = {
   telegramSecret: env.TELEGRAM_WEBHOOK_SECRET || '',
   geminiKey: env.GEMINI_API_KEY || '',
   model: env.AI_MODEL || 'gemini-3.5-flash-lite',
+  webUrl: (env.NIA_WEB_URL || '').trim().replace(/\/$/, ''),
+  adviceThresholds: parseThresholds(env.DEBT_ADVICE_THRESHOLDS),
 };
 
 const TABLES = {
@@ -147,6 +150,18 @@ function queryLimit(value) {
   return query('limit', undefined, Number(value));
 }
 
+function queryGreaterEqual(field, value) {
+  return query('greaterThanEqual', field, String(value));
+}
+
+function queryLessThan(field, value) {
+  return query('lessThan', field, String(value));
+}
+
+function queryCursorAfter(rowId) {
+  return query('cursorAfter', undefined, String(rowId));
+}
+
 async function appwriteRequest(path, { method = 'GET', body, headers = {} } = {}) {
   const requestHeaders = {
     Accept: 'application/json',
@@ -223,6 +238,26 @@ async function debtListRows(table, where) {
   }
 }
 
+// Income and expense rows of a time range, page by page with a cursor. More rows than the cap would give a
+// wrong average, so that throws and the advice treats the cash flow as unknown.
+const CASHFLOW_MAX_PAGES = 50;
+
+async function cashflowRows({ from, to }) {
+  const rows = [];
+  let cursor;
+  for (let page = 0; page < CASHFLOW_MAX_PAGES; page += 1) {
+    const queries = [queryEqual('householdId', config.householdId), queryGreaterEqual('occurredAt', from), queryLessThan('occurredAt', to), queryLimit(DEBT_PAGE)];
+    const batch = await listRows(TABLES.transactions, cursor ? [...queries, queryCursorAfter(cursor)] : queries);
+    rows.push(...batch.map((row) => {
+      const value = rowData(row);
+      return { type: value.type, amountMinor: value.amountMinor, occurredAt: value.occurredAt, ownerScope: value.ownerScope };
+    }));
+    if (batch.length < DEBT_PAGE) return rows;
+    cursor = batch[batch.length - 1].$id;
+  }
+  throw new Error('Too many transactions to average the cash flow.');
+}
+
 function debtCreateRow(table, { id, data }) {
   const permissions = (DEBT_ROW_ACTIONS[table] || ['read']).map((action) => permission(action, `team:${config.teamId}`));
   return appwriteRequest(`/tablesdb/${config.databaseId}/tables/${table}/rows`, { method: 'POST', body: compactObject({ rowId: id, data, permissions }) });
@@ -230,7 +265,8 @@ function debtCreateRow(table, { id, data }) {
 
 function debtDeps() {
   return {
-    config: { householdId: config.householdId, timezone: config.timezone, currency: config.currency },
+    config: { householdId: config.householdId, timezone: config.timezone, currency: config.currency, webUrl: config.webUrl, adviceThresholds: config.adviceThresholds },
+    cashflowRows,
     now: () => new Date(),
     ids: { pending: () => randomId().slice(0, 24) },
     listRows: debtListRows,
@@ -427,7 +463,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     `La moneda predeterminada del hogar es ${config.currency}.`,
     `En este chat el usuario está configurado como ${profile.alias}, con alcance predeterminado ${profile.ownerScope}.`,
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
-    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas); conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra o pedir una recomendación de cómo abonar); conversation para preguntas generales, capacidades, identidad o educación financiera.',
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
@@ -473,7 +509,17 @@ function rowData(row) {
   return row?.data && typeof row.data === 'object' ? row.data : row || {};
 }
 
-async function workspaceSnapshot() {
+// Code-computed debt figures for the analysis intent. Unreadable debt tables just leave them out.
+async function debtSnapshot() {
+  try {
+    return await debtSummaries(debtDeps());
+  } catch (caught) {
+    writeError(`No se pudieron leer las deudas para el análisis: ${caught?.message || caught}`);
+    return null;
+  }
+}
+
+async function workspaceSnapshot({ withDebts = false } = {}) {
   const [transactions, categories, budgets, goals] = await Promise.all([
     listRows(TABLES.transactions, [queryEqual('householdId', config.householdId), queryLimit(100)]),
     listRows(TABLES.categories, [queryEqual('householdId', config.householdId), queryLimit(100)]),
@@ -481,6 +527,7 @@ async function workspaceSnapshot() {
     listRows(TABLES.goals, [queryEqual('householdId', config.householdId), queryLimit(100)]),
   ]);
   const categoryNames = new Map(categories.map((row) => [row.$id, rowData(row).name]));
+  const debts = withDebts ? await debtSnapshot() : null;
   return {
     transactions: transactions.map((row) => {
       const value = rowData(row);
@@ -500,6 +547,7 @@ async function workspaceSnapshot() {
     categories: categories.map((row) => ({ id: row.$id, ...rowData(row) })),
     budgets: budgets.map((row) => ({ id: row.$id, ...rowData(row), category: categoryNames.get(rowData(row).categoryId) || rowData(row).categoryId || null })),
     goals: goals.map((row) => ({ id: row.$id, ...rowData(row) })),
+    ...(debts ? { debts } : {}),
   };
 }
 
@@ -510,6 +558,7 @@ async function askGeminiAnalysis(input, snapshot, history, profile) {
     `El usuario es ${profile.alias}. Responde en español.`,
     'Analiza exclusivamente los datos proporcionados. Puedes explicar totales, diferencias entre tú, tu pareja y compartido, categorías, presupuestos, metas, tendencias, meses y oportunidades de mejora.',
     'No inventes transacciones, presupuestos, metas ni saldos. Si no hay datos suficientes, dilo claramente y sugiere qué registrar.',
+    'Las deudas (préstamos y tarjetas) llegan ya calculadas en `debts`: cita su saldo, próxima cuota, tasa E.A. y monto vencido tal cual, y no calcules saldos, cuotas, intereses ni plazos de deudas. Si `debts` no está, no hables de deudas.',
     'Devuelve únicamente JSON válido con esta forma: {"reply":"respuesta clara en texto"}.',
     history?.length ? `Contexto reciente:\n${conversationContext(history)}` : 'Sin contexto anterior.',
     `Pregunta actual:\n${input}`,
@@ -1044,7 +1093,7 @@ async function handleTextOrReceipt(message, updateId, profile) {
   }
 
   if (intent === 'analysis') {
-    const snapshot = await workspaceSnapshot();
+    const snapshot = await workspaceSnapshot({ withDebts: true });
     const analysis = await askGeminiAnalysis(text, snapshot, history, profile);
     const reply = String(analysis?.reply || '').trim() || 'No pude generar el análisis con los datos disponibles.';
     await saveSession(chatId, actorId, session?.status || 'conversation', previous, appendHistory(appendHistory(history, 'user', userContext), 'assistant', reply));

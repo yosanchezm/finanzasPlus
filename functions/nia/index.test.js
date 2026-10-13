@@ -11,12 +11,18 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const plain = (text) => text.replace(/ /g, ' ');
 
 function makeNet(answers) {
-  const tables = { bot_sessions: [], ai_events: [], categories: [], transactions: [], debts: [], debt_events: [] };
+  const tables = { bot_sessions: [], ai_events: [], categories: [], transactions: [], budgets: [], goals: [], debts: [], debt_events: [] };
   const telegram = [];
   const prompts = [];
+  const gets = [];
   let counter = 0;
   const reply = (status, body) => ({ ok: status < 400, status, statusText: String(status), text: async () => JSON.stringify(body), json: async () => body });
-  const matches = (row, queries) => queries.every((q) => q.method !== 'equal' || String(row[q.attribute]) === q.values[0]);
+  const matches = (row, queries) => queries.every((q) => {
+    if (q.method === 'equal') return String(row[q.attribute]) === q.values[0];
+    if (q.method === 'greaterThanEqual') return String(row[q.attribute]) >= q.values[0];
+    if (q.method === 'lessThan') return String(row[q.attribute]) < q.values[0];
+    return true;
+  });
   net.fetch = async (url, init = {}) => {
     const target = new URL(url);
     if (target.host === 'api.telegram.org') {
@@ -24,17 +30,24 @@ function makeNet(answers) {
       return reply(200, { ok: true, result: {} });
     }
     if (target.host.startsWith('generativelanguage')) {
-      prompts.push(JSON.parse(init.body).contents[0].parts[0].text);
-      return reply(200, { candidates: [{ content: { parts: [{ text: JSON.stringify(answers.shift()) }] } }] });
+      const prompt = JSON.parse(init.body).contents[0].parts[0].text;
+      prompts.push(prompt);
+      const next = answers.shift();
+      return reply(200, { candidates: [{ content: { parts: [{ text: JSON.stringify(typeof next === 'function' ? next(prompt) : next) }] } }] });
     }
     const [, table, id] = target.pathname.match(/tables\/([^/]+)\/rows(?:\/([^/]+))?$/);
     const rows = tables[table];
+    if (!rows) return reply(404, { message: 'table not found' });
     const method = init.method || 'GET';
     if (method === 'GET') {
       const queries = target.searchParams.getAll('queries[]').map((q) => JSON.parse(q));
+      gets.push({ table, queries });
       const offset = (queries.find((q) => q.method === 'offset') || { values: [0] }).values[0];
       const limit = (queries.find((q) => q.method === 'limit') || { values: [25] }).values[0];
-      return reply(200, { rows: rows.filter((row) => matches(row, queries)).slice(offset, offset + limit) });
+      const found = rows.filter((row) => matches(row, queries));
+      const cursor = queries.find((q) => q.method === 'cursorAfter');
+      const start = cursor ? found.findIndex((row) => row.$id === cursor.values[0]) + 1 : offset;
+      return reply(200, { rows: found.slice(start, start + limit) });
     }
     const body = init.body ? JSON.parse(init.body) : {};
     if (method === 'POST') {
@@ -54,12 +67,19 @@ function makeNet(answers) {
     else rows.push({ $id: id, ...body.data });
     return reply(200, found || {});
   };
-  return { tables, telegram, prompts, answers };
+  return { tables, telegram, prompts, answers, gets };
 }
 
 let run;
 let fake;
 const debtRow = (id, name, extra = {}) => ({ $id: id, householdId: 'h1', name, kind: 'vehicle', ownerScope: 'shared', status: 'active', lender: '', termsJson: serializeTerms(loanTerms), ...extra });
+
+// (Re)loads the entry point: the environment is read once, when the module loads.
+const boot = async () => {
+  vi.resetModules();
+  const { default: handler } = await import('./index.js');
+  run = (update) => handler({ req: { method: 'POST', headers: { 'x-telegram-bot-api-secret-token': 'secret' }, bodyJson: update }, res: { json: (value) => value }, log: () => {}, error: () => {} });
+};
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -69,8 +89,7 @@ beforeEach(async () => {
   Object.entries({ APPWRITE_PROJECT_ID: 'p', APPWRITE_API_KEY: 'k', APPWRITE_DATABASE_ID: 'db', HOUSEHOLD_TEAM_ID: 't1', HOUSEHOLD_ID: 'h1', TELEGRAM_BOT_TOKEN: 'tok', TELEGRAM_WEBHOOK_SECRET: 'secret', GEMINI_API_KEY: 'g' })
     .forEach(([name, value]) => vi.stubEnv(name, value));
   vi.stubEnv('TELEGRAM_USER_MAP', JSON.stringify({ 7: { ownerScope: 'you', appwriteUserId: 'u7', alias: 'Camilo' } }));
-  const { default: handler } = await import('./index.js');
-  run = (update) => handler({ req: { method: 'POST', headers: { 'x-telegram-bot-api-secret-token': 'secret' }, bodyJson: update }, res: { json: (value) => value }, log: () => {}, error: () => {} });
+  await boot();
 });
 
 afterEach(() => {
@@ -147,5 +166,108 @@ describe('debt wiring in the Nia entry point', () => {
 
     expect(sent()).toEqual([expect.objectContaining({ text: 'Hola, soy Nia' })]);
     expect(fake.tables.debt_events).toHaveLength(0);
+  });
+});
+
+describe('simulate, advise and the analysis snapshot in the Nia entry point', () => {
+  const transaction = (id, type, amountMinor, occurredAt) => ({ $id: id, householdId: 'h1', type, amountMinor, occurredAt, ownerScope: 'shared', status: 'confirmed' });
+  // 3 full months before 2026-10-13 (July to September): income 6,000,000 and 45 expenses of 100,000 each, i.e. 138 rows (more than one page).
+  // Decoys outside the window (June, October) must not count.
+  const seedCashflow = () => {
+    for (const month of ['07', '08', '09']) {
+      fake.tables.transactions.push(transaction(`in${month}`, 'income', 6000000, `2026-${month}-05T15:00:00.000Z`));
+      for (let index = 0; index < 45; index += 1) fake.tables.transactions.push(transaction(`ex${month}${index}`, 'expense', 100000, `2026-${month}-10T15:00:00.000Z`));
+    }
+    fake.tables.transactions.push(transaction('inJune', 'income', 90000000, '2026-06-20T15:00:00.000Z'), transaction('exOctober', 'expense', 90000000, '2026-10-02T15:00:00.000Z'));
+  };
+  const factsOf = (prompt) => JSON.parse(prompt.split('Hechos:\n')[1]);
+
+  it('simulates read-only, and the simpay button becomes a payment confirmed exactly once', async () => {
+    fake = makeNet([{ intent: 'debt', action: 'advise' }, { action: 'simulate', debtRef: 'vehiculo', extraMinor: 2000000, strategy: 'reduce_term' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('simula abonar 2 millones al carro'));
+    expect(sent()[0].text).toContain('Simulación de abono extra a Crédito Vehículo');
+    expect(buttons(sent()[0])).toEqual(['nia:simpay']);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ action: 'simulate', awaiting: 'simpay', debtId: 'd1' });
+    expect(fake.tables.debt_events).toHaveLength(1);
+
+    await run(press('nia:simpay'));
+    expect(sent()[1].text).toContain('Estrategia: reducir plazo');
+    expect(buttons(sent()[1])).toContain('nia:confirm');
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm);
+
+    expect(fake.tables.debt_events.filter((event) => event.kind === 'extra_payment')).toHaveLength(1);
+    expect(fake.tables.transactions.filter((row) => row.debtId === 'd1')).toHaveLength(1);
+    expect(sent()[3].text).toContain('ya estaba registrado');
+  });
+
+  it('advises with the 3 full months read from Appwrite page by page and a faithful paraphrase of the facts', async () => {
+    fake = makeNet([
+      { intent: 'debt', action: 'advise' },
+      { action: 'advise', debtRef: 'vehiculo', extraMinor: 2000000 },
+      (prompt) => ({ reply: `Tu margen promedio es de $ ${factsOf(prompt).text.margin} al mes.` }),
+    ]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+    seedCashflow();
+
+    await run(message('qué me recomiendas si abono 2 millones al carro'));
+    const facts = factsOf(fake.prompts[2]);
+    const reads = fake.gets.filter((get) => get.table === 'transactions');
+
+    expect(facts).toMatchObject({ verdict: 'reduce_term', text: { income: '6.000.000', expense: '4.500.000', margin: '1.500.000' } });
+    expect(sent()).toEqual([expect.objectContaining({ text: 'Tu margen promedio es de $ 1.500.000 al mes.' })]);
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(reads.some((get) => get.queries.some((q) => q.method === 'cursorAfter'))).toBe(true);
+    expect(reads[0].queries.map((q) => `${q.method}:${q.attribute}`)).toEqual(expect.arrayContaining(['greaterThanEqual:occurredAt', 'lessThan:occurredAt']));
+    expect(fake.tables.debt_events).toHaveLength(1);
+  });
+
+  it('falls back to the template when Gemini fails, and honours DEBT_ADVICE_THRESHOLDS and NIA_WEB_URL', async () => {
+    vi.stubEnv('DEBT_ADVICE_THRESHOLDS', '{"tightMarginRatio":0.5}');
+    vi.stubEnv('NIA_WEB_URL', 'https://finanzas.example.com/');
+    await boot();
+    fake = makeNet([
+      { intent: 'debt', action: 'advise' },
+      { action: 'advise', debtRef: 'vehiculo', extraMinor: 2000000 },
+      () => { throw new Error('gemini down'); },
+      { intent: 'debt', action: 'simulate' },
+      { action: 'simulate', debtRef: 'hipoteca', extraMinor: 5000000 },
+    ]);
+    seed([debtRow('d1', 'Crédito Vehículo'), debtRow('d2', 'Hipoteca', { termsJson: serializeTerms({ ...loanTerms, kind: 'mortgage', principalMinor: 200000000, n: 360 }) })]);
+    fake.tables.debt_events = fake.tables.debt_events.map((event) => (event.debtId === 'd2' ? { ...event, amountMinor: 200000000 } : event));
+    seedCashflow(); // margin 25% of the income: tight only with the 50% threshold from the environment
+
+    await run(message('recomiéndame abonar 2 millones al carro'));
+    expect(sent()[0].text).toContain('Recomendación para un abono de $ 2.000.000');
+    expect(sent()[0].text).toContain('reducir la cuota');
+
+    await run(message('simula 5 millones a la hipoteca'));
+    expect(sent()[1].text).toMatch(/Plan completo: https:\/\/finanzas\.example\.com(\s|$)/);
+  });
+
+  it('feeds code-computed debt summaries to the analysis intent and tells the model not to do debt math', async () => {
+    fake = makeNet([{ intent: 'analysis', action: 'none' }, { reply: 'Todo en orden' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('cómo van mis finanzas'));
+    const prompt = fake.prompts[1];
+    const snapshot = JSON.parse(prompt.split('Datos actuales del hogar:\n')[1]);
+
+    expect(snapshot.debts).toEqual([expect.objectContaining({ name: 'Crédito Vehículo', balanceMinor: 10000000, pastDueMinor: 380381, nextDue: { dueOn: '2026-10-10', amountMinor: 380381 } })]);
+    expect(prompt).toMatch(/no calcules saldos, cuotas, intereses ni plazos de deudas/i);
+    expect(sent()).toEqual([expect.objectContaining({ text: 'Todo en orden' })]);
+  });
+
+  it('still analyses when the debt tables cannot be read', async () => {
+    fake = makeNet([{ intent: 'analysis', action: 'none' }, { reply: 'Sin deudas a la vista' }]);
+    delete fake.tables.debts;
+
+    await run(message('cómo van mis finanzas'));
+
+    expect(JSON.parse(fake.prompts[1].split('Datos actuales del hogar:\n')[1])).not.toHaveProperty('debts');
+    expect(sent()).toEqual([expect.objectContaining({ text: 'Sin deudas a la vista' })]);
   });
 });
