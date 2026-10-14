@@ -108,6 +108,7 @@ describe('finance-core sources', () => {
         'src/ledger/events.js',
         'src/ledger/preview.js',
         'src/ledger/project.js',
+        'src/ledger/restructure.js',
         'src/ledger/rows.js',
         'src/ledger/snapshot.js',
         'src/ledger/tail.js',
@@ -171,6 +172,7 @@ describe('public barrel (index.js)', () => {
         'allocate',
         'assertMinor',
         'buildCostRow',
+        'buildRestructureTerms',
         'buildFacts',
         'buildSchedule',
         'capOn',
@@ -203,6 +205,7 @@ describe('public barrel (index.js)', () => {
         'registerProjector',
         'removeCharge',
         'renderSummary',
+        'restructureCarry',
         'resolveLegal',
         'roundUnit',
         'serializeTerms',
@@ -239,5 +242,8 @@ describe('public barrel (index.js)', () => {
     expect(api.lateEAOn({ kind: 'consumer', rate: api.normalizeRate({ convention: 'EA', value: 24 }), late: { mode: 'usury', graceDays: 0 } }, '2026-10-20').ea).toBe(28.59);
     expect(api.normalizeLate(undefined)).toEqual({ mode: 'none', graceDays: 0 });
     expect(api.LATE_MODES).toContain('contract_multiple');
+    expect(api.EVENT_KINDS).toContain('late_policy');
+    expect(api.restructureCarry({ $id: 'd1', terms: { kind: 'informal', principalMinor: 900_000, openedOn: '2026-01-10', rate: { convention: 'ZERO' }, system: 'none' } }, [], '2026-03-01')).toMatchObject({ balanceMinor: 900_000, carriedMinor: 900_000, waivableLateMinor: 0 });
+    expect(api.buildRestructureTerms(api.validateTerms({ kind: 'informal', principalMinor: 900_000, openedOn: '2026-01-10', rate: { convention: 'ZERO' }, system: 'none' }), { effectiveOn: '2026-03-01', carriedMinor: 800_000, overrides: {} })).toMatchObject({ principalMinor: 800_000, openedOn: '2026-03-01' });
   });
 });

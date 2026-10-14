@@ -89,7 +89,8 @@ function mortgageNotices(work, asOf, legal) {
   return lateEAOn(work, asOf, legal).notices.filter((notice) => notice.code === 'late_mortgage_unverified');
 }
 
-function projectLoan({ debt, terms, events, asOf, legal }) {
+// Replays the active events on a loan and accrues mora up to `asOf`; the state is returned as it stands.
+function replayLoan({ debt, terms, events, asOf, legal }) {
   const state = {
     work: terms,
     offset: 0,
@@ -109,6 +110,12 @@ function projectLoan({ debt, terms, events, asOf, legal }) {
     if (extra.driftMinor) notices.push({ code: 'drift', eventId: event.id, amountMinor: extra.driftMinor, absorbed });
   }
   accrueLate(state, asOf, legal);
+  return { state, applied, notices };
+}
+
+function projectLoan(context) {
+  const { asOf, legal } = context;
+  const { state, applied, notices } = replayLoan(context);
   addLateNotices(state, mortgageNotices(state.work, asOf, legal));
   const plan = decorate(state.rows, asOf);
   const totals = totalsOf(applied, state.rows);
@@ -128,6 +135,15 @@ function projectLoan({ debt, terms, events, asOf, legal }) {
   };
 }
 
+// Terms plus the active events dated on or before `asOf`, in chronological order.
+function prepare(debt, events, asOf) {
+  if (!isIsoDate(asOf)) throw new ValidationError('invalid_date', `asOf must be a real YYYY-MM-DD date, got ${String(asOf)}`);
+  const terms = debtTerms(debt);
+  const { known, unknown } = readEvents(events);
+  const dated = known.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
+  return { terms, active: sortEvents(activeEvents(dated)), unknown };
+}
+
 /**
  * Projects a debt as of a date: balance, next due, past due, remaining term and
  * the FULL plan with a status per row (`paid`, `partial`, `due`, `pastDue`,
@@ -141,14 +157,29 @@ function projectLoan({ debt, terms, events, asOf, legal }) {
  * @throws {ValidationError}
  */
 export function project(debt, events, asOf, opts = {}) {
-  if (!isIsoDate(asOf)) throw new ValidationError('invalid_date', `asOf must be a real YYYY-MM-DD date, got ${String(asOf)}`);
-  const terms = debtTerms(debt);
-  const { known, unknown } = readEvents(events);
-  const dated = known.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
-  const active = sortEvents(activeEvents(dated));
+  const { terms, active, unknown } = prepare(debt, events, asOf);
   const projection = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts, legal: legalOf(debt, opts) });
   if (unknown.length === 0) return projection;
   // Events written by a newer build are skipped, not guessed at (AD1): one notice each, whatever their date.
   const skipped = unknown.map(({ id, kind }) => ({ code: 'unknown_event_kind', eventId: id, kind }));
   return { ...projection, notices: [...(projection.notices ?? []), ...skipped] };
+}
+
+/**
+ * Replays a loan up to `asOf` and returns the working state (rows with their payments and accrued mora)
+ * instead of a projection, for helpers that read figures the projection does not expose, such as
+ * `restructureCarry`. Internal: not exported by the package barrel.
+ * @param {object} debt A `debts` row (see `project`).
+ * @param {object[]} events The debt's `debt_events` rows.
+ * @param {string} asOf `YYYY-MM-DD`.
+ * @param {object} [opts] `legal` as in `project`.
+ * @returns {({ terms: object, state: object, applied: object[] } | null)} `null` when the debt kind has its own
+ *   projector (a card), because it has no installment rows to read.
+ * @throws {ValidationError}
+ */
+export function replayLoanAt(debt, events, asOf, opts = {}) {
+  const { terms, active } = prepare(debt, events, asOf);
+  if (PROJECTORS.has(terms.kind)) return null;
+  const { state, applied } = replayLoan({ debt, terms, events: active, asOf, legal: legalOf(debt, opts) });
+  return { terms, state, applied };
 }

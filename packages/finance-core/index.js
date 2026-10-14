@@ -43,6 +43,7 @@ export { cycleDates, minimumPayment } from './src/card/card.js';
 export { project, registerProjector } from './src/ledger/project.js';
 export { buildCostRow, commitPlan, planCommit } from './src/ledger/commit.js';
 export { previewChange } from './src/ledger/preview.js';
+export { buildRestructureTerms, restructureCarry } from './src/ledger/restructure.js';
 export { simulateExtra } from './src/prepay/simulate.js';
 export { compareStrategies } from './src/prepay/compare.js';
 export { ADVICE_DEFAULTS, advise } from './src/advice/advice.js';
