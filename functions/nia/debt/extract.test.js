@@ -329,3 +329,64 @@ describe('normaliseDebtExtraction: charge_change', () => {
     expect(prompt).toContain('newValue');
   });
 });
+
+describe('normaliseDebtExtraction: restructure', () => {
+  const change = { action: 'restructure', debtRef: 'credito', rate: { value: null }, charges: [], planChange: { effectiveOn: null, n: 48, system: null, periodicity: null, firstDueOn: '2026-12-05', waiveLate: false } };
+
+  it('reads the term, the first due date and waiveLate, with the date defaulting to today and no rate when none was said', () => {
+    const result = norm(change);
+
+    expect(result).toMatchObject({ action: 'restructure', debtRef: 'credito', needsConvention: false, missingFields: [], problems: [] });
+    expect(result.planChange).toEqual({ effectiveOn: TODAY, n: 48, system: null, periodicity: null, firstDueOn: '2026-12-05', waiveLate: false });
+    const full = norm({ ...change, planChange: { effectiveOn: '2026-11-01', n: 24, system: 'german', periodicity: 'biweekly', firstDueOn: null, waiveLate: true } });
+    expect(full.planChange).toEqual({ effectiveOn: '2026-11-01', n: 24, system: 'german', periodicity: 'biweekly', firstDueOn: null, waiveLate: true });
+  });
+
+  it('puts a stated rate in the rate field, like a new loan, and asks for the convention when it is not clear', () => {
+    const stated = norm({ ...change, rate: { value: 20, period: 'annual' } });
+    const unclear = norm({ ...change, rate: { value: 2, period: 'monthly', compounding: null, timing: null } });
+    const monthly = norm({ ...change, rate: { value: 1.8, period: 'monthly', compounding: 'effective', timing: 'arrears' } });
+
+    expect(stated.planChange).toMatchObject({ rate: { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, rateValue: 20 });
+    expect(stated.needsConvention).toBe(false);
+    expect(unclear.needsConvention).toBe(true);
+    expect(unclear.planChange).toMatchObject({ rate: null, rateValue: 2 });
+    expect(monthly.planChange.rate).toEqual({ value: 1.8, basis: 'effective', periodicity: 'monthly', timing: 'arrears' });
+    expect(norm({ ...change, rate: { value: -3, period: 'annual' } }).problems).toEqual(['invalid_rate']);
+    expect(norm({ ...change, rate: { value: 0, period: 'annual' } }).planChange).toMatchObject({ rateValue: 0, rate: { value: 0 } });
+  });
+
+  it('asks for the number of installments when it is missing or not a positive whole number', () => {
+    expect(norm({ ...change, planChange: { ...change.planChange, n: null } }).missingFields).toEqual(['term']);
+    expect(norm({ ...change, planChange: { ...change.planChange, n: 0 } }).missingFields).toEqual(['term']);
+    expect(norm({ ...change, planChange: { ...change.planChange, n: 12.5 } }).missingFields).toEqual(['term']);
+    expect(norm({ ...change, planChange: null }).missingFields).toEqual(['term']);
+  });
+
+  it('drops a system, a periodicity and a date it does not recognize, and takes waiveLate only when it is true', () => {
+    const result = norm({ ...change, planChange: { n: 12, system: 'balloon', periodicity: 'fortnightly', firstDueOn: 'pronto', waiveLate: 'yes' } });
+
+    expect(result.planChange).toEqual({ effectiveOn: TODAY, n: 12, system: null, periodicity: null, firstDueOn: null, waiveLate: false });
+  });
+
+  it('keeps the charges of the new plan when the user states them, and leaves the current ones when not', () => {
+    const charges = [{ kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05 }, { kind: 'fee', label: 'Manejo', basis: 'fixed', value: 10000 }];
+    const result = norm({ ...change, charges });
+
+    expect(result.planChange.charges).toEqual([
+      { id: 'c1', kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05, cadence: 'per_installment' },
+      { id: 'c2', kind: 'fee', label: 'Manejo', basis: 'fixed', value: 10000, cadence: 'per_installment' },
+    ]);
+    expect(norm(change).planChange).not.toHaveProperty('charges');
+  });
+
+  it('teaches the model the action, that the plan goes in planChange and the rate in rate, and what waiveLate means', () => {
+    const prompt = debtPrompt('reestructura a 48 cuotas', [], [], { today: TODAY });
+
+    expect(prompt).toContain('restructure');
+    expect(prompt).toContain('waiveLate');
+    expect(prompt).toContain('firstDueOn');
+    expect(prompt).toMatch(/condon/i);
+    expect(prompt).toMatch(/reestructur/i);
+  });
+});

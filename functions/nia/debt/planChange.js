@@ -1,9 +1,9 @@
-import { ValidationError, activeEvents, compareIso, isIsoDate, previewChange, project, rateLabel, removeCharge, sortEvents } from '../../../packages/finance-core/index.js';
+import { PERIODICITIES, ValidationError, activeEvents, buildRestructureTerms, compareIso, isIsoDate, periodDates, previewChange, project, rateLabel, removeCharge, restructureCarry, sortEvents } from '../../../packages/finance-core/index.js';
 import { fold } from './findDebt.js';
 import { pesos } from './format.js';
-import { describeCoreError, usuryLines } from './preview.js';
+import { PERIOD_LABELS, SYSTEM_LABELS, describeCoreError, usuryLines } from './preview.js';
 
-// Plan changes of Nia (NI2, NI7): `rate_change` and `charge_change` (edit or remove an existing charge; adding one is web-only). The model only extracts; every
+// Plan changes of Nia (NI2, NI3, NI7): `rate_change`, `charge_change` (edit or remove an existing charge; adding one is web-only) and `restructure`. The model only extracts; every
 // figure comes from the core's `previewChange`, the same replay the web dialogs use, so a preview equals the
 // projection once the event is saved. Nothing here writes. Pure and Node 16 safe.
 
@@ -321,6 +321,159 @@ export function describeChargeChange(debt, target, draft, figures, dependents = 
     ? `quité ${target.label}${dependents.length > 0 ? ` (y ${dependents.map((charge) => charge.label).join(', ')})` : ''}`
     : `${target.label} ahora vale ${describeValue(target, draft.newValue)}`;
   const lines = [`✅ Listo: registré el cambio de cargos de ${debt.name} desde ${draft.effectiveOn}: ${what}.`, `${nextLabel(debt.kind === 'card')}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`];
+  if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
+  return lines.join('\n');
+}
+
+// ---- restructure (NI3) ----
+// The pending keeps only the overrides the user stated (`restructureDraft`). Everything else, the carried balance included, is
+// rebuilt from the live debt by `rebuildRestructure`, both for the preview and at Confirm, so a payment recorded in between
+// changes what is written.
+
+export const SYSTEMS = ['french', 'german', 'bullet', 'interest_only'];
+
+const hasKey = (object, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(object, key);
+
+const RESTRUCTURE_CARD = 'Por ahora no puedo reestructurar una tarjeta: no tiene un plan de cuotas que rehacer. No guardé nada.';
+const RESTRUCTURE_NO_BALANCE = 'Esta deuda no tiene saldo por reestructurar. No guardé nada.';
+const RESTRUCTURE_TOO_BIG = 'El plan nuevo es demasiado grande para guardarlo en un solo cambio (por ejemplo, por tener demasiados cargos). Haz la reestructuración desde la web. No guardé nada.';
+const RESTRUCTURE_NEEDS_TERM = 'Necesito el número de cuotas del plan nuevo, en número entero. No guardé nada.';
+const RESTRUCTURE_INVALID = 'No pude armar el nuevo plan con esos datos. Revisa las cuotas, la tasa, la periodicidad y las fechas. No guardé nada.';
+const RESTRUCTURE_FIRST_DUE = (on) => `La primera cuota debe ser posterior a la fecha de la reestructuración (${on}). Dime otra fecha para la primera cuota. No guardé nada.`;
+const READ_CODES = ['invalid_terms_json', 'invalid_debt', 'unsupported_schema_version', 'invalid_date', 'invalid_rate'];
+
+/**
+ * Reads what the model extracted about a restructure: the effective date (today when not said or not a real date), the number of
+ * installments of the new plan (`null` when not a positive whole number), the system, periodicity and first due date when they are
+ * valid, and `waiveLate` (true only when the model said true). The rate rides in `rate` and the charges in `charges`.
+ * @param {object | null} raw The model's `planChange` object.
+ * @param {{ today: string }} options
+ */
+export function readRestructure(raw, { today }) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  return {
+    effectiveOn: isIsoDate(input.effectiveOn) ? input.effectiveOn : today,
+    n: Number.isSafeInteger(input.n) && input.n > 0 ? input.n : null,
+    system: SYSTEMS.includes(input.system) ? input.system : null,
+    periodicity: hasKey(PERIODICITIES, input.periodicity) ? input.periodicity : null,
+    firstDueOn: isIsoDate(input.firstDueOn) ? input.firstDueOn : null,
+    waiveLate: input.waiveLate === true,
+  };
+}
+
+/**
+ * The overrides a restructure pending stores (AD14): the date, the number of installments and only what the user stated. While the
+ * convention of the rate is missing, `rateValue` stands in for `rate`.
+ * @param {object} planChange `normaliseDebtExtraction(...).planChange` of a restructure.
+ */
+export function restructureDraft(planChange) {
+  const { effectiveOn, n, system, periodicity, firstDueOn, waiveLate, rate, rateValue, charges } = planChange;
+  return {
+    effectiveOn,
+    n,
+    ...(system ? { system } : {}),
+    ...(periodicity ? { periodicity } : {}),
+    ...(firstDueOn ? { firstDueOn } : {}),
+    ...(rate ? { rate } : typeof rateValue === 'number' ? { rateValue } : {}),
+    ...(Array.isArray(charges) && charges.length > 0 ? { charges } : {}),
+    ...(waiveLate ? { waiveLate: true } : {}),
+  };
+}
+
+function restructureIssue(error, draft) {
+  if (error.code === 'restructure_unsupported') return RESTRUCTURE_CARD;
+  if (error.code === 'invalid_first_due') return RESTRUCTURE_FIRST_DUE(draft.effectiveOn);
+  if (error.code === 'payload_too_large') return RESTRUCTURE_TOO_BIG;
+  if (READ_CODES.includes(error.code)) return describeCoreError(error);
+  return RESTRUCTURE_INVALID;
+}
+
+/**
+ * Rebuilds a restructure from the LIVE debt: what it refinances (`restructureCarry`, with the mora when `waiveLate` is off), the
+ * terms in force with the carried balance as principal and the overrides on top (`buildRestructureTerms`), and the core replay of
+ * the event. `n` is always passed (the core does not carry the old grace, balloon, manual plan or due day), and a first due date
+ * that was not stated is one period after the effective date. Nothing is written. Invalid terms, an unreadable event, a payload
+ * over 8000 characters or a card give `{ ok: false, issue }`.
+ * @param {{ debt: object, events: object[], today: string, draft: { effectiveOn: string, n: number, rate?: object, system?: string,
+ *   periodicity?: string, firstDueOn?: string, charges?: object[], waiveLate?: boolean } }} input `debt` is decorated with `legal`.
+ * @returns {{ ok: true, draft: object, carry: object, carriedMinor: number, waivedLateMinor: number, overdueMinor: number,
+ *   terms: object, eventDraft: object, figures: ReturnType<typeof previewChange> } | { ok: false, issue: string }}
+ */
+export function rebuildRestructure({ debt, events, today, draft }) {
+  if (!Number.isSafeInteger(draft.n) || draft.n < 1) return { ok: false, issue: RESTRUCTURE_NEEDS_TERM };
+  const { effectiveOn } = draft;
+  try {
+    const carry = restructureCarry(debt, events, effectiveOn);
+    const waivedLateMinor = draft.waiveLate ? carry.waivableLateMinor : 0;
+    const carriedMinor = carry.carriedMinor - waivedLateMinor;
+    if (carriedMinor <= 0) return { ok: false, issue: RESTRUCTURE_NO_BALANCE };
+    const inForce = project(debt, events, effectiveOn);
+    const periodicity = draft.periodicity || inForce.terms.periodicity || 'monthly';
+    const overrides = { rate: draft.rate, system: draft.system, periodicity: draft.periodicity, n: draft.n, firstDueOn: draft.firstDueOn || periodDates(effectiveOn, periodicity, 2)[1], charges: draft.charges };
+    const terms = buildRestructureTerms(inForce.terms, { effectiveOn, carriedMinor, overrides });
+    const eventDraft = { kind: 'restructure', effectiveOn, terms, ...(draft.waiveLate ? { waiveLate: true } : {}) };
+    const figures = previewChange(debt, events, eventDraft, { on: today });
+    if (figures.payloadChars > EVENT_PAYLOAD_MAX_CHARS) return { ok: false, issue: RESTRUCTURE_TOO_BIG };
+    return { ok: true, draft, carry, carriedMinor, waivedLateMinor, overdueMinor: inForce.pastDueMinor - waivedLateMinor, terms, eventDraft, figures };
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return { ok: false, issue: restructureIssue(error, draft) };
+  }
+}
+
+function restructureLines(debt, built) {
+  const { carry, carriedMinor, waivedLateMinor, overdueMinor, terms, figures, draft } = built;
+  const { before, after } = figures;
+  const { arrears } = carry;
+  const lines = [`🔁 Reestructuración de ${debt.name}`, `Desde: ${draft.effectiveOn}`, '', 'Lo que se refinancia:'];
+  lines.push(`Saldo de capital: ${pesos(carry.balanceMinor)}`, `Intereses vencidos: ${pesos(arrears.interest)}`, `Cargos vencidos: ${pesos(arrears.charges)}`);
+  if (arrears.taxes > 0) lines.push(`Impuestos vencidos: ${pesos(arrears.taxes)}`);
+  if (waivedLateMinor > 0) lines.push(`Mora condonada: ${pesos(waivedLateMinor)} (no se suma)`);
+  else if (arrears.lateInterest > 0) lines.push(`Mora: ${pesos(arrears.lateInterest)}`);
+  if (overdueMinor > 0) lines.push(`Cuotas vencidas que se refinancian: ${pesos(overdueMinor)}`);
+  lines.push(`Saldo que pasa al nuevo plan: ${pesos(carriedMinor)}`);
+  if (arrears.interest + arrears.charges + arrears.taxes + arrears.lateInterest > 0) lines.push('Lo vencido se suma al saldo y desde ahora genera intereses.');
+  lines.push('');
+  lines.push(terms.system === 'none' ? 'Plan nuevo: solo se lleva el saldo, sin cuotas' : `Plan nuevo: ${terms.n} cuotas ${PERIOD_LABELS[terms.periodicity]} · ${SYSTEM_LABELS[terms.system]}`);
+  lines.push(`Tasa: ${rateLabel(terms.rate)}`);
+  if (terms.system !== 'none') lines.push(`Primera cuota: ${terms.firstDueOn}`);
+  lines.push(`Cuota: ${money(before.installmentMinor, after.installmentMinor)}`);
+  lines.push(`Cuotas restantes: ${before.remainingPeriods} → ${after.remainingPeriods}`);
+  lines.push(`Intereses por pagar: ${money(before.remainingInterestMinor, after.remainingInterestMinor)}`);
+  const delta = after.remainingCostMinor - before.remainingCostMinor;
+  lines.push(`Costo restante (intereses y cargos): ${money(before.remainingCostMinor, after.remainingCostMinor)} (${delta <= 0 ? 'ahorras' : 'pagas de más'} ${pesos(Math.abs(delta))})`);
+  return lines;
+}
+
+/**
+ * Preview of a restructure: what is refinanced (balance, overdue interest, charges, taxes and mora), the balance carried to the new
+ * plan, the new installment and term, the cost before and after, the usury notice from the household tables (`debt.legal`) and the
+ * backdated note. The returned `draft` is the overrides only, ready for the pending. Read-only.
+ * @param {{ debt: object, events: object[], today: string, draft: object }} input As for `rebuildRestructure`; `draft.rateValue` is ignored.
+ * @returns {{ ok: true, draft: object, text: string } | { ok: false, issue: string }}
+ */
+export function previewRestructure({ debt, events, today, draft }) {
+  const { rateValue, ...overrides } = draft;
+  const built = rebuildRestructure({ debt, events, today, draft: overrides });
+  if (!built.ok) return built;
+  const lines = restructureLines(debt, built);
+  lines.push(...usuryLines(built.terms.rate, built.terms.kind, overrides.effectiveOn, debt.legal));
+  if (built.figures.impacted.length > 0) lines.push(`ℹ️ ${BACKDATED_NOTE}`);
+  lines.push('', '¿Quieres registrar la reestructuración así? Aún no se guarda.');
+  return { ok: true, draft: overrides, text: lines.join('\n') };
+}
+
+/**
+ * The reply after a restructure was written, with the figures of the debt as rebuilt from the live events.
+ * @param {object} debt The live `debts` row.
+ * @param {Extract<ReturnType<typeof rebuildRestructure>, { ok: true }>} built
+ */
+export function describeRestructure(debt, built) {
+  const { carriedMinor, waivedLateMinor, terms, figures, draft } = built;
+  const lines = [`✅ Listo: registré la reestructuración de ${debt.name} desde ${draft.effectiveOn}.`, `Saldo refinanciado: ${pesos(carriedMinor)}`];
+  if (waivedLateMinor > 0) lines.push(`Mora condonada: ${pesos(waivedLateMinor)}`);
+  lines.push(`Cuota: ${pesos(figures.after.installmentMinor)}`, `Cuotas restantes: ${figures.after.remainingPeriods}`);
+  if (terms.system !== 'none') lines.push(`Primera cuota: ${terms.firstDueOn}`);
   if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
   return lines.join('\n');
 }

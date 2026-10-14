@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { previewChange, project, resolveLegal, serializeTerms } from '../../../packages/finance-core/index.js';
+import { buildRestructureTerms, previewChange, project, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
-import { BACKDATED_NOTE, TOO_LOW_NOTE, chargesInForce, describeChargeChange, findCharge, modesFor, previewChargeChange, previewRateChange, readChargeChange, readPlanChange, rebuildCharges } from './planChange.js';
+import { PENDING_MAX_BYTES, buildPending } from './pending.js';
+import { BACKDATED_NOTE, TOO_LOW_NOTE, chargesInForce, describeChargeChange, describeRestructure, findCharge, modesFor, previewChargeChange, previewRateChange, previewRestructure, readChargeChange, readPlanChange, readRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 
 const TODAY = '2026-10-13';
 const EA = (value) => ({ value, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
@@ -356,5 +357,252 @@ describe('describeChargeChange', () => {
     expect(text).toContain('registré el cambio de cargos de Crédito Vehículo');
     expect(text).toContain('quité Seguro de vida');
     expect(text).toContain(`Próxima cuota (con cargos): ${pesos(figures.before.nextTotalMinor)} → ${pesos(figures.after.nextTotalMinor)}`);
+  });
+});
+
+// ---- restructure (NI3) ----
+// Golden: 10,000,000 at 24% EA over 36 months with a 10,000 fee and mora at the usury cap (28.59% EA); the first installment
+// (390,381) is 10 days late on 2026-02-25, so a restructure that day refinances 391,756 with the mora and 390,381 without.
+const MORA_DAY = '2026-02-25';
+const MORA_TERMS = { ...loanTerms, openedOn: '2026-01-15', firstDueOn: '2026-02-15', charges: [{ id: 'fee', kind: 'fee', label: 'Admin fee', basis: 'fixed', value: 10000, cadence: 'per_installment' }], late: { mode: 'usury' } };
+const MORA_LEGAL = resolveLegal([], { usuryTable: [{ modality: 'consumer', validFrom: '2026-01-01', validTo: '2026-12-31', capEA: 28.59, source: 'fixture', verified: true }] });
+const moraDebt = (extra = {}) => debtRow(MORA_TERMS, { legal: MORA_LEGAL, ...extra });
+const moraOpen = event('e0', 'disbursement', '2026-01-15', 10000000);
+const restructure = ({ debt = moraDebt(), events = [moraOpen], today = MORA_DAY, draft = {} } = {}) =>
+  previewRestructure({ debt, events, today, draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15', ...draft } });
+const rebuilt = (input) => rebuildRestructure({ debt: moraDebt(), events: [moraOpen], today: MORA_DAY, draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15' }, ...input });
+
+// The same figures from the core pieces, without going through Nia.
+function oracle(waiveLate, { debt = moraDebt(), events = [moraOpen] } = {}) {
+  const carry = restructureCarry(debt, events, MORA_DAY);
+  const carriedMinor = carry.carriedMinor - (waiveLate ? carry.waivableLateMinor : 0);
+  const terms = buildRestructureTerms(project(debt, events, MORA_DAY).terms, { effectiveOn: MORA_DAY, carriedMinor, overrides: { n: 48, firstDueOn: '2026-04-15' } });
+  return { carriedMinor, terms, figures: previewChange(debt, events, { kind: 'restructure', effectiveOn: MORA_DAY, terms, ...(waiveLate ? { waiveLate: true } : {}) }, { on: MORA_DAY }) };
+}
+
+describe('readRestructure', () => {
+  it('reads the term, system, periodicity, first due date and waiveLate, with the date defaulting to today', () => {
+    expect(readRestructure({ n: 48, system: 'german', periodicity: 'biweekly', firstDueOn: '2026-12-05', waiveLate: true, effectiveOn: '2026-11-01' }, { today: TODAY }))
+      .toEqual({ effectiveOn: '2026-11-01', n: 48, system: 'german', periodicity: 'biweekly', firstDueOn: '2026-12-05', waiveLate: true });
+    expect(readRestructure({}, { today: TODAY })).toEqual({ effectiveOn: TODAY, n: null, system: null, periodicity: null, firstDueOn: null, waiveLate: false });
+  });
+
+  it('drops what is not valid instead of passing it on', () => {
+    expect(readRestructure({ n: 0, system: 'none', periodicity: 'daily', firstDueOn: '2026-02-30', waiveLate: 'true', effectiveOn: 'mañana' }, { today: TODAY }))
+      .toEqual({ effectiveOn: TODAY, n: null, system: null, periodicity: null, firstDueOn: null, waiveLate: false });
+    expect(readRestructure(null, { today: TODAY }).n).toBeNull();
+  });
+});
+
+describe('restructureDraft (what the pending keeps)', () => {
+  const stated = { effectiveOn: TODAY, n: 48, system: null, periodicity: null, firstDueOn: '2026-12-05', waiveLate: false };
+
+  it('keeps only what the user overrode', () => {
+    expect(restructureDraft(stated)).toEqual({ effectiveOn: TODAY, n: 48, firstDueOn: '2026-12-05' });
+    expect(restructureDraft({ ...stated, system: 'german', periodicity: 'monthly', waiveLate: true, rate: EA(20), rateValue: 20 }))
+      .toEqual({ effectiveOn: TODAY, n: 48, firstDueOn: '2026-12-05', system: 'german', periodicity: 'monthly', waiveLate: true, rate: EA(20) });
+  });
+
+  it('keeps the stated value while the convention is missing, and the charges of the new plan', () => {
+    const charges = [{ id: 'c1', kind: 'fee', label: 'Manejo', basis: 'fixed', value: 10000, cadence: 'per_installment' }];
+
+    expect(restructureDraft({ ...stated, rate: null, rateValue: 2 })).toEqual({ effectiveOn: TODAY, n: 48, firstDueOn: '2026-12-05', rateValue: 2 });
+    expect(restructureDraft({ ...stated, charges })).toMatchObject({ charges });
+  });
+
+  it('fits in the pending even with six charges and every override', () => {
+    const charges = Array.from({ length: 6 }, (_, index) => ({ id: `c${index + 1}`, kind: 'insurance', label: `Seguro de vida número ${index + 1}`, basis: 'pctOutstanding', value: 0.05, cadence: 'per_installment' }));
+    const draft = restructureDraft({ effectiveOn: TODAY, n: 48, system: 'german', periodicity: 'monthly', firstDueOn: '2026-12-05', waiveLate: true, rate: EA(20), charges });
+    const pending = buildPending({ id: 'a'.repeat(24), action: 'restructure', awaiting: 'confirm', debtId: 'd'.repeat(36), draft });
+
+    expect(Buffer.byteLength(JSON.stringify(pending), 'utf8')).toBeLessThan(PENDING_MAX_BYTES);
+  });
+});
+
+describe('previewRestructure', () => {
+  it('golden: shows what is refinanced, with the mora, the carried balance, the new installment and the term', () => {
+    const result = restructure();
+    const expected = oracle(false);
+    const text = plain(result.text);
+
+    expect(result.ok).toBe(true);
+    expect(expected.carriedMinor).toBe(10192251);
+    expect(text).toContain('Reestructuración de Crédito Vehículo');
+    expect(text).toContain(`Saldo de capital: ${pesos(10000000)}`);
+    expect(text).toContain(`Intereses vencidos: ${pesos(180876)}`);
+    expect(text).toContain(`Cargos vencidos: ${pesos(10000)}`);
+    expect(text).toContain(`Mora: ${pesos(1375)}`);
+    expect(text).toContain(`Cuotas vencidas que se refinancian: ${pesos(391756)}`);
+    expect(text).toContain(`Saldo que pasa al nuevo plan: ${pesos(10192251)}`);
+    expect(text).toContain('48 cuotas');
+    expect(text).toContain('Primera cuota: 2026-04-15');
+    expect(text).toContain(`Cuota: ${pesos(expected.figures.before.installmentMinor)} → ${pesos(expected.figures.after.installmentMinor)}`);
+    expect(expected.figures.after.installmentMinor).toBeGreaterThan(0);
+    expect(text).toContain(`Cuotas restantes: ${expected.figures.before.remainingPeriods} → ${expected.figures.after.remainingPeriods}`);
+    expect(text).toContain(`Intereses por pagar: ${pesos(expected.figures.before.remainingInterestMinor)} → ${pesos(expected.figures.after.remainingInterestMinor)}`);
+    expect(text).toContain(`Costo restante (intereses y cargos): ${pesos(expected.figures.before.remainingCostMinor)} → ${pesos(expected.figures.after.remainingCostMinor)}`);
+    expect(text).toContain('Aún no se guarda');
+    expect(result.draft).toEqual({ effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15' });
+  });
+
+  it('with waiveLate the mora is forgiven: it is shown apart and left out of the carried balance and of what is refinanced', () => {
+    const result = restructure({ draft: { waiveLate: true } });
+    const expected = oracle(true);
+    const text = plain(result.text);
+
+    expect(expected.carriedMinor).toBe(10190876);
+    expect(text).toContain(`Mora condonada: ${pesos(1375)}`);
+    expect(text).toContain(`Cuotas vencidas que se refinancian: ${pesos(390381)}`);
+    expect(text).toContain(`Saldo que pasa al nuevo plan: ${pesos(10190876)}`);
+    expect(text).not.toContain(`Mora: ${pesos(1375)}`);
+    expect(result.draft.waiveLate).toBe(true);
+  });
+
+  it('shows the rate of the new plan with the EA echo and the usury notice from the household tables', () => {
+    const legal = resolveLegal([{ kind: 'usury', modality: 'consumer', validFrom: '2026-02-01', validTo: '2026-02-28', value: 2900, source: 'Resolución', verified: true }]);
+    const high = restructure({ debt: moraDebt({ legal }), draft: { rate: { value: 2.5, basis: 'effective', periodicity: 'monthly', timing: 'arrears' } } });
+    const same = restructure();
+
+    expect(high.ok).toBe(true);
+    expect(plain(high.text)).toContain('Tasa: 2.5% MV ≈ 34.49% EA');
+    expect(plain(high.text)).toContain('supera el tope de usura de 29% E.A.');
+    expect(plain(high.text)).toContain('no bloquea');
+    expect(plain(same.text)).toContain('Tasa: 24% EA');
+    expect(plain(same.text)).not.toContain('usura');
+  });
+
+  it('applies the overrides on the new terms (system, periodicity) and says them', () => {
+    const result = restructure({ draft: { system: 'german', periodicity: 'biweekly', firstDueOn: '2026-03-12' } });
+
+    expect(result.ok).toBe(true);
+    expect(plain(result.text)).toContain('48 cuotas quincenales');
+    expect(plain(result.text)).toContain('abono fijo a capital');
+  });
+
+  it('puts the first installment one period after the effective date when it was not said', () => {
+    const result = restructure({ draft: { firstDueOn: undefined } });
+
+    expect(result.ok).toBe(true);
+    expect(plain(result.text)).toContain('Primera cuota: 2026-03-25');
+  });
+
+  it('adds the backdated note when a recorded payment changes cost, and not otherwise', () => {
+    const payment = event('p1', 'payment', MORA_DAY, 390381);
+    const backdated = restructure({ events: [moraOpen, payment], today: '2026-03-20', draft: { effectiveOn: '2026-02-20', firstDueOn: '2026-04-15' } });
+    const current = restructure();
+
+    expect(plain(backdated.text)).toContain(BACKDATED_NOTE);
+    expect(plain(current.text)).not.toContain(BACKDATED_NOTE);
+  });
+
+  it('measures a backdated restructure on its effective date, not on today', () => {
+    const result = restructure({ today: '2026-03-20' });
+
+    expect(plain(result.text)).toContain(`Cuotas vencidas que se refinancian: ${pesos(391756)}`);
+    expect(plain(result.text)).toContain(`Saldo que pasa al nuevo plan: ${pesos(10192251)}`);
+  });
+
+  it('refuses a card without a preview', () => {
+    const card = debtRow({ ...cardTerms, charges: [] }, { kind: 'card', name: 'Visa' });
+    const result = restructure({ debt: card, events: [], draft: { effectiveOn: TODAY, firstDueOn: '2026-12-05' }, today: TODAY });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(plain(result.issue)).toContain('tarjeta');
+    expect(plain(result.issue)).toContain('No guardé nada');
+  });
+
+  it('explains a first installment on or before the effective date and an invalid plan, without a preview', () => {
+    const early = restructure({ draft: { firstDueOn: MORA_DAY } });
+    const bad = restructure({ draft: { periodicity: 'fortnightly' } });
+
+    expect(early).toMatchObject({ ok: false });
+    expect(plain(early.issue)).toContain('primera cuota');
+    expect(plain(early.issue)).toContain(MORA_DAY);
+    expect(bad).toMatchObject({ ok: false });
+    expect(plain(bad.issue)).toContain('No pude armar el nuevo plan');
+    expect(early.text).toBeUndefined();
+  });
+
+  it('needs a whole number of installments', () => {
+    expect(restructure({ draft: { n: undefined } })).toMatchObject({ ok: false, issue: expect.stringContaining('cuotas') });
+    expect(restructure({ draft: { n: 12.5 } })).toMatchObject({ ok: false });
+  });
+
+  it('says when the debt has nothing left to restructure', () => {
+    const settled = debtRow({ ...loanTerms, principalMinor: 1000000, openedOn: '2026-09-10', n: 1, firstDueOn: '2026-10-10', rate: { convention: 'EA', value: 0 } });
+    const events = [event('e0', 'disbursement', '2026-09-10', 1000000), event('p1', 'payment', '2026-10-10', 1000000)];
+    const result = restructure({ debt: settled, events, today: TODAY, draft: { effectiveOn: TODAY, firstDueOn: '2026-12-05' } });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(plain(result.issue)).toContain('no tiene saldo');
+  });
+
+  it('reports an unreadable debt in Spanish', () => {
+    expect(restructure({ debt: moraDebt({ termsJson: '{' }) })).toMatchObject({ ok: false, issue: expect.stringContaining('No pude leer los términos') });
+  });
+});
+
+describe('rebuildRestructure (Confirm)', () => {
+  it('rebuilds from the live debt: a payment recorded after the preview changes the written carried balance', () => {
+    const before = rebuilt();
+    const payment = event('p1', 'payment', MORA_DAY, 100000);
+    const after = rebuilt({ events: [moraOpen, payment] });
+
+    expect(before.ok).toBe(true);
+    expect(before.carriedMinor).toBe(10192251);
+    expect(before.eventDraft.terms.principalMinor).toBe(10192251);
+    expect(after.carriedMinor).toBe(10092251);
+    expect(after.eventDraft.terms.principalMinor).toBe(10092251);
+    expect(after.carry.arrears).toEqual({ interest: 92251, charges: 0, taxes: 0, lateInterest: 0 });
+  });
+
+  it('writes the draft as a restructure event with the terms of the live debt plus the overrides', () => {
+    const { eventDraft } = rebuilt({ draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15', rate: EA(20), waiveLate: true } });
+
+    expect(eventDraft).toMatchObject({ kind: 'restructure', effectiveOn: MORA_DAY, waiveLate: true });
+    expect(eventDraft.terms).toMatchObject({ n: 48, firstDueOn: '2026-04-15', openedOn: MORA_DAY, rate: EA(20), system: 'french', periodicity: 'monthly', late: { mode: 'usury' }, principalMinor: 10190876 });
+    expect(rebuilt().eventDraft).not.toHaveProperty('waiveLate');
+  });
+
+  it('writes the same figures that the preview showed for the same debt', () => {
+    const result = rebuilt();
+    const expected = oracle(false);
+
+    expect(result.figures.after).toEqual(expected.figures.after);
+    expect(result.eventDraft.terms).toEqual(expected.terms);
+  });
+
+  it('refuses a plan whose event would not fit in 8000 characters', () => {
+    const charges = Array.from({ length: 90 }, (_, index) => ({ id: `c${index + 1}`, kind: 'fee', label: `Cargo número ${index + 1}`, basis: 'fixed', value: 1000, cadence: 'per_installment' }));
+    const result = rebuilt({ draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15', charges } });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(plain(result.issue)).toContain('demasiado grande');
+    expect(plain(result.issue)).toContain('No guardé nada');
+  });
+
+  it('refuses invalid terms and a card instead of throwing', () => {
+    expect(rebuilt({ draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-02-10' } })).toMatchObject({ ok: false, issue: expect.stringContaining('primera cuota') });
+    expect(rebuilt({ draft: { effectiveOn: MORA_DAY, n: 0, firstDueOn: '2026-04-15' } })).toMatchObject({ ok: false });
+    const card = debtRow({ ...cardTerms, charges: [] }, { kind: 'card', name: 'Visa' });
+    expect(rebuilt({ debt: card, events: [] })).toMatchObject({ ok: false, issue: expect.stringContaining('tarjeta') });
+  });
+});
+
+describe('describeRestructure', () => {
+  it('reports the figures that were written: carried balance, new installment and term', () => {
+    const built = rebuilt({ draft: { effectiveOn: MORA_DAY, n: 48, firstDueOn: '2026-04-15', waiveLate: true } });
+    const text = plain(describeRestructure(moraDebt(), built));
+
+    expect(text).toContain('registré la reestructuración de Crédito Vehículo desde 2026-02-25');
+    expect(text).toContain(`Saldo refinanciado: ${pesos(10190876)}`);
+    expect(text).toContain(`Mora condonada: ${pesos(1375)}`);
+    expect(text).toContain(`Cuota: ${pesos(built.figures.after.installmentMinor)}`);
+    expect(text).toContain(`Cuotas restantes: ${built.figures.after.remainingPeriods}`);
+    expect(text).toContain('Primera cuota: 2026-04-15');
+  });
+
+  it('does not mention a waiver that was not asked for', () => {
+    expect(plain(describeRestructure(moraDebt(), rebuilt()))).not.toContain('condonada');
   });
 });

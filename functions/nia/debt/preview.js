@@ -18,8 +18,8 @@ import { pesos } from './format.js';
 
 const OPEN_STATUSES = ['pastDue', 'partial', 'due'];
 const KIND_LABELS = { consumer: 'consumo', vehicle: 'vehículo', libranza: 'libranza', mortgage: 'hipoteca', leasing: 'leasing', family: 'familiar', informal: 'informal', other: 'otra' };
-const SYSTEM_LABELS = { french: 'cuota fija (francés)', german: 'abono fijo a capital (alemán)', bullet: 'pago único al final', interest_only: 'solo intereses', none: 'solo saldo' };
-const PERIOD_LABELS = { weekly: 'semanales', biweekly: 'quincenales', monthly: 'mensuales', bimonthly: 'bimestrales', quarterly: 'trimestrales', semiannual: 'semestrales', annual: 'anuales' };
+export const SYSTEM_LABELS = { french: 'cuota fija (francés)', german: 'abono fijo a capital (alemán)', bullet: 'pago único al final', interest_only: 'solo intereses', none: 'solo saldo' };
+export const PERIOD_LABELS = { weekly: 'semanales', biweekly: 'quincenales', monthly: 'mensuales', bimonthly: 'bimestrales', quarterly: 'trimestrales', semiannual: 'semestrales', annual: 'anuales' };
 const STRATEGY_LABELS = { reduce_term: 'reducir plazo', reduce_installment: 'reducir cuota', advance_installments: 'adelantar cuotas' };
 
 const CORE_MESSAGES = {
