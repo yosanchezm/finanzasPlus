@@ -211,6 +211,55 @@ describe('DebtDetailContainer void flow', () => {
     expect(port.deleteCostRow).toHaveBeenCalledTimes(1);
   });
 
+  it('voids a rate change after confirming, shows its summary instead of $ 0 and reports it by kind', async () => {
+    const rate = { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' };
+    const events = [...EVENTS, makeEvent('rc1', 'rate_change', '2026-02-01', 0, { rate, mode: 'keep_term' })];
+    const { user, onNotify } = setup({ events });
+    expect(screen.getByText('Tasa: 24,00 % → 20,00 % E.A. desde 1 feb · mantiene plazo')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Anular cambio de tasa del 1 feb' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText('¿Anular este cambio de tasa?')).toBeInTheDocument();
+    expect(port.createEvent).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Anular cambio de tasa' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ kind: 'void', dedupeKey: 'void:rc1', amountMinor: 0 });
+    expect(JSON.parse(data.payloadJson)).toEqual({ targetEventId: 'rc1', reason: 'Anulado desde la web' });
+    expect(onNotify).toHaveBeenCalledWith('Cambio de tasa anulado.');
+  });
+
+  it('refuses to void a restructure that a payment follows, names the payment and writes nothing', async () => {
+    const terms = { kind: 'consumer', principalMinor: 9000000, openedOn: '2026-02-01', system: 'french', periodicity: 'monthly', n: 24, firstDueOn: '2026-03-05', rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' } };
+    const events = [...EVENTS, makeEvent('rs1', 'restructure', '2026-02-01', 0, { terms }), makePayment('p1', TODAY, 390381)];
+    const { user } = setup({ events });
+
+    await user.click(screen.getByRole('button', { name: 'Anular reestructuración del 1 feb' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('No se puede anular: la bloquean el pago del 5 feb.');
+    expect(within(dialog).queryByRole('button', { name: /^Anular/ })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Entendido' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(port.createEvent).not.toHaveBeenCalled();
+  });
+
+  it('voids a restructure that nothing follows once the confirmation is checked', async () => {
+    const terms = { kind: 'consumer', principalMinor: 9000000, openedOn: '2026-02-01', system: 'french', periodicity: 'monthly', n: 24, firstDueOn: '2026-03-05', rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' } };
+    const events = [...EVENTS, makeEvent('rs1', 'restructure', '2026-02-01', 0, { terms })];
+    const { user, onNotify } = setup({ events });
+
+    await user.click(screen.getByRole('button', { name: 'Anular reestructuración del 1 feb' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByRole('button', { name: 'Anular reestructuración' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('checkbox'));
+    await user.click(within(dialog).getByRole('button', { name: 'Anular reestructuración' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(port.createEvent.mock.calls[0][0].data).toMatchObject({ kind: 'void', dedupeKey: 'void:rs1' });
+    expect(onNotify).toHaveBeenCalledWith('Reestructuración anulada.');
+  });
+
   it('offers no void action for a payment that is already voided', () => {
     const voided = [...PAID, makeEvent('v1', 'void', TODAY, 0, { targetEventId: 'e1', reason: 'x' })];
     setup({ events: voided });

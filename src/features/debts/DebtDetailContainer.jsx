@@ -7,7 +7,7 @@ import PrepaymentSimulator from './PrepaymentSimulator';
 import VoidDialog from './VoidDialog';
 import { findDebtEventByDedupe } from '../../appwrite';
 import { loadCashflow } from './cashflow';
-import { buildDebtDetail } from './debtDetailModel';
+import { buildDebtDetail, voidSuccessMessage } from './debtDetailModel';
 import { defaultNonce } from './nonce';
 import { saveDebtEvent } from './saveDebtEvent';
 import { useCommitDialog } from './useCommitDialog';
@@ -66,7 +66,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   const voiding = useCommitDialog({
     ...flow,
-    successMessage: () => 'Pago anulado.',
+    successMessage: ({ kind }) => voidSuccessMessage(kind),
     alreadySaved: 'La anulación ya se había registrado, así que no se guardó de nuevo.',
     findSaved: ({ context }) => findDebtEventByDedupe(`void:${context.id}`),
     save: ({ input, nonce, context }) => saveDebtEvent({ debt, events, draft: { kind: 'void', effectiveOn: today, targetEventId: context.id, reason: input.reason }, nonce, actorId: user.$id, today }),
@@ -112,7 +112,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
         />
       )}
       {voiding.dialog && (
-        <VoidDialog entry={voiding.dialog.context} saveState={voiding.saveState} onConfirm={(reason) => voiding.submit({ reason })} onClose={voiding.close} />
+        <VoidDialog entry={voiding.dialog.context} saveState={voiding.saveState} onConfirm={(reason) => voiding.submit({ reason, kind: voiding.dialog.context.kind })} onClose={voiding.close} />
       )}
     </>
   );

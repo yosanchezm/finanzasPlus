@@ -1,7 +1,56 @@
-import { activeEvents, project, sortEvents } from '@finance-core';
+import { activeEvents, parseTerms, project, sortEvents, validateTerms } from '@finance-core';
+import { summarizeEvent } from './eventSummary';
 
-// Payments and the card's statements and purchases can be voided from the history (the other kinds change the plan).
-const VOIDABLE = ['payment', 'extra_payment', 'charge', 'adjustment'];
+// Payments, the card's statements and purchases, and the changes to rate, charges and late-interest policy can be voided
+// from the history. A restructure is voidable only through the guarded flow; a disbursement never is.
+const VOIDABLE = ['payment', 'extra_payment', 'charge', 'adjustment', 'rate_change', 'charge_change', 'late_policy'];
+const GUARDED = 'restructure';
+// A restructure cannot be voided once any of these sorts after it: they were computed on top of it.
+const BLOCKS_RESTRUCTURE_VOID = ['payment', 'extra_payment', 'rate_change', 'charge_change', 'late_policy', 'restructure'];
+
+const VOID_MESSAGES = {
+  payment: 'Pago anulado.',
+  extra_payment: 'Abono anulado.',
+  rate_change: 'Cambio de tasa anulado.',
+  charge_change: 'Cambio de cargos anulado.',
+  restructure: 'Reestructuración anulada.',
+  late_policy: 'Política de mora anulada.',
+  adjustment: 'Extracto anulado.',
+  charge: 'Compra anulada.',
+};
+
+/** Toast shown once a void of an event of this kind was saved. */
+export const voidSuccessMessage = (kind) => VOID_MESSAGES[kind] ?? 'Movimiento anulado.';
+
+/**
+ * What the history may do with one event. `voidable` is whether a void action is offered at all;
+ * a `guarded` void (restructure) asks for explicit confirmation and is refused while later events
+ * exist: `voidBlocked` then lists them as `{ code: 'later_events', events: [{ id, kind, effectiveOn }] }`.
+ * @param {{ id: string, kind: string }} event A normalized event.
+ * @param {object[]} activeSorted The debt's non-voided events in chronological order (see `sortEvents`).
+ * @returns {{ voidable: boolean, guarded: boolean, voidBlocked: ({ code: string, events: object[] } | null) }}
+ */
+export function voidRuleOf(event, activeSorted) {
+  if (event.kind !== GUARDED) return { voidable: VOIDABLE.includes(event.kind), guarded: false, voidBlocked: null };
+  const later = activeSorted.slice(activeSorted.findIndex((other) => other.id === event.id) + 1).filter((other) => BLOCKS_RESTRUCTURE_VOID.includes(other.kind));
+  const events = later.map(({ id, kind, effectiveOn }) => ({ id, kind, effectiveOn }));
+  return { voidable: true, guarded: true, voidBlocked: events.length > 0 ? { code: 'later_events', events } : null };
+}
+
+// The summary of each plan-change event, computed in chronological order: a charge change is read against the charges in force just before it.
+function summariesOf({ debt, sorted, active, applied, isCard }) {
+  const initial = debt.terms ? validateTerms(debt.terms) : parseTerms(debt.termsJson);
+  let charges = initial.charges;
+  const summaries = new Map();
+  for (const event of sorted) {
+    if (event.kind === 'void') continue;
+    summaries.set(event.id, summarizeEvent(event, { applied: applied.get(event.id), card: isCard, previousCharges: charges }));
+    if (!active.has(event.id)) continue;
+    if (event.kind === 'charge_change') charges = event.payload.charges;
+    else if (event.kind === 'restructure') charges = event.payload.terms.charges;
+  }
+  return summaries;
+}
 
 /**
  * Pure view model of one debt: the projection (rendered as is), the real cost over the whole
@@ -16,9 +65,12 @@ export function buildDebtDetail({ debt, events, asOf }) {
   const active = new Set(activeEvents(events).map((event) => event.id));
   const reasons = new Map(sorted.filter((event) => event.kind === 'void').map((event) => [event.payload.targetEventId, event.payload.reason ?? null]));
   const applied = new Map(projection.applied.map((entry) => [entry.eventId, entry]));
+  const activeSorted = sorted.filter((event) => active.has(event.id));
+  const summaries = summariesOf({ debt, sorted, active, applied, isCard: Boolean(projection.card) });
 
   const history = sorted.filter((event) => event.kind !== 'void').reverse().map((event) => {
     const voided = !active.has(event.id);
+    const rule = voided ? { voidable: false, guarded: false, voidBlocked: null } : voidRuleOf(event, activeSorted);
     return {
       id: event.id,
       kind: event.kind,
@@ -30,7 +82,10 @@ export function buildDebtDetail({ debt, events, asOf }) {
       voided,
       voidReason: voided ? reasons.get(event.id) ?? null : null,
       costMinor: applied.get(event.id)?.costMinor ?? 0,
-      canVoid: !voided && VOIDABLE.includes(event.kind),
+      summary: summaries.get(event.id) ?? null,
+      canVoid: rule.voidable,
+      guardedVoid: rule.guarded,
+      voidBlocked: rule.voidBlocked,
     };
   });
 
