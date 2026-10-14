@@ -6,6 +6,7 @@
  */
 
 import { withDebtSchema } from './lib/debt-schema.mjs';
+import { withLegalSchema } from './lib/legal-schema.mjs';
 
 const endpoint = (process.env.VITE_APPWRITE_ENDPOINT || '').replace(/\/$/, '');
 const projectId = process.env.VITE_APPWRITE_PROJECT_ID;
@@ -129,7 +130,8 @@ const baseTables = [
 
 // Debt management (additive): the debts and debt_events tables plus transactions.debtId.
 // The ensure* loops below only create what is missing, which keeps reruns a no-op.
-const tables = withDebtSchema(baseTables, team);
+// Legal rates (additive): the legal_rates table, chained after the debt schema.
+const tables = withLegalSchema(withDebtSchema(baseTables, team), team);
 
 // Appwrite 1.8.x self-hosted exposes the legacy `string` column endpoint.
 // `varchar` is documented for newer API versions but returns 404 on 1.8.1.
