@@ -110,19 +110,24 @@ export function buildTerms(create) {
 /** Applies a rate convention picked with the `nia:conv:` buttons to the value the user stated. */
 export const withConvention = (create, convention) => ({ ...create, rate: normalizeRate({ convention, value: create.rateValue }) });
 
-function noticeLines(terms) {
+const LEGAL_UNAVAILABLE_LINE = 'ℹ️ No pude leer las tasas legales del hogar; usé los valores de la app.';
+
+// `legal` is the household's resolved tables (the code tables when absent). A preview that cites a cap while the tables
+// could not be read says so in one extra line (legal_rates_unavailable); nothing else changes and nothing blocks.
+function noticeLines(terms, legal) {
   const lines = [];
-  const usury = usuryNotice(terms.rate, terms.kind === 'mortgage' ? 'mortgage' : 'consumer', terms.openedOn);
+  const usury = usuryNotice(terms.rate, terms.kind === 'mortgage' ? 'mortgage' : 'consumer', terms.openedOn, { usuryTable: legal && legal.usuryTable });
   if (usury) {
     lines.push(`⚠️ La tasa (${usury.eaPercent.toFixed(2)}% E.A.) supera el tope de usura de ${usury.capEA}% E.A. vigente al ${usury.asOf}${usury.verified ? '' : ' (tope no verificado oficialmente)'}. Es solo informativo: no bloquea el registro.`);
+    if (legal && legal.status === 'unavailable') lines.push(LEGAL_UNAVAILABLE_LINE);
   }
-  if (ley1555Notice(terms, terms.openedOn)) {
+  if (ley1555Notice(terms, terms.openedOn, { smmlvTable: legal && legal.smmlvTable })) {
     lines.push('ℹ️ Ley 1555: podrías prepagar una hipoteca sin penalización y elegir cómo aplicar el abono. Su alcance para esta deuda no está verificado; revisa tu contrato.');
   }
   return lines;
 }
 
-function createText(create, terms) {
+function createText(create, terms, legal) {
   const lines = ['🆕 Nueva deuda', `Nombre: ${create.name} (${KIND_LABELS[terms.kind]})${create.lender ? ` · ${create.lender}` : ''}`, `Monto: ${pesos(terms.principalMinor)}`, `Tasa: ${rateLabel(terms.rate)}`];
   if (terms.system === 'none') {
     lines.push('Plan: solo se lleva el saldo, sin cuotas');
@@ -133,20 +138,21 @@ function createText(create, terms) {
     lines.push(`Primera cuota: ${pesos(rows[0].totalDueMinor)} el ${rows[0].dueOn}`);
     lines.push(`Intereses y cargos totales: ${pesos(totals.costMinor)}`);
   }
-  return [...lines, ...noticeLines(terms), '', '¿Quieres registrarla así? Aún no se guarda.'].join('\n');
+  return [...lines, ...noticeLines(terms, legal), '', '¿Quieres registrarla así? Aún no se guarda.'].join('\n');
 }
 
 /**
  * Preview of a new debt. A rate with no clear convention yields `needsConvention`
  * (the caller shows the `nia:conv:` buttons) before any preview exists.
  * @param {object} create `normaliseDebtExtraction(...).create`
+ * @param {{ legal?: object }} [options] `legal`: the household's resolved legal tables (the handler's `loadLegal`).
  */
-export function previewCreate(create) {
+export function previewCreate(create, options = {}) {
   if (create.rate === null) {
     return { ok: false, needsConvention: true, text: `Dijiste una tasa de ${create.rateValue}%, pero no me queda claro de qué tipo es. Elige la convención de tasa de tu contrato:` };
   }
   return guard(() => {
     const terms = buildTerms(create);
-    return { ok: true, terms, text: createText(create, terms) };
+    return { ok: true, terms, text: createText(create, terms, options.legal) };
   });
 }

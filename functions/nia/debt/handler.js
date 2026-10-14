@@ -1,4 +1,4 @@
-import { ValidationError, advise, commitPlan, compareStrategies, planCommit, project, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { ValidationError, advise, commitPlan, compareStrategies, planCommit, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
@@ -17,7 +17,7 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 //            config: { householdId, timezone, currency, webUrl?, adviceThresholds?, paraphraseTimeoutMs? } }
 // `createRow` rejects with `status: 409` when the id or a unique key already exists.
 
-const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories' };
+const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
 const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
@@ -53,7 +53,25 @@ async function say(deps, ctx, { text, keyboard, status, pending }) {
 const inform = (deps, ctx, text) => say(deps, ctx, { text, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
 const notify = (deps, ctx, text) => deps.sendMessage(ctx.chatId, clampTelegram(text));
 
-const loadDebts = (deps) => deps.listRows(T.debts, { householdId: deps.config.householdId });
+/**
+ * The household's resolved legal tables (IBC, usury caps, SMMLV) over the code tables. Never throws: when legal_rates
+ * cannot be read (a 404 before the migration, or any other failure) it returns the code tables with status 'unavailable'.
+ */
+export async function loadLegal(deps) {
+  try {
+    return resolveLegal(await deps.listRows(T.legal, { householdId: deps.config.householdId }));
+  } catch {
+    return resolveLegal.unavailable();
+  }
+}
+
+/** Every debt row of the household, each decorated with the same resolved `legal` tables the web uses (pass `legal` to reuse a read). */
+export async function loadDebts(deps, legal) {
+  const tables = legal || (await loadLegal(deps));
+  const rows = await deps.listRows(T.debts, { householdId: deps.config.householdId });
+  return rows.map((debt) => ({ ...debt, legal: tables }));
+}
+
 const loadEvents = (deps, debtId) => deps.listRows(T.events, { householdId: deps.config.householdId, debtId });
 const today = (deps) => isoDateIn(deps.now(), deps.config.timezone);
 
@@ -107,8 +125,8 @@ export async function debtSummaries(deps) {
   return summaries(deps, await loadDebts(deps), today(deps));
 }
 
-async function finishCreate(deps, ctx, id, create) {
-  const preview = previewCreate(create);
+async function finishCreate(deps, ctx, id, create, legal) {
+  const preview = previewCreate(create, { legal: legal || (await loadLegal(deps)) });
   if (preview.needsConvention) {
     const pending = buildPending({ id, action: 'create', awaiting: 'convention', draft: { create } });
     return say(deps, ctx, { text: preview.text, keyboard: conventionKeyboard(), status: STATUS.convention, pending });
@@ -233,7 +251,8 @@ async function runAnalysis(deps, ctx, action, id, debt, draft, debts) {
  */
 export async function handleDebt(deps, ctx) {
   const asOf = today(deps);
-  const debts = await loadDebts(deps);
+  const legal = await loadLegal(deps);
+  const debts = await loadDebts(deps, legal);
   const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
@@ -241,7 +260,7 @@ export async function handleDebt(deps, ctx) {
   if (request.action === 'pay') return startPay(deps, ctx, request, debts);
   if (request.action === 'create') {
     if (request.missingFields.length) return inform(deps, ctx, `Para registrar la deuda necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
-    return finishCreate(deps, ctx, deps.ids.pending(), request.create);
+    return finishCreate(deps, ctx, deps.ids.pending(), request.create, legal);
   }
   return startAnalysis(deps, ctx, request, debts);
 }

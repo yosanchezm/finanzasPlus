@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { serializeTerms } from '../../../packages/finance-core/index.js';
+import { resolveLegal, serializeTerms } from '../../../packages/finance-core/index.js';
 import { buildTerms, previewCreate, previewPay, withConvention } from './preview.js';
 
 const TODAY = '2026-10-13';
@@ -156,5 +156,38 @@ describe('buildTerms and previewCreate', () => {
     const result = previewCreate({ ...create, principalMinor: 0 });
 
     expect(result).toMatchObject({ ok: false, issue: 'El monto del préstamo debe ser mayor que cero.' });
+  });
+});
+
+describe('previewCreate with the household legal tables', () => {
+  const create = { kind: 'vehicle', name: 'Moto', lender: 'Bancolombia', principalMinor: 10000000, rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, rateValue: 24, n: 36, periodicity: 'monthly', system: 'french', firstDueOn: null, charges: [], openedOn: TODAY };
+  const at = (value) => ({ ...create, rate: { value, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, rateValue: value });
+  const household = resolveLegal([{ kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: 'Resolución', verified: true }]);
+  const UNAVAILABLE = 'No pude leer las tasas legales del hogar';
+
+  it('cites the household cap of 29 % (not the code 28.59 %) and stays silent between the two', () => {
+    const above = plain(previewCreate(at(29.5), { legal: household }).text);
+    const between = previewCreate(at(28.8), { legal: household });
+
+    expect(above).toContain('supera el tope de usura de 29% E.A.');
+    expect(plain(previewCreate(at(29.5)).text)).toContain('supera el tope de usura de 28.59% E.A.');
+    expect(between.ok).toBe(true);
+    expect(plain(between.text)).not.toContain('usura');
+    expect(plain(previewCreate(at(28.8)).text)).toContain('tope de usura de 28.59% E.A.');
+  });
+
+  it('appends one notice line when the legal tables were unavailable and the preview cites a cap', () => {
+    const text = plain(previewCreate(at(30), { legal: resolveLegal.unavailable() }).text);
+
+    expect(text).toContain('tope de usura de 28.59% E.A.');
+    expect(text.split(UNAVAILABLE)).toHaveLength(2);
+    expect(text).toContain('usé los valores de la app');
+  });
+
+  it('does not mention the unavailable tables when no cap is cited, or when they were read', () => {
+    expect(plain(previewCreate(at(24), { legal: resolveLegal.unavailable() }).text)).not.toContain(UNAVAILABLE);
+    expect(plain(previewCreate(at(30), { legal: household }).text)).not.toContain(UNAVAILABLE);
+    expect(plain(previewCreate(at(30), { legal: resolveLegal([]) }).text)).not.toContain(UNAVAILABLE);
+    expect(plain(previewCreate(at(30)).text)).not.toContain(UNAVAILABLE);
   });
 });

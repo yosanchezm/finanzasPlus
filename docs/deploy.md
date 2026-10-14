@@ -123,6 +123,16 @@ El archivo resultante es `functions/nia.tar.gz` (ignorado por Git). Para poder v
 
 Vuelve a generar y subir el `tar.gz` después de cada cambio de Nia. El de la gestión de deudas (crear, pagar, listar, simular y recomendar abonos) necesita antes las tablas `debts` y `debt_events` en la base de datos en producción: aplica la migración de la sección 3 de [setup.md](setup.md) y luego sube el paquete. Las variables opcionales `NIA_WEB_URL` y `DEBT_ADVICE_THRESHOLDS` se agregan en la Function y requieren un nuevo despliegue para tomar efecto.
 
+### Orden de despliegue: tasas legales
+
+La tabla `legal_rates` (tasas legales del hogar) se crea con la migración. El orden es:
+
+1. Ejecuta `npm run migrate:appwrite` (primero dos veces en desarrollo) **antes** de desplegar esta versión o una posterior.
+2. Despliega la web (Dokploy) y sube el `tar.gz` de Nia. Conviene hacerlo juntos para que ambas superficies calculen con las mismas tasas.
+3. Si se despliega sin migrar, nada falla: la web y Nia usan los valores de la app y avisan que no pudieron leer las tasas legales.
+
+Para volver atrás, redespliega la versión anterior; la tabla puede quedar sin uso y no hace falta borrarla.
+
 ## Verificación local
 
 ```bash

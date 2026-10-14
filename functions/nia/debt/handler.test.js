@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { serializeTerms } from '../../../packages/finance-core/index.js';
-import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback } from './handler.js';
+import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, loadDebts, loadLegal } from './handler.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
 const ACTOR = 'telegram:1';
@@ -11,8 +11,8 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const debtRow = (id, name, extra = {}) => ({ $id: id, householdId: 'h1', name, kind: 'vehicle', ownerScope: 'shared', status: 'active', lender: '', termsJson: serializeTerms(loanTerms), ...extra });
 const disbursement = (debtId) => ({ $id: `e-${debtId}`, debtId, householdId: 'h1', kind: 'disbursement', effectiveOn: '2026-09-10', amountMinor: 10000000, payloadJson: '{}', actorId: ACTOR, source: 'telegram', dedupeKey: `seed:${debtId}`, $createdAt: '2026-09-10T12:00:00.000Z' });
 
-function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [], cashflow = [], config = {} } = {}) {
-  const tables = { debts: [...debts], debt_events: debts.map((debt) => disbursement(debt.$id)), transactions: [], categories: [...categories] };
+function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [], cashflow = [], config = {}, legalRows = [], legalError = null } = {}) {
+  const tables = { debts: [...debts], debt_events: debts.map((debt) => disbursement(debt.$id)), transactions: [], categories: [...categories], legal_rates: [...legalRows] };
   const sent = [];
   const sessions = [];
   const prompts = [];
@@ -27,7 +27,10 @@ function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [],
     },
     now: () => new Date('2026-10-13T15:00:00Z'),
     ids: { pending: () => 'p1' },
-    listRows: async (table, where) => tables[table].filter((row) => Object.entries(where).every(([key, value]) => row[key] === value)),
+    listRows: async (table, where) => {
+      if (table === 'legal_rates' && legalError) throw legalError;
+      return tables[table].filter((row) => Object.entries(where).every(([key, value]) => row[key] === value));
+    },
     createRow: async (table, { id, data }) => {
       if (tables[table].some((row) => row.$id === id || (table === 'debt_events' && row.dedupeKey === data.dedupeKey))) throw conflict();
       const row = { $id: id, $createdAt: '2026-10-13T15:00:00.000Z', ...data };
@@ -557,5 +560,98 @@ describe('debtSummaries (the code-computed figures behind the analysis snapshot)
     expect(items[0]).toMatchObject({ id: 'd1', name: 'Crédito Vehículo', ownerScope: 'you', balanceMinor: 10000000, pastDueMinor: 380381, nextDue: { dueOn: '2026-10-10', amountMinor: 380381 } });
     expect(items[0].eaPercent).toBeCloseTo(24, 6);
     expect(items[1]).toEqual({ id: 'd2', name: 'Rota', ownerScope: 'shared', unreadable: true });
+  });
+});
+
+describe('household legal rates (A2)', () => {
+  const USURY = { $id: 'lr1', householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: 'Resolución', verified: true };
+  const missingTable = () => Object.assign(new Error('GET /tables/legal_rates/rows → 404: Table not found'), { status: 404 });
+  const capOf = (legal) => legal.usuryTable.find((entry) => entry.modality === 'consumer' && entry.validFrom === '2026-10-01').capEA;
+
+  it('loadLegal resolves the household rows over the code tables', async () => {
+    const legal = await loadLegal(world({ legalRows: [USURY] }).deps);
+
+    expect(legal.status).toBe('table');
+    expect(capOf(legal)).toBe(29);
+  });
+
+  it('loadLegal with an empty table resolves to the code defaults', async () => {
+    const legal = await loadLegal(world().deps);
+
+    expect(legal.status).toBe('defaults');
+    expect(capOf(legal)).toBe(28.59);
+  });
+
+  it.each([
+    ['a 404 (migration not run)', missingTable()],
+    ['a server error', Object.assign(new Error('boom'), { status: 500 })],
+    ['a failure with no status', new Error('network')],
+  ])('loadLegal survives %s with the unavailable fallback and the code tables', async (_label, legalError) => {
+    const legal = await loadLegal(world({ legalError }).deps);
+
+    expect(legal.status).toBe('unavailable');
+    expect(capOf(legal)).toBe(28.59);
+  });
+
+  it('loadDebts decorates every debt with the same resolved tables', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], legalRows: [USURY] });
+
+    const debts = await loadDebts(w.deps);
+
+    expect(debts.map((debt) => debt.$id)).toEqual(['d1', 'd2']);
+    expect(debts.map((debt) => capOf(debt.legal))).toEqual([29, 29]);
+    expect(debts[0].legal).toBe(debts[1].legal);
+    expect(debts[0]).toMatchObject({ name: 'Carro', kind: 'vehicle' });
+  });
+
+  it('loadDebts still returns the debts, with the unavailable fallback, when legal_rates cannot be read', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro')], legalError: missingTable() });
+
+    const debts = await loadDebts(w.deps);
+
+    expect(debts).toHaveLength(1);
+    expect(debts[0].legal.status).toBe('unavailable');
+    expect(capOf(debts[0].legal)).toBe(28.59);
+  });
+
+  it('only reads legal_rates for this household', async () => {
+    const w = world({ legalRows: [USURY, { ...USURY, $id: 'lr2', householdId: 'other', value: 2500 }] });
+
+    expect(capOf(await loadLegal(w.deps))).toBe(29);
+  });
+
+  it('a payment still previews and confirms when the legal rates cannot be read', async () => {
+    const w = world({ answers: [payAnswer()], legalError: missingTable() });
+    await handleDebt(w.deps, ctx({ text: 'pagué 380 mil al carro' }));
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.sent[0].text).toContain('Abono a Crédito Vehículo');
+    expect(w.tables.debt_events.filter((event) => event.kind === 'payment')).toHaveLength(1);
+  });
+
+  it('a new loan above the household cap cites 29 % and not the code 28.59 %', async () => {
+    const w = world({ debts: [], answers: [loanAnswer({ rate: { value: 29.5, period: 'annual' } })], legalRows: [USURY] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('tope de usura de 29% E.A.');
+    expect(w.sent[0].text).not.toContain('No pude leer las tasas legales');
+  });
+
+  it('a new loan above the cap adds one line when the legal rates were unavailable, and still previews', async () => {
+    const w = world({ debts: [], answers: [loanAnswer({ rate: { value: 30, period: 'annual' } })], legalError: missingTable() });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('tope de usura de 28.59% E.A.');
+    expect(w.sent[0].text.split('No pude leer las tasas legales del hogar')).toHaveLength(2);
+    expect(buttons(w.sent[0].keyboard)).toContain('nia:confirm');
+  });
+
+  it('the convention buttons keep the household cap in the preview that follows', async () => {
+    const w = world({ debts: [], answers: [loanAnswer({ rate: { value: 2.5, period: 'monthly' } })], legalRows: [USURY] });
+    await handleDebt(w.deps, ctx());
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+
+    expect(w.sent[1].text).toContain('Tasa: 2.5% MV ≈ 34.49% EA');
+    expect(w.sent[1].text).toContain('tope de usura de 29% E.A.');
   });
 });
