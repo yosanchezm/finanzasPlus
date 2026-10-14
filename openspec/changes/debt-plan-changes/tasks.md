@@ -61,11 +61,11 @@ Slice checkpoint (last task of every slice, id `<slice>.CP`): `git diff --stat` 
 ### A1 core compatibility and legal (design 640) · deps: none
 Groups: A1a (about 250), A1b (about 390).
 
-- [ ] A1a.1 RED `packages/finance-core/test/ledger/events.forward.test.js`: unknown string kind skipped with `unknown_event_kind {eventId, kind}`; known events project as if absent; `void` of an unknown target ignored; `validateEvent` and `planCommit` still throw on unknown kind; mutation: lenient `validateEvent` must fail. Add `events.js` to node16 list. Reqs DL1.
-- [ ] A1a.2 GREEN `src/ledger/events.js` (`readEvents`; `sortEvents`/`activeEvents` use it), `src/ledger/project.js` (notice). Done: A1a.1 passes, parity suites unchanged.
-- [ ] A1b.1 RED `test/legal.resolve.test.js`: 1949 to 2924 bp, 1906 to 2859; override wins; mortgage `ibc` derives nothing; empty rows give code defaults (SMMLV 2026 = 1,750,905); `capOn` covers, carries stale with `lastValidTo`, null before first cap, never throws; `smmlvFor` carries forward; `legalOf` precedence (`opts` > `debt` > code); `resolveLegal.unavailable`; `usuryNotice` with only 2026-10 cap on 2026-12 gives `stale:true`, injected 29.00 beats 28.59, no cap gives null; `ley1555Notice` 300,000,000 within 1,540,796,400, 2,000,000,000 above, household 1,800,000 gives 1,584,000,000. Barrel exact-keys RED. Reqs LR2, LR3, LR4, LR5, LR6 (core), IR1, PA1.
-- [ ] A1b.2 GREEN `src/legal.js`, `index.js`, `project.js` (`legalOf` into context). Done: all pass.
-- [ ] A1.CP checkpoint. Gate for owner: deploy web + Nia at or after A1 (action 2).
+- [x] A1a.1 RED `packages/finance-core/test/ledger/events.forward.test.js`: unknown string kind skipped with `unknown_event_kind {eventId, kind}`; known events project as if absent; `void` of an unknown target ignored; `validateEvent` and `planCommit` still throw on unknown kind; mutation: lenient `validateEvent` must fail. Add `events.js` to node16 list. Reqs DL1.
+- [x] A1a.2 GREEN `src/ledger/events.js` (`readEvents`; `sortEvents`/`activeEvents` use it), `src/ledger/project.js` (notice). Done: A1a.1 passes, parity suites unchanged.
+- [x] A1b.1 RED `test/legal.resolve.test.js`: 1949 to 2924 bp, 1906 to 2859; override wins; mortgage `ibc` derives nothing; empty rows give code defaults (SMMLV 2026 = 1,750,905); `capOn` covers, carries stale with `lastValidTo`, null before first cap, never throws; `smmlvFor` carries forward; `legalOf` precedence (`opts` > `debt` > code); `resolveLegal.unavailable`; `usuryNotice` with only 2026-10 cap on 2026-12 gives `stale:true`, injected 29.00 beats 28.59, no cap gives null; `ley1555Notice` 300,000,000 within 1,540,796,400, 2,000,000,000 above, household 1,800,000 gives 1,584,000,000. Barrel exact-keys RED. Reqs LR2, LR3, LR4, LR5, LR6 (core), IR1, PA1.
+- [x] A1b.2 GREEN `src/legal.js`, `index.js`, `project.js` (`legalOf` into context). Done: all pass.
+- [x] A1.CP checkpoint. Gate for owner: deploy web + Nia at or after A1 (action 2).
 
 ### A2 schema and decoration (design 800) · deps: A1
 Groups: A2a schema + web (about 500), A2b Nia + docs (about 300).
