@@ -40,6 +40,18 @@ describe('buildPending', () => {
     expect(bytes(JSON.stringify(pending))).toBeLessThan(PENDING_MAX_BYTES);
   });
 
+  it('keeps a legal rate pending (the whole draft row) a few hundred bytes long, whatever the kind', () => {
+    const month = { kind: 'usury', modality: 'productive_urban', validFrom: '2026-11-01', validTo: '2026-11-30', value: 10000 };
+    const year = { kind: 'smmlv', modality: 'all', validFrom: '2027-01-01', validTo: '2027-12-31', value: 100000000 };
+
+    for (const draft of [month, year]) {
+      const pending = buildPending({ ...pay, action: 'legal_rate', debtId: undefined, preview: undefined, draft });
+
+      expect(pending).toMatchObject({ kind: 'debt', v: 1, action: 'legal_rate', awaiting: 'confirm', draft });
+      expect(bytes(JSON.stringify(pending))).toBeLessThan(300);
+    }
+  });
+
   it('keeps a picker payload with 6 candidates under the limit', () => {
     const candidates = Array.from({ length: 6 }, (_, index) => `db${String(index).padStart(34, 'x')}`);
     const pending = buildPending({ id: pay.id, action: 'pay', awaiting: 'pick', candidates, draft: pay.draft });

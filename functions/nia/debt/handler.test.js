@@ -11,12 +11,13 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const debtRow = (id, name, extra = {}) => ({ $id: id, householdId: 'h1', name, kind: 'vehicle', ownerScope: 'shared', status: 'active', lender: '', termsJson: serializeTerms(loanTerms), ...extra });
 const disbursement = (debtId) => ({ $id: `e-${debtId}`, debtId, householdId: 'h1', kind: 'disbursement', effectiveOn: '2026-09-10', amountMinor: 10000000, payloadJson: '{}', actorId: ACTOR, source: 'telegram', dedupeKey: `seed:${debtId}`, $createdAt: '2026-09-10T12:00:00.000Z' });
 
-function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [], cashflow = [], config = {}, legalRows = [], legalError = null } = {}) {
+function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [], answers = [], cashflow = [], config = {}, legalRows = [], legalError = null, updateError = null } = {}) {
   const tables = { debts: [...debts], debt_events: debts.map((debt) => disbursement(debt.$id)), transactions: [], categories: [...categories], legal_rates: [...legalRows] };
   const sent = [];
   const sessions = [];
   const prompts = [];
   const windows = [];
+  const updates = [];
   const conflict = () => Object.assign(new Error('conflict'), { status: 409 });
   const deps = {
     config: { householdId: 'h1', timezone: 'America/Bogota', currency: 'COP', ...config },
@@ -38,6 +39,14 @@ function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [],
       return row;
     },
     deleteRow: async (table, id) => { tables[table] = tables[table].filter((row) => row.$id !== id); },
+    updateRow: async (table, id, data) => {
+      if (updateError) throw updateError;
+      const row = tables[table].find((item) => item.$id === id);
+      if (!row) throw Object.assign(new Error('not found'), { status: 404 });
+      updates.push({ table, id, data });
+      Object.assign(row, data);
+      return row;
+    },
     gemini: async (prompt) => {
       prompts.push(prompt);
       const answer = answers.shift();
@@ -48,7 +57,7 @@ function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [],
     sendMessage: async (chatId, text, keyboard) => { sent.push({ chatId, text: plain(text), keyboard }); },
     saveSession: async (chatId, actorId, status, pending, history) => { sessions.push({ status, pending, history }); },
   };
-  return { deps, tables, sent, sessions, prompts, windows, lastPending: () => sessions[sessions.length - 1].pending };
+  return { deps, tables, sent, sessions, prompts, windows, updates, lastPending: () => sessions[sessions.length - 1].pending };
 }
 
 const profile = { ownerScope: 'you', appwriteUserId: ACTOR, alias: 'Camilo' };
@@ -653,5 +662,204 @@ describe('household legal rates (A2)', () => {
 
     expect(w.sent[1].text).toContain('Tasa: 2.5% MV ≈ 34.49% EA');
     expect(w.sent[1].text).toContain('tope de usura de 29% E.A.');
+  });
+});
+
+describe('legal_rate (E1)', () => {
+  const legalAnswer = (legal = {}, extra = {}) => ({ action: 'legal_rate', legal: { kind: 'usury', modality: 'consumer', month: 'noviembre', year: null, value: 28.2, ...legal }, ...extra });
+  const NOV_ID = 'lruco202611h1';
+  const novRow = (extra = {}) => ({ $id: NOV_ID, householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2700, source: 'Resolución', verified: true, actorId: 'u0', ...extra });
+  const preview = async (w, text = 'la usura de noviembre es 28.2') => { await handleDebt(w.deps, ctx({ text })); return w.lastPending(); };
+
+  it('previews kind, modality, month and value, asks for Confirm and writes nothing', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    const pending = await preview(w);
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Tasa de usura');
+    expect(w.sent[0].text).toContain('Modalidad: consumo y ordinario');
+    expect(w.sent[0].text).toContain('Mes: noviembre de 2026');
+    expect(w.sent[0].text).toContain('Valor: 28.20% E.A.');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[0].status).toBe('awaiting_confirmation');
+    expect(pending).toEqual({ kind: 'debt', v: 1, id: 'p1', action: 'legal_rate', awaiting: 'confirm', draft: { kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820 } });
+    expect(Buffer.byteLength(JSON.stringify(pending), 'utf8')).toBeLessThan(1500);
+    expect(w.tables.legal_rates).toEqual([]);
+  });
+
+  it('works without any debt', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    await preview(w);
+
+    expect(w.prompts[0]).toContain('No hay deudas registradas');
+    expect(w.sent[0].text).toContain('Valor: 28.20% E.A.');
+  });
+
+  it('Confirm writes one row with the deterministic id, basis points and the user as author', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    const pending = await preview(w);
+    await confirmDebt(w.deps, ctx(), pending);
+
+    expect(w.tables.legal_rates).toEqual([expect.objectContaining({
+      $id: NOV_ID,
+      householdId: 'h1',
+      kind: 'usury',
+      modality: 'consumer',
+      validFrom: '2026-11-01',
+      validTo: '2026-11-30',
+      value: 2820,
+      verified: false,
+      actorId: ACTOR,
+    })]);
+    expect(w.tables.legal_rates[0].source).toContain('Nia');
+    expect(w.updates).toEqual([]);
+    expect(w.sent[1].text).toContain('Listo: registré la tasa de usura (consumo y ordinario) de noviembre de 2026: 28.20% E.A.');
+    expect(w.sessions[1].status).toBe('completed');
+    expect(w.lastPending()).toEqual({ kind: 'debt', v: 1, id: 'p1', action: 'legal_rate', done: true });
+  });
+
+  it('a second Confirm leaves one row and answers that it was already registered', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    const pending = await preview(w);
+    await confirmDebt(w.deps, ctx(), pending);
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.tables.legal_rates).toHaveLength(1);
+    expect(w.sent[2].text).toContain('ya estaba registrad');
+    expect(w.updates).toEqual([]);
+  });
+
+  it('even the same pending confirmed twice before the session is marked done leaves one row', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    const pending = await preview(w);
+    await confirmDebt(w.deps, ctx(), pending);
+    await confirmDebt(w.deps, ctx(), pending); // a Telegram retry that read the session before it was marked done
+
+    expect(w.tables.legal_rates).toHaveLength(1);
+    expect(w.tables.legal_rates[0]).toMatchObject({ $id: NOV_ID, value: 2820 });
+  });
+
+  it('updates the row of the same key (409, then updateRow) and says it was an update', async () => {
+    const w = world({ debts: [], legalRows: [novRow()], answers: [legalAnswer()] });
+    const pending = await preview(w);
+    await confirmDebt(w.deps, ctx(), pending);
+
+    expect(w.tables.legal_rates).toHaveLength(1);
+    expect(w.updates).toHaveLength(1);
+    expect(w.updates[0]).toMatchObject({ table: 'legal_rates', id: NOV_ID, data: { value: 2820, kind: 'usury', modality: 'consumer', verified: false, actorId: ACTOR } });
+    expect(w.tables.legal_rates[0]).toMatchObject({ value: 2820, verified: false, actorId: ACTOR });
+    expect(w.sent[1].text).toContain('Listo: actualicé la tasa de usura');
+    expect(w.sent[1].text).not.toContain('registré');
+    expect(w.lastPending()).toMatchObject({ done: true });
+  });
+
+  it('another month or another modality is another row, not an update', async () => {
+    const w = world({ debts: [], legalRows: [novRow()], answers: [legalAnswer({ month: 'diciembre' }), legalAnswer({ modality: 'hipotecario' })] });
+    await confirmDebt(w.deps, ctx(), await preview(w));
+    await confirmDebt(w.deps, ctx(), await preview(w));
+
+    expect(w.updates).toEqual([]);
+    expect(w.tables.legal_rates.map((row) => row.$id)).toEqual([NOV_ID, 'lruco202612h1', 'lrumg202611h1']);
+  });
+
+  it('a failed update keeps the pending untouched so Confirm can be tapped again', async () => {
+    const failure = Object.assign(new Error('boom'), { status: 500 });
+    const w = world({ debts: [], legalRows: [novRow()], answers: [legalAnswer()], updateError: failure });
+    const pending = await preview(w);
+
+    await expect(confirmDebt(w.deps, ctx(), pending)).rejects.toBe(failure);
+    expect(w.sessions).toHaveLength(1);
+    expect(w.tables.legal_rates[0].value).toBe(2700);
+  });
+
+  it('an IBC shows the usury cap it implies and is stored as an IBC row only', async () => {
+    const w = world({ debts: [], answers: [legalAnswer({ kind: 'ibc', value: 19.49 })] });
+    const pending = await preview(w, 'el IBC de noviembre es 19.49');
+
+    expect(w.sent[0].text).toContain('Valor: 19.49% E.A.');
+    expect(w.sent[0].text).toContain('Tope de usura que resulta: 29.24% E.A.');
+    await confirmDebt(w.deps, ctx(), pending);
+    expect(w.tables.legal_rates).toEqual([expect.objectContaining({ $id: 'lrico202611h1', kind: 'ibc', value: 1949 })]);
+    expect(w.sent[1].text).toContain('registré el IBC (consumo y ordinario) de noviembre de 2026: 19.49% E.A.');
+  });
+
+  it('the SMMLV of a year is stored in whole pesos for the whole year', async () => {
+    const w = world({ debts: [], answers: [{ action: 'legal_rate', legal: { kind: 'smmlv', value: 1750905, year: 2027 } }] });
+    const pending = await preview(w, 'el salario mínimo de 2027 es 1.750.905');
+
+    expect(w.sent[0].text).toContain('Año: 2027');
+    expect(w.sent[0].text).toContain('Valor: $ 1.750.905');
+    await confirmDebt(w.deps, ctx(), pending);
+    expect(w.tables.legal_rates).toEqual([expect.objectContaining({ $id: 'lrsal202701h1', kind: 'smmlv', modality: 'all', validFrom: '2027-01-01', validTo: '2027-12-31', value: 1750905 })]);
+  });
+
+  it('resolves a month without a year against today and previews the year it chose', async () => {
+    const w = world({ debts: [], answers: [legalAnswer({ month: 'enero' }), legalAnswer({ month: 'mayo' })] });
+    await preview(w);
+    await preview(w);
+
+    expect(w.sent[0].text).toContain('Mes: enero de 2027');
+    expect(w.sent[1].text).toContain('Mes: mayo de 2026');
+  });
+
+  it('refuses 2.82 asking for a correction, and keeps the pending request as it was', async () => {
+    const w = world({ debts: [], answers: [legalAnswer({ value: 2.82 })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('entre 5 % y 100 %');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(w.tables.legal_rates).toEqual([]);
+  });
+
+  it('refuses an SMMLV out of range and an IBC for a mortgage, each with its own explanation', async () => {
+    const w = world({ debts: [], answers: [{ action: 'legal_rate', legal: { kind: 'smmlv', value: 1750 } }, legalAnswer({ kind: 'ibc', modality: 'hipotecario', value: 19.49 })] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('salario mínimo');
+    expect(w.sent[0].text).toContain('100.000');
+    expect(w.sent[1].text).toContain('hipoteca');
+    expect(w.sent[1].text).toContain('tasa de usura');
+    expect(w.tables.legal_rates).toEqual([]);
+    expect(w.sessions.map((session) => session.pending)).toEqual([null, null]);
+  });
+
+  it('asks for what is missing: the month, or the kind and the value', async () => {
+    const w = world({ debts: [], answers: [legalAnswer({ month: null }), { action: 'legal_rate', legal: null }] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toBe('Para registrar la tasa legal necesito: el mes.');
+    expect(w.sent[1].text).toBe('Para registrar la tasa legal necesito: si es la tasa de usura, el IBC o el salario mínimo, el valor.');
+    expect(w.tables.legal_rates).toEqual([]);
+  });
+
+  it('previews even when the legal rates of the household cannot be read', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()], legalError: Object.assign(new Error('404'), { status: 404 }) });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Valor: 28.20% E.A.');
+    expect(buttons(w.sent[0].keyboard)).toContain('nia:confirm');
+  });
+
+  it('does not trust a pending whose value is out of range', async () => {
+    const w = world({ debts: [] });
+    const pending = { kind: 'debt', v: 1, id: 'p1', action: 'legal_rate', awaiting: 'confirm', draft: { kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 50 } };
+    await confirmDebt(w.deps, ctx(), pending);
+
+    expect(w.tables.legal_rates).toEqual([]);
+    expect(w.sent[0].text).toContain('No pude guardar esa tasa');
+    expect(w.sessions).toEqual([]);
+  });
+
+  it('ignores a strategy or convention button while a legal rate waits for Confirm', async () => {
+    const w = world({ debts: [], answers: [legalAnswer()] });
+    await preview(w);
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:strat:reduce_term');
+
+    expect(w.sent[1].text).toContain('ya no aplica');
+    expect(w.tables.legal_rates).toEqual([]);
   });
 });

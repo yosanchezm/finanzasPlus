@@ -19,7 +19,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay',
+ * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {

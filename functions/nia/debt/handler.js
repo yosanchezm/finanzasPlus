@@ -1,9 +1,10 @@
-import { ValidationError, advise, commitPlan, compareStrategies, planCommit, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, planCommit, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
+import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
 import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
@@ -11,16 +12,17 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 // Debt flow of Nia (NDA-1, NDA-3, NDA-4). The model only extracts; every number comes
 // from the shared core and every write needs a confirmation. All I/O goes through
 // the injected `deps`, so the flow runs in tests without network:
-//   deps = { listRows(table, where), createRow(table, { id, data }), deleteRow(table, id),
+//   deps = { listRows(table, where), createRow(table, { id, data }), updateRow(table, id, data), deleteRow(table, id),
 //            gemini(prompt), sendMessage(chatId, text, keyboard), saveSession(chatId, actorId, status, pending, history),
 //            now(), ids: { pending() }, cashflowRows({ from, to }),
 //            config: { householdId, timezone, currency, webUrl?, adviceThresholds?, paraphraseTimeoutMs? } }
-// `createRow` rejects with `status: 409` when the id or a unique key already exists.
+// `createRow` rejects with `status: 409` when the id or a unique key already exists; a `legal_rate` Confirm then calls `updateRow`.
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
 const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
+const LEGAL_SOURCE = 'Nia (Telegram)';
 
 const CARDS_WEB = 'Simular y recomendar abonos aplica a préstamos con plan de cuotas; todavía no está disponible para tarjetas (ni en la web).';
 const ASK_EXTRA = '¿Cuánto quieres abonar? Escríbeme el monto en pesos.';
@@ -30,8 +32,22 @@ const PROBLEMS = {
   future_date: 'La fecha del pago no puede ser futura. ¿Qué día fue?',
   invalid_rate: 'La tasa no es válida: debe ser desde 0 y, si es anticipada, menor a 100 % por periodo. ¿Cuál es?',
   card_in_web: 'Las tarjetas se crean desde la web, en la sección Deudas. Aquí puedo registrar abonos a una tarjeta que ya exista.',
+  legal_value_out_of_range: 'Ese valor no parece una tasa válida: debe estar entre 5 % y 100 % E.A. y tener máximo dos decimales (por ejemplo, 28.2). Escríbelo de nuevo; no guardé nada.',
+  legal_smmlv_out_of_range: 'El salario mínimo debe estar entre $ 100.000 y $ 100.000.000, en pesos enteros. Escríbelo de nuevo; no guardé nada.',
+  legal_mortgage_needs_usury: 'Para la hipoteca registra directamente la tasa de usura: el IBC no la deriva. Dime la usura y el mes; no guardé nada.',
+  legal_unknown_modality: 'No reconozco esa modalidad. Puede ser consumo y ordinario, bajo monto, productivo (rural o urbano), popular (rural o urbano) o hipotecario.',
+  legal_invalid_month: 'No entendí el mes o el año. Escríbelo, por ejemplo, “noviembre” o “noviembre de 2026”.',
 };
-const MISSING = { amount: 'el monto del pago', name: 'el nombre de la deuda', principal: 'el monto del préstamo', rate: 'la tasa de interés', term: 'el número de cuotas' };
+const MISSING = {
+  amount: 'el monto del pago',
+  name: 'el nombre de la deuda',
+  principal: 'el monto del préstamo',
+  rate: 'la tasa de interés',
+  term: 'el número de cuotas',
+  legal_kind: 'si es la tasa de usura, el IBC o el salario mínimo',
+  legal_value: 'el valor',
+  legal_month: 'el mes',
+};
 
 const hasStatus = (error, status) => Boolean(error) && (error.status === status || error.code === status);
 const clip = (value) => String(value || '').trim().slice(0, 700);
@@ -140,6 +156,13 @@ async function finishCreate(deps, ctx, id, create, legal) {
     return inform(deps, ctx, 'Esa deuda tiene demasiados cargos para registrarla por Telegram. Créala desde la web, en la sección Deudas.');
   }
   return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+// A legal rate (NI1): the draft is the whole pending (a few dozen bytes), nothing is written until Confirm.
+async function startLegalRate(deps, ctx, request) {
+  if (request.missingFields.length) return inform(deps, ctx, `Para registrar la tasa legal necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const pending = buildPending({ id: deps.ids.pending(), action: 'legal_rate', awaiting: 'confirm', draft: request.legalRate });
+  return say(deps, ctx, { text: previewLegalRate(request.legalRate), keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
 }
 
 async function continuePay(deps, ctx, id, debt, draft) {
@@ -262,6 +285,7 @@ export async function handleDebt(deps, ctx) {
     if (request.missingFields.length) return inform(deps, ctx, `Para registrar la deuda necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
     return finishCreate(deps, ctx, deps.ids.pending(), request.create, legal);
   }
+  if (request.action === 'legal_rate') return startLegalRate(deps, ctx, request);
   return startAnalysis(deps, ctx, request, debts);
 }
 
@@ -329,7 +353,26 @@ async function commitCreate(deps, ctx, pending) {
   return { duplicate: duplicate && existed, text: `✅ Listo: registré la deuda «${name}» por ${pesos(terms.principalMinor)}.` };
 }
 
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.' };
+// The row id is the same for the same key (core `legalRateId`), so a second save collides (409) and becomes an update:
+// repeated confirmations leave one row, and a changed value on an existing key is reported as an update.
+async function commitLegalRate(deps, ctx, pending) {
+  if (!isStorableLegalRate(pending.draft)) return { text: 'No pude guardar esa tasa: los datos no son válidos. Escríbemela de nuevo.', failed: true };
+  const { kind, modality, validFrom, validTo, value } = pending.draft;
+  const id = legalRateId({ kind, modality, validFrom }, deps.config.householdId);
+  const data = { householdId: deps.config.householdId, kind, modality, validFrom, validTo, value, source: LEGAL_SOURCE, verified: false, actorId: ctx.profile.appwriteUserId };
+  let updated = false;
+  try {
+    await deps.createRow(T.legal, { id, data });
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+    await deps.updateRow(T.legal, id, data);
+    updated = true;
+  }
+  return { duplicate: false, text: `✅ Listo: ${updated ? 'actualicé' : 'registré'} ${describeLegalRate(pending.draft)}.` };
+}
+
+const COMMIT = { create: commitCreate, legal_rate: commitLegalRate };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its
@@ -341,7 +384,7 @@ export async function confirmDebt(deps, ctx, pending) {
   if (pending.awaiting !== 'confirm') return notify(deps, ctx, 'Antes de confirmar necesito que elijas una de las opciones de los botones anteriores.');
   let outcome;
   try {
-    outcome = pending.action === 'create' ? await commitCreate(deps, ctx, pending) : await commitPay(deps, ctx, pending, today(deps));
+    outcome = COMMIT[pending.action] ? await COMMIT[pending.action](deps, ctx, pending) : await commitPay(deps, ctx, pending, today(deps));
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
     return notify(deps, ctx, describeCoreError(error));

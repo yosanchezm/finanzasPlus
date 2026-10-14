@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { previewLegalRate, readLegalRate, resolveMonth } from './legal.js';
+import { describeLegalRate, isStorableLegalRate, previewLegalRate, readLegalRate, resolveMonth } from './legal.js';
 
 const TODAY = '2026-10-14';
 const read = (legal, today = TODAY) => readLegalRate(legal, { today });
@@ -181,5 +181,39 @@ describe('previewLegalRate', () => {
     expect(text).toContain('Año: 2027');
     expect(text).toContain('Valor: $ 1.750.905');
     expect(text).not.toContain('Modalidad');
+  });
+});
+
+describe('isStorableLegalRate (what Confirm re-checks in a pending it did not just build)', () => {
+  const row = (extra = {}) => ({ kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820, ...extra });
+
+  it('accepts what readLegalRate produces', () => {
+    expect(isStorableLegalRate(row())).toBe(true);
+    expect(isStorableLegalRate(read(usury()).legalRate)).toBe(true);
+    expect(isStorableLegalRate({ kind: 'smmlv', modality: 'all', validFrom: '2027-01-01', validTo: '2027-12-31', value: 1750905 })).toBe(true);
+  });
+
+  it.each([
+    ['a value out of range', row({ value: 50 })],
+    ['an unknown kind', row({ kind: 'mora' })],
+    ['an unknown modality', row({ modality: 'cripto' })],
+    ['an IBC for a mortgage', row({ kind: 'ibc', modality: 'mortgage' })],
+    ['an SMMLV with a modality', { kind: 'smmlv', modality: 'consumer', validFrom: '2027-01-01', validTo: '2027-12-31', value: 1750905 }],
+    ['a period that is not the whole month', row({ validTo: '2026-11-15' })],
+    ['a period that does not start on day 1', row({ validFrom: '2026-11-02' })],
+    ['no draft at all', null],
+  ])('refuses %s', (_label, draft) => {
+    expect(isStorableLegalRate(draft)).toBe(false);
+  });
+});
+
+describe('describeLegalRate', () => {
+  it('names the rate with its article, modality, month and value', () => {
+    expect(describeLegalRate({ kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820 })).toBe('la tasa de usura (consumo y ordinario) de noviembre de 2026: 28.20% E.A.');
+    expect(describeLegalRate({ kind: 'ibc', modality: 'consumer', validFrom: '2026-12-01', validTo: '2026-12-31', value: 1949 })).toBe('el IBC (consumo y ordinario) de diciembre de 2026: 19.49% E.A.');
+  });
+
+  it('names the SMMLV by year', () => {
+    expect(describeLegalRate({ kind: 'smmlv', modality: 'all', validFrom: '2027-01-01', validTo: '2027-12-31', value: 1750905 }).replace(/ /g, ' ')).toBe('el salario mínimo de 2027: $ 1.750.905');
   });
 });

@@ -15,6 +15,8 @@ function makeNet(answers) {
   const telegram = [];
   const prompts = [];
   const gets = [];
+  const posts = [];
+  const patches = [];
   let counter = 0;
   const reply = (status, body) => ({ ok: status < 400, status, statusText: String(status), text: async () => JSON.stringify(body), json: async () => body });
   const matches = (row, queries) => queries.every((q) => {
@@ -52,6 +54,7 @@ function makeNet(answers) {
     const body = init.body ? JSON.parse(init.body) : {};
     if (method === 'POST') {
       const rowId = body.rowId;
+      posts.push({ table, rowId, permissions: body.permissions }); // every attempt, including the ones answered with a 409
       if (rows.some((row) => row.$id === rowId || (table === 'debt_events' && row.dedupeKey === body.data.dedupeKey))) return reply(409, { message: 'exists' });
       counter += 1;
       const row = { $id: rowId, $createdAt: `2026-10-13T15:00:0${counter % 10}.000Z`, ...body.data };
@@ -62,12 +65,13 @@ function makeNet(answers) {
       tables[table] = rows.filter((row) => row.$id !== id);
       return reply(204, {});
     }
+    if (method === 'PATCH') patches.push({ table, id, data: body.data });
     const found = rows.find((row) => row.$id === id);
     if (found) Object.assign(found, body.data);
     else rows.push({ $id: id, ...body.data });
     return reply(200, found || {});
   };
-  return { tables, telegram, prompts, answers, gets };
+  return { tables, telegram, prompts, answers, gets, posts, patches };
 }
 
 let run;
@@ -269,5 +273,72 @@ describe('simulate, advise and the analysis snapshot in the Nia entry point', ()
 
     expect(JSON.parse(fake.prompts[1].split('Datos actuales del hogar:\n')[1])).not.toHaveProperty('debts');
     expect(sent()).toEqual([expect.objectContaining({ text: 'Sin deudas a la vista' })]);
+  });
+});
+
+describe('legal_rate in the Nia entry point', () => {
+  const legalAnswers = (legal = {}) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'legal_rate', legal: { kind: 'usury', modality: 'consumer', month: 'noviembre', year: null, value: 28.2, ...legal } },
+  ];
+  const NOV_ID = 'lruco202611h1';
+  const novRow = (extra = {}) => ({ $id: NOV_ID, householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2700, source: 'Resolución', verified: true, actorId: 'u0', ...extra });
+  const legalWrites = () => fake.posts.filter((post) => post.table === 'legal_rates');
+  const legalPatches = () => fake.patches.filter((patch) => patch.table === 'legal_rates');
+
+  it('tells the classifier that a legal rate is a debt-flow request', async () => {
+    fake = makeNet(legalAnswers());
+    fake.tables.legal_rates = [];
+
+    await run(message('la usura de noviembre es 28.2'));
+
+    expect(fake.prompts[0]).toContain('tasa legal');
+    expect(fake.prompts[1]).toContain('legal_rate');
+  });
+
+  it('previews first, then Confirm writes one row with team read + update only, and repeated Confirms keep one', async () => {
+    fake = makeNet(legalAnswers());
+    fake.tables.legal_rates = [];
+
+    await run(message('la usura de noviembre es 28.2'));
+    expect(sent()[0].text).toContain('Valor: 28.20% E.A.');
+    expect(sent()[0].text).toContain('Mes: noviembre de 2026');
+    expect(buttons(sent()[0])).toContain('nia:confirm');
+    expect(fake.tables.legal_rates).toEqual([]);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ kind: 'debt', action: 'legal_rate', awaiting: 'confirm', draft: { kind: 'usury', value: 2820 } });
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:confirm')); // and the user taps once more
+
+    expect(fake.tables.legal_rates).toEqual([expect.objectContaining({ $id: NOV_ID, householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820, verified: false, actorId: 'u7' })]);
+    expect(legalWrites()).toEqual([{ table: 'legal_rates', rowId: NOV_ID, permissions: ['read("team:t1")', 'update("team:t1")'] }]);
+    expect(legalPatches()).toEqual([]);
+    expect(sent().slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+  });
+
+  it('updates an existing key through PATCH /rows/{id} and reports an update', async () => {
+    fake = makeNet(legalAnswers());
+    fake.tables.legal_rates = [novRow()];
+
+    await run(message('la usura de noviembre es 28.2'));
+    await run(press('nia:confirm'));
+
+    expect(legalPatches()).toEqual([{ table: 'legal_rates', id: NOV_ID, data: expect.objectContaining({ kind: 'usury', modality: 'consumer', value: 2820, verified: false, actorId: 'u7' }) }]);
+    expect(fake.tables.legal_rates).toEqual([expect.objectContaining({ $id: NOV_ID, value: 2820, verified: false })]);
+    expect(legalWrites()).toEqual([{ table: 'legal_rates', rowId: NOV_ID, permissions: ['read("team:t1")', 'update("team:t1")'] }]);
+    expect(sent()[1].text).toContain('actualicé la tasa de usura');
+  });
+
+  it('refuses a rate outside 5-100 before anything is written', async () => {
+    fake = makeNet(legalAnswers({ value: 2.82 }));
+    fake.tables.legal_rates = [];
+
+    await run(message('la usura de noviembre es 2.82'));
+
+    expect(sent()[0].text).toContain('entre 5 % y 100 %');
+    expect(legalWrites()).toEqual([]);
+    expect(legalPatches()).toEqual([]);
   });
 });

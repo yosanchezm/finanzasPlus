@@ -225,7 +225,7 @@ async function deleteRow(table, rowId) {
 
 // Debt flow seam (functions/nia/debt/handler.js): thin adapters over the helpers above. Rows are flat,
 // ids are chosen by the caller (deterministic ids make retries idempotent) and a 409 carries `status`.
-const DEBT_ROW_ACTIONS = { debts: ['read', 'update'], debt_events: ['read'], transactions: ['read', 'update', 'delete'], categories: ['read', 'update'] };
+const DEBT_ROW_ACTIONS = { debts: ['read', 'update'], debt_events: ['read'], transactions: ['read', 'update', 'delete'], categories: ['read', 'update'], legal_rates: ['read', 'update'] };
 const DEBT_PAGE = 100;
 
 async function debtListRows(table, where) {
@@ -271,6 +271,7 @@ function debtDeps() {
     ids: { pending: () => randomId().slice(0, 24) },
     listRows: debtListRows,
     createRow: debtCreateRow,
+    updateRow, // PATCH /rows/{id}: a legal_rate Confirm on an existing key updates the row
     deleteRow,
     gemini: (prompt) => geminiJson([{ text: prompt }], 0.1),
     sendMessage,
@@ -463,7 +464,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     `La moneda predeterminada del hogar es ${config.currency}.`,
     `En este chat el usuario está configurado como ${profile.alias}, con alcance predeterminado ${profile.ownerScope}.`,
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
-    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra o pedir una recomendación de cómo abonar); conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar o registrar una tasa legal: la usura, el IBC o el salario mínimo); conversation para preguntas generales, capacidades, identidad o educación financiera.',
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',

@@ -18,7 +18,7 @@ const MODALITY_LABELS = {
   mortgage: 'hipotecario',
 };
 const KIND_TITLES = { usury: 'Tasa de usura (tope)', ibc: 'IBC (interés bancario corriente)', smmlv: 'Salario mínimo (SMMLV)' };
-const KIND_NAMES = { usury: 'tasa de usura', ibc: 'IBC', smmlv: 'salario mínimo' };
+const KIND_PHRASES = { usury: 'la tasa de usura', ibc: 'el IBC', smmlv: 'el salario mínimo' };
 const MIN_YEAR = 2000;
 const MAX_YEAR = 2100;
 const MONTHS_AHEAD = 6; // a month without a year is the one within this many months ahead of today, else the past one
@@ -148,10 +148,26 @@ const percentText = (basisPointsValue) => `${(basisPointsValue / 100).toFixed(2)
 const monthText = (legalRate) => `${MONTHS[Number(legalRate.validFrom.slice(5, 7)) - 1]} de ${legalRate.validFrom.slice(0, 4)}`;
 const valueText = (legalRate) => (legalRate.kind === 'smmlv' ? pesos(legalRate.value) : percentText(legalRate.value));
 
-/** The draft as one phrase for a confirmation: "la tasa de usura de consumo y ordinario de noviembre de 2026: 28.20% E.A." */
+/** The draft as one phrase for a confirmation: "la tasa de usura (consumo y ordinario) de noviembre de 2026: 28.20% E.A." */
 export function describeLegalRate(legalRate) {
-  if (legalRate.kind === 'smmlv') return `el salario mínimo de ${legalRate.validFrom.slice(0, 4)}: ${valueText(legalRate)}`;
-  return `la ${KIND_NAMES[legalRate.kind]} de ${MODALITY_LABELS[legalRate.modality]} de ${monthText(legalRate)}: ${valueText(legalRate)}`;
+  if (legalRate.kind === 'smmlv') return `${KIND_PHRASES.smmlv} de ${legalRate.validFrom.slice(0, 4)}: ${valueText(legalRate)}`;
+  return `${KIND_PHRASES[legalRate.kind]} (${MODALITY_LABELS[legalRate.modality]}) de ${monthText(legalRate)}: ${valueText(legalRate)}`;
+}
+
+/**
+ * Whether a draft can be written as it is: a known kind and modality, a value in range and the whole period (a month,
+ * or a year for the SMMLV). Confirm re-checks this because a pending comes back from the session, not from the reader.
+ * @param {(object | null)} legalRate
+ * @returns {boolean}
+ */
+export function isStorableLegalRate(legalRate) {
+  if (!legalRate || typeof legalRate !== 'object') return false;
+  const { kind, modality, validFrom, validTo, value } = legalRate;
+  if (!legalValueInRange(kind, value) || typeof validFrom !== 'string' || typeof validTo !== 'string') return false;
+  if (kind === 'smmlv') return modality === 'all' && /^\d{4}-01-01$/.test(validFrom) && validTo === `${validFrom.slice(0, 4)}-12-31`;
+  if (!LEGAL_MODALITIES.includes(modality) || (kind === 'ibc' && modality === 'mortgage')) return false;
+  const [, year, month] = /^(\d{4})-(\d{2})-01$/.exec(validFrom) || [];
+  return year !== undefined && Number(month) >= 1 && Number(month) <= 12 && validTo === `${year}-${month}-${pad2(lastDayOf(Number(year), Number(month)))}`;
 }
 
 /**
