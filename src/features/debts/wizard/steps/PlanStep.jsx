@@ -25,10 +25,12 @@ function ManualRows({ rows, set }) {
   );
 }
 
-export default function PlanStep({ state, set }) {
-  const systems = SYSTEMS_BY_KIND[state.kind];
+// `systems` narrows the payment systems on offer (the restructure dialog leaves out the manual plan); by default the kind's own.
+// `invalid` marks the fields (n, firstDueOn, grace, balloon) the owner found wrong; the owner shows the messages.
+export default function PlanStep({ state, set, systems = SYSTEMS_BY_KIND[state.kind], invalid = {} }) {
   const graced = ['french', 'german'].includes(state.system);
-  const bind = (field) => ({ value: state[field], onChange: (event) => set({ [field]: event.target.value }) });
+  const flag = (field) => (invalid[field] ? { 'aria-invalid': true } : {});
+  const bind = (field) => ({ value: state[field], onChange: (event) => set({ [field]: event.target.value }), ...flag(field) });
 
   return (
     <div className="flex flex-col gap-4">
@@ -45,13 +47,13 @@ export default function PlanStep({ state, set }) {
               {Object.entries(PERIODICITY_ADJECTIVES).map(([value, label]) => <option key={value} value={value}>{capitalize(label)}</option>)}
             </SelectField>
           </div>
-          <TextField label="Primera cuota" type="date" value={firstDueOf(state)} onChange={(event) => set({ firstDueOn: event.target.value })} />
+          <TextField label="Primera cuota" type="date" value={firstDueOf(state)} onChange={(event) => set({ firstDueOn: event.target.value })} {...flag('firstDueOn')} />
           {state.system === 'interest_only' && (
             <TextField label="Pago final" type="number" inputMode="numeric" placeholder="$ 0" inputClassName="tabular-nums" {...bind('balloon')} />
           )}
           {graced && (
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
-              <TextField label="Cuotas de gracia" type="number" inputMode="numeric" inputClassName="tabular-nums" value={state.grace.periods} onChange={(event) => set({ grace: { ...state.grace, periods: event.target.value } })} />
+              <TextField label="Cuotas de gracia" type="number" inputMode="numeric" inputClassName="tabular-nums" value={state.grace.periods} onChange={(event) => set({ grace: { ...state.grace, periods: event.target.value } })} {...flag('grace')} />
               <SelectField label="Durante la gracia" value={state.grace.type} onChange={(event) => set({ grace: { ...state.grace, type: event.target.value } })}>
                 <option value="total">No pagas nada</option>
                 <option value="principal">Pagas solo intereses</option>
