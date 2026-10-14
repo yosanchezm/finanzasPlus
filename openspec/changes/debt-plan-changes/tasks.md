@@ -81,11 +81,11 @@ Groups: A2a schema + web (about 500), A2b Nia + docs (about 300).
 ### A3 Ajustes panel (design 900) · deps: A2
 Groups: A3a nav + model + hook (about 450), A3b panel (about 450).
 
-- [ ] A3a.1 RED `legalRatesModel.test.js`: grouping by modality and month, badges (derived from IBC, manual usury, app value, unverified, stale "usando la de {mes}"), derived echo 19.49 gives 29,24, range errors disable save. RED `useLegalRates.test.js`: save then reload, missing-table state. RED shell tests: Sidebar button enabled with `aria-current`, `MoreSheet` item, `FinanceShell` `case 'Ajustes'` in `UNSCOPED_VIEWS`. Reqs LR1, LR7.
-- [ ] A3a.2 GREEN `src/features/settings/{legalRatesModel.js,useLegalRates.js,SettingsContainer.jsx}`; `Sidebar.jsx`, `MoreSheet.jsx`, `FinanceShell.jsx`.
-- [ ] A3b.1 RED `LegalRatesPanel.test.jsx` (RTL): enter IBC 19.49 shows "Usura = 29,24 % E.A." before saving; stale badge + prompt when current month has no row; SMMLV by year; invalid disables save with inline message; "Verificado" checkbox; informational copy; missing-table banner "Falta actualizar la base de datos". Reqs LR7, LR6.
-- [ ] A3b.2 GREEN `LegalRatesPanel.jsx`, `SettingsView.jsx`.
-- [ ] A3.CP checkpoint. Owner action 4 becomes possible.
+- [x] A3a.1 RED `legalRatesModel.test.js`: grouping by modality and month, badges (derived from IBC, manual usury, app value, unverified, stale "usando la de {mes}"), derived echo 19.49 gives 29,24, range errors disable save. RED `useLegalRates.test.js`: save then reload, missing-table state. RED shell tests: Sidebar button enabled with `aria-current`, `MoreSheet` item, `FinanceShell` `case 'Ajustes'` in `UNSCOPED_VIEWS`. Reqs LR1, LR7.
+- [x] A3a.2 GREEN `src/features/settings/{legalRatesModel.js,useLegalRates.js,SettingsContainer.jsx}`; `Sidebar.jsx`, `MoreSheet.jsx`, `FinanceShell.jsx`.
+- [x] A3b.1 RED `LegalRatesPanel.test.jsx` (RTL): enter IBC 19.49 shows "Usura = 29,24 % E.A." before saving; stale badge + prompt when current month has no row; SMMLV by year; invalid disables save with inline message; "Verificado" checkbox; informational copy; missing-table banner "Falta actualizar la base de datos". Reqs LR7, LR6.
+- [x] A3b.2 GREEN `LegalRatesPanel.jsx`, `SettingsView.jsx`.
+- [x] A3.CP checkpoint. Owner action 4 becomes possible.
 
 ## Phase B: Web rate and charge change (parallel with C after A)
 
