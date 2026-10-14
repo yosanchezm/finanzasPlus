@@ -347,3 +347,54 @@ None for B3 (no schema, no deploy order).
 ### Remaining
 
 C1 onward (not started).
+
+
+## Batch C1 (terms.late, terms.modality, daily rate): COMPLETE
+
+Branch `feat/dpc-c1-late-terms` (from master 2fb3324). Core only: no web, Nia, schema or deploy change.
+
+### Tasks
+
+- [x] C1.1 RED `test/late/policy.test.js` (27 tests), `terms.test.js` (5 tests), `node16.test.js` (source list, exact keys, working-function checks)
+- [x] C1.2 GREEN `src/late/policy.js`, `src/terms.js`, `index.js`
+- [x] C1.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| `feat(finance-core): validate late interest policy and modality in terms and resolve the daily rate with the usury cap of each day` | C1 (single group) | 6 files, 447 insertions |
+
+Total vs master before this progress/tasks commit: 6 files, 447 insertions = 447 changed lines (budget 2,000; group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| C1.1 / C1.2 `policy.js` | Safety net `packages/finance-core`: 23 files, 407 tests passed. `policy.test.js` failed at import (module did not exist); in the same run `terms.test.js` failed 3 (late and modality dropped by `validateTerms`) and `node16.test.js` failed 3 (source list, exact keys, working functions) | `packages/finance-core`: 24 files, 439 tests passed. Triangulated: every mode with cap, no cap, stale cap and mid-way cap change; mortgage with and without an explicit cap; modality override both ways; defaults for all nine kinds. Golden `dailyRate(28.59)` = 0.00068917 (1e-8) and 0.000689165756 (1e-12), 27.5 and 40 | None needed. Mutations: `Math.min` to `Math.max` failed 3 tests, dropping the stale notice failed 2, widening the multiple limit to 30 failed 1, deleting the `terms.late` line in `validateTerms` failed 3; all restored |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/late/policy.test.js` exit 0: 1 file, 27 tests passed. `npx vitest run packages/finance-core`: 24 files, 439 tests passed (baseline 23 files, 407). Full `npm test -- --maxWorkers=4`: 106 files, 1,405 tests passed (baseline before C1: 105 files, 1,373) |
+| Runtime harness command/scenario and exact result | `npm run package:nia` exit 0 (core is bundled into the Nia package). `npm run build` exit 0 |
+| Rollback boundary | Revert the C1 commit: `src/late/policy.js`, the `late` and `modality` lines in `terms.js`, the seven barrel exports and the three test files. No stored data depends on it: `late` and `modality` are written only when present, and nothing writes them yet |
+
+### Decisions and deviations from design
+
+- Names: the design lists `lateEAOn`; the orchestrator brief names `lateRateOn`. Both exist: `lateEAOn(terms, day, legal)` returns `{ ea, notices }` and `lateRateOn` adds `daily`. Both take the terms in force on that day (the contract rate and the policy only change at events, as in the design) and a resolved `legal` (default: the code tables).
+- `late_mortgage_unverified` is returned by `lateEAOn` for any mortgage-modality debt whose mode is not `none` (design says `project()` raises it under the same condition). C2 only has to collect the notices and dedupe them.
+- `normalizeLate` rejects a `fixed` rate whose EA is 0 (spec: "rate > 0"). C2a's "0% fixed gives 0" case cannot be built through `validateTerms`: build it with `contract_multiple` over a 0% contract rate, or call the engine with a hand-built policy.
+- `normalizeLate` drops fields the mode does not use and ignores `since` (design: `late_policy.effectiveOn` replaces it, per the tasks forecast note). `graceDays` is always present after normalization (default 0).
+- `late` and `modality` are written by `validateTerms` only when present in the input, so every pre-existing serialized terms document and every S3a fixture stays byte-identical.
+- Error codes: `invalid_late` for policy errors, `invalid_rate` for a malformed fixed rate or `dailyRate` input, `invalid_terms` for an unknown `modality`, `invalid_date` for a bad day.
+- Notice shape: `{ code, severity: 'info', blocking: false, modality, asOf, lastValidTo? }`.
+
+### Owner gate
+
+None for C1 (no schema, no deploy order). From C2 on, web and Nia deploy together (owner action 3).
+
+### Remaining
+
+C2 onward (not started).

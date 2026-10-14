@@ -119,9 +119,9 @@ Groups: B3a editor + model (about 380), B3b dialog + wiring (about 320).
 ## Phase C: Core mora (parallel with B after A)
 
 ### C1 late terms (design 520) · deps: A
-- [ ] C1.1 RED `test/late/policy.test.js`: `normalizeLate` per mode (`fixed` without rate and `contract_multiple` without multiple or m outside (0,3] rejected, `graceDays` integer 0..90); absent policy is `none`; `modalityOf` (mortgage, else consumer, override); `defaultLateFor` (usury for consumer, vehicle, libranza, leasing, card, mortgage; none for family, informal, other); `dailyRate(28.59)` = 0.00068917 (1e-8); `lateEAOn` cap/min logic. `terms.js` keeps `late` and `modality`. Barrel + node16 RED. Reqs LI1, LI2, LI4.
-- [ ] C1.2 GREEN `src/late/policy.js`, `terms.js`, barrel.
-- [ ] C1.CP checkpoint.
+- [x] C1.1 RED `test/late/policy.test.js`: `normalizeLate` per mode (`fixed` without rate and `contract_multiple` without multiple or m outside (0,3] rejected, `graceDays` integer 0..90); absent policy is `none`; `modalityOf` (mortgage, else consumer, override); `defaultLateFor` (usury for consumer, vehicle, libranza, leasing, card, mortgage; none for family, informal, other); `dailyRate(28.59)` = 0.00068917 (1e-8); `lateEAOn` cap/min logic. `terms.js` keeps `late` and `modality`. Barrel + node16 RED. Reqs LI1, LI2, LI4.
+- [x] C1.2 GREEN `src/late/policy.js`, `terms.js`, barrel.
+- [x] C1.CP checkpoint.
 
 ### C2 accrual (design 900) · deps: C1
 Groups: C2a engine + rows (about 450), C2b project, goldens, properties (about 450).
