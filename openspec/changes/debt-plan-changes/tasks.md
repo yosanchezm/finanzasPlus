@@ -157,14 +157,14 @@ Groups: D1a model (about 350), D1b steps 1-2 (about 400), D1c step 3 + wiring (a
 ### D2 mora UI (design 850) · deps: C3, A1 deployed
 Groups: D2a wizard (about 250), D2b detail + payment (about 330), D2c `LatePolicyDialog` (about 270).
 
-- [ ] D2.0 GATE (owner): A1 is deployed on web and Nia. Do not merge D2 otherwise.
-- [ ] D2a.1 RED `wizardModel`/`PlanStep` tests: mora select defaults (family none, consumer usury); `fixed` asks for a rate; default applied to the created terms. Reqs WM7, LI2.
-- [ ] D2a.2 GREEN `wizardModel.js`, `PlanStep.jsx`.
-- [ ] D2b.1 RED detail tests: mora KPI, Mora column when any `lateMinor > 0` (1,375, 10 days, base 199,505), totals include mora, `late_cap_stale` (with Ajustes link), `late_cap_unknown`, `late_mortgage_unverified` notices non-blocking; `paymentModel`: 390,381 at day 10 previews 10,000 / 1,375 / 180,876 / 198,130 with cost 192,251; double submit one event; history `late_policy` summary. Reqs WM8, WM9, DL8, AS1.
-- [ ] D2b.2 GREEN `DebtDetail.jsx`, `PlanTable.jsx`, `paymentModel.js`, `PaymentDialog.jsx`, `eventSummary.js`.
-- [ ] D2c.1 RED `LatePolicyDialog.test.jsx`: effective 10 days ago previews and saves mora 1,375 with one `late_policy`; effective today shows 0 and keeps cost rows; stale notice when table does not cover today; `contract_multiple` input (0<m<=3); `graceDays`; past-date warning; reconcile afterSave. Reqs WM2, LI7.
-- [ ] D2c.2 GREEN `LatePolicyDialog.jsx`, `MoreActionsMenu.jsx` (loans), container.
-- [ ] D2.CP checkpoint.
+- [ ] D2.0 GATE (owner): A1 is deployed on web and Nia. Do not merge D2 otherwise. Open: D2 is implemented on `feat/dpc-d2-mora-ui` but must not be merged or deployed until the owner confirms this gate.
+- [x] D2a.1 RED `wizardModel`/`PlanStep` tests: mora select defaults (family none, consumer usury); `fixed` asks for a rate; default applied to the created terms. Reqs WM7, LI2.
+- [x] D2a.2 GREEN `wizardModel.js`, `PlanStep.jsx`.
+- [x] D2b.1 RED detail tests: mora KPI, Mora column when any `lateMinor > 0` (1,375, 10 days, base 199,505), totals include mora, `late_cap_stale` (with Ajustes link), `late_cap_unknown`, `late_mortgage_unverified` notices non-blocking; `paymentModel`: 390,381 at day 10 previews 10,000 / 1,375 / 180,876 / 198,130 with cost 192,251; double submit one event; history `late_policy` summary. Reqs WM8, WM9, DL8, AS1.
+- [x] D2b.2 GREEN `DebtDetail.jsx`, `PlanTable.jsx`, `paymentModel.js`, `PaymentDialog.jsx`, `eventSummary.js`.
+- [x] D2c.1 RED `LatePolicyDialog.test.jsx`: effective 10 days ago previews and saves mora 1,375 with one `late_policy`; effective today shows 0 and keeps cost rows; stale notice when table does not cover today; `contract_multiple` input (0<m<=3); `graceDays`; past-date warning; reconcile afterSave. Reqs WM2, LI7.
+- [x] D2c.2 GREEN `LatePolicyDialog.jsx`, `MoreActionsMenu.jsx` (loans), container.
+- [x] D2.CP checkpoint.
 
 ## Phase E: Nia legal rate and plan changes (deps: A, B)
 

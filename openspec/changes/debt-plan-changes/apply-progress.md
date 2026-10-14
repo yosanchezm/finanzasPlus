@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3), `feat/dpc-f1-nia-restructure` (F1; E1 and E2 live on their own branches in the stack).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3), `feat/dpc-f1-nia-restructure` (F1; E1 and E2 live on their own branches in the stack), `feat/dpc-d2-mora-ui` (D2, held for the owner gate D2.0).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -766,3 +766,67 @@ Deploy the new Nia tarball (`npm run package:nia`) with or after the web build; 
 ### Remaining
 
 D2 (owner gate D2.0), then F2 and F3.
+
+## Batch D2 (mora UI: wizard, detail, payment, LatePolicyDialog): COMPLETE, MERGE HELD (owner gate D2.0 open)
+
+Branch `feat/dpc-d2-mora-ui` (from master cb09a35). No live Appwrite was touched and no dev server was started; `.env` was never read.
+
+### Owner gate (D2.0, left unchecked)
+
+D2 is implemented on its branch but MUST NOT be merged or deployed until the owner confirms D2.0: A1 (the forward-compatible reader) is deployed on BOTH web and Nia. This build can write `terms.late` (the wizard) and `late_policy` events (the dialog); an older bundle without A1 would not read them. Deploy order: A1 on web and Nia first, then this build.
+
+### Tasks
+
+- [ ] D2.0 GATE (owner): open, see above
+- [x] D2a.1 RED `lateModel.test.js`, `wizardModel.test.js`, `DebtWizard.test.jsx`: mora select defaults (family and other none, consumer, vehicle and mortgage usury); `fixed` asks for a rate and blocks Siguiente; the default is written into the created terms (none writes nothing); an invalid mora is explained in the plan step
+- [x] D2a.2 GREEN `lateModel.js` (draft model), `LateFields.jsx` (shared inputs), `wizardModel.js`, `PlanStep.jsx` (`withLate`), `DebtWizard.jsx`, `RateField.jsx` (`valueLabel`)
+- [x] D2b.1 RED `DebtDetail.test.jsx`, `PlanTable.test.jsx`, `debtDetailModel.test.js`, `paymentModel.test.js`, `PaymentDialog.test.jsx`, `DebtDetailContainer.test.jsx`, `DebtsContainer.test.jsx`: mora figure, Mora column (1,375, 10 days, base 199,505), totals with mora, `late_cap_stale` with the Ajustes link, `late_cap_unknown`, `late_mortgage_unverified`, 390,381 at day 10 previews 10,000 / 1,375 / 180,876 / 198,130 with cost 192,251 (also through the container: one event and one cost row of 192,251 on a double tap), `late_policy` history line
+- [x] D2b.2 GREEN `DebtDetail.jsx`, `LateNotices.jsx`, `PlanTable.jsx`, `debtDetailModel.js` (`cost.lateMinor`), `paymentModel.js` (`lateMinor`), `PaymentDialog.jsx`, `DebtDetailContainer.jsx`, `DebtsContainer.jsx` and `FinanceShell.jsx` (`onOpenSettings` / `onNavigate`), `debtFixtures.js`. `eventSummary.js` needed no change: its `late_policy` summary shipped in B1/C3 and the detail test now covers it
+- [x] D2c.1 RED `latePolicyModel.test.js`, `LatePolicyDialog.test.jsx`, `DebtDetailContainer.test.jsx`: effective 10 days ago previews mora 1,375 and saves one `late_policy`; effective today shows 0; stale and unknown notices; `contract_multiple` (0 < m <= 3); `graceDays`; past-date warning; afterSave reconcile
+- [x] D2c.2 GREEN `latePolicyModel.js`, `LatePolicyDialog.jsx`, `DebtDetailContainer.jsx` (loans only). `MoreActionsMenu.jsx` already listed "Configurar mora" (B2) and needed no change
+- [x] D2.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 5599c78 `feat(debts): choose the mora policy in the new-debt wizard, preset by kind, and save it in the created terms` | D2a | 9 files, 356 insertions, 7 deletions |
+| 739fdad `feat(debts): show mora in the debt detail, plan table, cost and payment preview, with the legal cap notices and a link to Ajustes` | D2b | 17 files, 335 insertions, 19 deletions |
+| d8bcb8b `feat(debts): configure the mora policy from Más acciones with a live preview as of today, written as one late_policy event` | D2c | 6 files, 612 insertions, 2 deletions |
+
+Total vs master before this progress/tasks commit: 30 files, 1,302 insertions, 27 deletions = 1,329 changed lines (budget 2,000; each commit <= 800: D2a is 363, D2b is 354, D2c is 614; design 850, worst case 1,700).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR / mutation |
+|---|---|---|---|
+| D2a.1 / D2a.2 model | `lateModel.test.js` failed at import; 7 `wizardModel.test.js` cases failed (no `late` in the state, nothing written) | `lateModel.test.js` 10 tests (defaults by kind, draft to core input, blank grace is 0, missing versus invalid messages, grace ignored while the mode is none) and `wizardModel.test.js` 71 incl. 8 new | Mutation: the `terms.late` write disabled failed 5 |
+| D2a.1 / D2a.2 UI | 5 `DebtWizard.test.jsx` cases failed (no mora select) | 16 tests: usury preset saved, family none saved without a policy, fixed blocks until a rate is typed and saves it with 5 grace days, grace 120 blocks with a message and turning mora off recovers, the wizard offers three modes (the multiple is not in the wizard, per the design) | `LateFields` extracted so the dialog reuses it |
+| D2b.1 / D2b.2 payment | 3 `paymentModel.test.js` cases failed (no `lateMinor`; one expected total corrected to 391,756 + 390,381 after reading `dueNow`) | 11 tests: day-10 split 10,000 / 1,375 / 180,876 / 198,130, cost 192,251, no policy gives 199,505 and cost 190,876; `PaymentDialog.test.jsx` 7; container: one event and one cost row of 192,251 on a double tap | Mutation: mora folded back into `feesMinor` failed 2 |
+| D2b.1 / D2b.2 plan and cost | 3 `PlanTable.test.jsx` and 3 `debtDetailModel.test.js` cases failed | `PlanTable.test.jsx` 9 (column, days singular and plural, absent without mora, phone cards), `debtDetailModel.test.js` 35 (`cost.lateMinor` 1,375, total plus 1,375 against the no-policy twin, paid mora counted once settled) | Mutation: Mora column forced off failed 2. `?? 0` added for a card projection, which has no `remainingLateInterest` yet |
+| D2b.1 / D2b.2 detail | 4 `DebtDetail.test.jsx` cases failed (+1 `DebtDetailContainer.test.jsx`, +1 `DebtsContainer.test.jsx` for Ajustes) | `DebtDetail.test.jsx` 22 incl. 8 new: figure, cost, call-out wording, stale with link, unknown with link, mortgage Ley 546 (with and without a known cap), no notice with a current cap or without a handler, history line | Mutation: the Ajustes link removed failed 2 |
+| D2c.1 / D2c.2 model | `latePolicyModel.test.js` failed at import | 20 tests: golden 1,375 on 10 days, effective today 0, a future date measured on its own date, grace 3 gives 962, fixed 20% gives 997, fixed 36% capped to 1,375, multiples 1 and 1.5 give 1,176 and 1,375, off previews against the policy in force, unchanged, issues (missing is silent), stale from the lookup even when nothing is overdue, unknown, `describeLate` | Mutation: measuring on today instead of the later date failed 1 |
+| D2c.1 / D2c.2 dialog and container | `LatePolicyDialog.test.jsx` failed at import; 6 container cases failed (no menu item) | `LatePolicyDialog.test.jsx` 14 and 6 container cases: menu order, one `late_policy` event with no cost row, reload then reconcile on fresh events with the row note, double tap writes one, retry reuses the nonce, an edited form after a lost response finds the saved event and writes nothing | One test expectation corrected: turning mora off effective today keeps the accrued 1,375 (never retroactive); it drops to 0 only when dated on the due date |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run src/features/debts` exit 0: 39 files, 520 tests passed (baseline before D2: 36 files, 433). Full `npm test -- --maxWorkers=4`: 122 files, 1,905 tests passed on the first run (baseline before D2: 119 files, 1,818) |
+| Runtime harness command/scenario and exact result | The container tests drive the real dialogs, `useCommitDialog`, `planCommit`/`commitPlan` and `previewChange` against a fake debt port: a late_policy save, a double tap, a retry with the same nonce, a mora payment. `npm run build` exit 0. `package:nia` is not part of this slice |
+| Rollback boundary | Revert d8bcb8b (dialog, model, container wiring), then 739fdad (detail, plan table, cost, payment and notices; `onNavigate` plumbing), then 5599c78 (wizard mora step and `LateFields`). Reverting only the wizard commit would remove `LateFields`, which the dialog imports, so revert d8bcb8b first. No stored data depends on them: `late_policy` events and `terms.late` are read by the core from A1/C3 on |
+
+### Decisions and deviations from design
+
+- The wizard offers `none`, `usury` and `fixed` only. The design table says `contract_multiple` is offered in "Configurar mora" and Nia, not in the wizard; the batch summary listed it for the wizard, the design was followed. `LateFields` takes a `modes` list, so adding it later is one prop.
+- The wizard writes `terms.late` only when the mode is not `none` (an absent policy is `none`, so a family loan is stored exactly as before). Informal debts have no plan step and therefore no mora control; they and cards (default `usury` per LI2, owned by F3b with the card mora engine) get no `terms.late` from D2. Existing debts are untouched.
+- "Configurar mora" is offered to loans only. Card wiring stays in F3 (the existing card menu test still lists two items).
+- The Save button of the dialog is disabled when the chosen policy equals the one in force (the dialog says so), instead of writing a no-op event as the rate dialog allows.
+- The stale/unknown notices in the dialog come from the `previewChange` notices plus a direct `lateEAOn` lookup on the measured day, so the stale cap shows even when nothing is overdue yet (the design only names `after.notices`, which carry it only after some mora accrued). Both cap notices on the detail link to Ajustes (the design links the stale one); the link needs `onOpenSettings`, wired from `FinanceShell` through `DebtsContainer.onNavigate`.
+- The Total column of the plan table now shows installment plus mora; the Mora cell shows `N días · base $X`. The overdue call-out gains ", con $X de mora" only when mora is above 0.
+- `PaymentDialog` splits "Intereses de mora" from "Cargos e impuestos" (`feesMinor` no longer includes the mora). The cost expense (192,251) is unchanged, it comes from the core.
+- `eventSummary.js` and `MoreActionsMenu.jsx` are in the task text but needed no change (already shipped in B1/B2/C3); the tests that cover them were added to the detail and container suites.
+
+### Remaining
+
+D2.0 (owner gate: confirm A1 deployed on web and Nia, then merge D2). F2 (needs A1 deployed on Nia) and F3 are not started.
