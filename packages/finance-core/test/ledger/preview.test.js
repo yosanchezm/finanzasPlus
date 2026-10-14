@@ -39,6 +39,7 @@ describe('snapshot', () => {
       pastDueMinor: 0,
       lateInterestMinor: 0,
       installmentMinor: 380_381,
+      nextTotalMinor: 380_381,
       nextDueOn: '2026-05-15',
       remainingPeriods: 33,
       lastDueOn: '2029-01-15',
@@ -53,8 +54,9 @@ describe('snapshot', () => {
     const open = snapshot(project(debt(insured), onTime(insured, 3), '2026-05-02'), '2026-05-02');
     expect(open.remainingChargesMinor).toBe(330_000);
     expect(open.remainingCostMinor).toBe(open.remainingInterestMinor + 330_000);
+    expect(open.nextTotalMinor).toBe(open.installmentMinor + 10_000); // the installment plus its fee
     const done = snapshot(project(debt(french()), onTime(french(), 36), '2029-02-01'), '2029-02-01');
-    expect(done).toMatchObject({ balanceMinor: 0, installmentMinor: 0, nextDueOn: null, lastDueOn: null, remainingPeriods: 0, remainingCostMinor: 0 });
+    expect(done).toMatchObject({ balanceMinor: 0, installmentMinor: 0, nextDueOn: null, lastDueOn: null, remainingPeriods: 0, nextTotalMinor: 0, remainingCostMinor: 0 });
   });
 });
 
@@ -178,6 +180,7 @@ describe('previewChange: charge_change, restructure and payloadChars', () => {
     expect(result.after.remainingCostMinor - result.before.remainingCostMinor).toBe(330_000);
     expect(result.after.remainingPeriods).toBe(result.before.remainingPeriods);
     expect(result.after.installmentMinor).toBe(result.before.installmentMinor);
+    expect(result.after.nextTotalMinor - result.before.nextTotalMinor).toBe(10_000);
   });
 
   it('previews a restructure on the carried balance and the new number of periods', () => {
@@ -261,6 +264,14 @@ describe('previewChange on a card (CC2 characterization)', () => {
     expect(result.after.remainingPeriods).toBe(10);
     expect(result.after.remainingCostMinor).toBeGreaterThan(result.before.remainingCostMinor);
     expect(result.after).toEqual(snapshot(project(card, [stored], '2026-05-20'), '2026-05-20'));
+  });
+
+  it('reports the minimum payment of the open statement as the next total, fees included', () => {
+    const projection = project(card, [], '2026-04-20');
+    const open = projection.plan[0];
+    expect(snapshot(projection, '2026-04-20').nextTotalMinor).toBe(146_102);
+    expect(open.minimumMinor).toBe(146_102);
+    expect(snapshot(projection, '2026-04-20').installmentMinor).toBeLessThan(146_102); // interest and deferred only
   });
 
   it('changes the revolving rate while the 0% deferred tranche is untouched', () => {

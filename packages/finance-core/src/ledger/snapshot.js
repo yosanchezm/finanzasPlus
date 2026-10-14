@@ -3,12 +3,13 @@ import { compareIso } from '../calendar.js';
 /**
  * Summary of a projection as of a date, shared by the prepayment simulation and the plan
  * change preview so both read the same numbers (AD8). Pure: it only reads `projection`.
- * `installmentMinor` and `nextDueOn` come from the first open row due after `on`;
+ * `installmentMinor`, `nextTotalMinor` and `nextDueOn` come from the first open row due after `on`; the
+ * installment is interest plus principal, the total adds that row's charges and taxes (a card's minimum payment);
  * `remainingCostMinor` is every cost still to pay: interest, charges, taxes and mora.
  * @param {object} projection The result of `project()`.
  * @param {string} on `YYYY-MM-DD`.
  * @returns {{ balanceMinor: number, pastDueMinor: number, lateInterestMinor: number, installmentMinor: number,
- *   nextDueOn: (string | null), remainingPeriods: number, lastDueOn: (string | null), remainingInterestMinor: number,
+ *   nextTotalMinor: number, nextDueOn: (string | null), remainingPeriods: number, lastDueOn: (string | null), remainingInterestMinor: number,
  *   remainingChargesMinor: number, remainingCostMinor: number }}
  */
 export function snapshot(projection, on) {
@@ -23,6 +24,7 @@ export function snapshot(projection, on) {
     pastDueMinor: projection.pastDueMinor,
     lateInterestMinor,
     installmentMinor: next ? next.installmentMinor : 0,
+    nextTotalMinor: next ? next.totalDueMinor : 0,
     nextDueOn: next ? next.dueOn : null,
     remainingPeriods: projection.remainingPeriods,
     lastDueOn: open.length > 0 ? open[open.length - 1].dueOn : null,
