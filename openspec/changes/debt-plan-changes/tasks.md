@@ -200,10 +200,10 @@ Groups: F1a rebuild (about 330), F1b handler (about 320).
 - [x] F1.CP checkpoint.
 
 ### F2 Nia mora (design 450) · deps: C3, D2, A1 deployed on Nia
-- [ ] F2.0 GATE (owner): Nia tarball at or after A1 is deployed. Do not deploy F2 otherwise.
-- [ ] F2.1 RED `extract.test.js`, `handler.test.js`, `preview.test.js`, `replies.test.js`: "activa mora a la usura" previews mode `usury`, today, cap in force, "la mora no es retroactiva", Confirm writes one `late_policy`; fixed 40% vs cap 28.59 states 28.59 applies; all four modes including `contract_multiple`; creating a debt applies the default by kind; list replies show mora; double Confirm one event. Reqs NI4, NI6, NI8, LI2.
-- [ ] F2.2 GREEN `extract.js`, `handler.js`, `preview.js`, `replies.js`.
-- [ ] F2.CP checkpoint.
+- [ ] F2.0 GATE (owner): Nia tarball at or after A1 is deployed. Do not deploy F2 otherwise. Open: F2 is implemented on `feat/dpc-f2-nia-mora` but must not be merged or deployed until the owner confirms this gate.
+- [x] F2.1 RED `extract.test.js`, `handler.test.js`, `preview.test.js`, `replies.test.js`: "activa mora a la usura" previews mode `usury`, today, cap in force, "la mora no es retroactiva", Confirm writes one `late_policy`; fixed 40% vs cap 28.59 states 28.59 applies; all four modes including `contract_multiple`; creating a debt applies the default by kind; list replies show mora; double Confirm one event. Reqs NI4, NI6, NI8, LI2.
+- [x] F2.2 GREEN `extract.js`, `handler.js`, `preview.js`, `replies.js`.
+- [x] F2.CP checkpoint.
 
 ### F3 card mora (design 950) · deps: C3, D2
 Groups: F3a engine + guards (about 480), F3b card UI (about 470).

@@ -830,3 +830,63 @@ Total vs master before this progress/tasks commit: 30 files, 1,302 insertions, 2
 ### Remaining
 
 D2.0 (owner gate: confirm A1 deployed on web and Nia, then merge D2). F2 (needs A1 deployed on Nia) and F3 are not started.
+
+## Batch F2 (Nia mora: `late_policy` action, default mora by kind, mora lines in replies): COMPLETE, DEPLOY HELD (owner gate F2.0 open)
+
+Branch `feat/dpc-f2-nia-mora` (from `feat/dpc-d2-mora-ui` aee5ba1). No live Appwrite, Gemini or Telegram was touched; `.env` was never read. Mode: Strict TDD, artifact store hybrid (Engram not available: this file and `tasks.md` carry the record).
+
+### Owner gate (F2.0, left unchecked)
+
+F2 is implemented on its branch but MUST NOT be merged or deployed until the owner confirms F2.0: a Nia tarball at or after A1 (the forward-compatible reader) is deployed first. This build can write `late_policy` events and a default `terms.late` on debts created from Nia; an older Nia would mark such debts unreadable. F3 is not started.
+
+### Tasks
+
+- [ ] F2.0 GATE (owner): open, see above
+- [x] F2.1 RED `extract.test.js`, `late.test.js` (new), `handler.test.js`, `preview.test.js`, `replies.test.js`, `replies.advice.test.js`, `index.test.js`: "activa mora a la usura" previews mode `usury`, today, the cap in force and "La mora no es retroactiva"; Confirm writes one `late_policy`; fixed 40% against the 28.59 cap states that 28.59 applies; all four modes including `contract_multiple`; creating a debt applies the default by kind; list, payment preview, simulate and advise show the mora; double Confirm leaves one event. Reqs NI4, NI6, NI8, LI2.
+- [x] F2.2 GREEN `extract.js` (`late{mode, rate, multiple, graceDays, effectiveOn}`), new `late.js` (preview and reply), `handler.js` (`late_policy` action, callbacks, commit), `preview.js` (default by kind, mora lines in the payment preview), `replies.js` (list, simulate, advise), `pending.js` (type doc), `index.js` (classifier text)
+- [x] F2.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 80500ae `feat(nia): extract and preview a mora policy change with the cap in force, the capped rate and the not-retroactive note` | F2a | 4 files, 364 insertions, 3 deletions |
+| 5e58656 `feat(nia): configure the mora from Telegram with one late_policy event per confirmation, and give new debts the default mora by kind` | F2b | 5 files, 320 insertions, 6 deletions |
+| 2e0bc3f `feat(nia): show the accrued mora in payment previews, the debt list, simulations and advice, and route mora requests through the classifier` | F2c | 9 files, 188 insertions, 12 deletions |
+
+Total vs `feat/dpc-d2-mora-ui` before this progress/tasks commit: 14 files, 872 insertions, 21 deletions = 893 changed lines (budget 2,000; each commit <= 800: F2a is 367, F2b is 326, F2c is 200; design 450, worst case 900).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR / mutation |
+|---|---|---|---|
+| F2.1 / F2.2 extraction | 8 `extract.test.js` cases failed (no `latePolicy`, no `late_policy` action, prompt silent) | 57 tests in the file: four modes each with only their own field, date and grace defaults, missing mode, rate and multiple, a fixed rate with no convention kept aside as `rateValue`, multiple 0 and 4, grace 91 and 2.5 and a zero fixed rate as problems, prompt teaches `late_policy` | `late.mode` is a different object from `planChange.mode` (keep_term / keep_installment), so the name clash flagged in the brief does not occur; the normalized result field is `latePolicy` |
+| F2.1 / F2.2 preview | `late.test.js` failed at import (module absent) | 14 tests: golden 1,375 on 10 days at the 28.59 cap, effective today 0, fixed 40% against the cap says 28.59 applies, fixed 20% gives 997 with no cap warning, multiples 1 and 1.5 (24% and 36% capped), grace days, off keeps the accrued mora (1,375 against 687), already in force, stale cap, unknown cap, mortgage Ley 546, backdated cost note, card and unreadable refused, the reply after Confirm | The two branches that printed the "Mora acumulada" line were merged into one |
+| F2.1 / F2.2 handler | 18 new handler cases failed (the `late_policy (F2)` suite plus the 2 create defaults) | Preview writes nothing; Confirm writes one event with `de{id}`, `debt:{id}` and the done marker; double tap, retry and race leave one; dedupe checked before the rebuild (survives a deleted debt); rebuild from the live debt (a payment after the preview leaves 3 of mora instead of 1,375); four modes; convention buttons for a fixed rate; missing mode, rate and multiple; multiple 5 and grace 120 corrected; card refused; pick between debts; stale `nia:mode` button ignored | `CONVENTION_NEXT.late_policy` joins the existing map instead of a second callback path |
+| F2.1 / F2.2 create default | 2 `preview.test.js` and 2 handler cases failed | Bank kinds (consumer, vehicle, libranza, leasing, mortgage) write `late` `{mode: 'usury', graceDays: 0}`; family, other and informal write nothing (the web D2a rule); the create preview names the mora only when it is on | Two older assertions of `not.toContain('usura')` became `not.toContain('tope de usura')`: the new mora line says "usura", the cap notice is what they guard |
+| F2.1 / F2.2 pay, list, simulate, advise | 3 `preview.test.js`, 1 `replies.test.js`, 3 `replies.advice.test.js` and 4 handler cases failed | "Mora" and "Mora pendiente" lines in the payment preview (full payment 1,375; a 1,000 payment leaves 375), `mora $ 1.375` in the list, "Mora acumulada hoy" in simulate and advise; the paraphrase receives `lateInterest` as text, the guard allows that figure and still rejects an invented one (9.999) | `debtSummaries` also carries `lateInterestMinor`, so the analysis snapshot sees it |
+| F2.1 / F2.2 wiring | 1 `index.test.js` case failed (classifier text had no mora) | Classifier names "configurar la mora"; the entry point previews and a repeated Confirm writes one `late_policy` | none needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions/nia` exit 0: 13 files, 476 tests passed (baseline before F2: 12 files, 419). Full `npm test -- --maxWorkers=4`: 123 files, 1,962 tests passed on the first run (baseline before F2: 122 files, 1,905) |
+| Runtime harness command/scenario and exact result | The `index.test.js` harness drives the real entry point with a fake network: classifier, extraction, preview, `nia:confirm` three times, one `late_policy` row. The handler tests drive the real core `previewChange`, `planCommit` and `commitPlan` against an in-memory port. `npm run build` exit 0. `npm run package:nia` exit 0 (`functions/nia.tar.gz` is untracked) |
+| Rollback boundary | Revert 2e0bc3f (mora lines in replies and the classifier text), then 5e58656 (the action and the create default), then 80500ae (extraction and `late.js`). Reverting only 80500ae would break the import in `handler.js`, so revert in order. Nothing in the core, the web or the schema changed |
+
+### Decisions and deviations from design
+
+- The extraction field is `late{mode, rate, multiple, graceDays, effectiveOn}` as designed. The normalized request carries it as `latePolicy: { effectiveOn, late, rateValue? }`, and the pending stores `draft: { effectiveOn, late }` (about 120 bytes; a fixed rate adds one rate object).
+- A fixed mora rate with no stated convention reuses the `nia:conv:*` buttons: the pending keeps `rateValue` and `CONVENTION_NEXT.late_policy` completes `late.rate`. The design did not list this path; it follows the spec requirement that the convention callback applies to every action that needs one.
+- The pending stores the rate the user asked for (for example 40%), not the capped one. The core caps at accrual time with the table in force on each day, so a later cap update is honoured; the preview says which rate applies today.
+- "La mora no es retroactiva" is worded as: mora accrues from the day after the effective date, not for earlier days. A backdated effective date is still accepted (the user chose it) and shows the accrued figure and, when a recorded payment is touched, the web cost-update note.
+- Cards are refused politely (at preview and again at Confirm): their mora is part of F3. The default mora on create does not apply to cards because Nia does not create them.
+- The create default lives in `buildTerms`, so the preview and the commit agree. Informal debts (balance only) get no mora, like the web wizard.
+- The payment preview no longer folds the mora into "Cargos e impuestos": it has its own "Mora" line. The `summary` stored in the pending is unchanged (its `charges` still includes the mora), so the pending size and the cost row are as before.
+- The advice mora figure is not in the core `facts`; the handler passes it as an extra (`lateInterest` in the paraphrase prompt, allowed in the numeric guard through its `extra` list) and the deterministic template prints it. The core `advise` was not touched.
+- Two earlier `preview.test.js` assertions (`not.toContain('usura')`) were narrowed to `not.toContain('tope de usura')`, see the evidence table.
+
+### Remaining
+
+F2.0 (owner gate: confirm the Nia tarball at or after A1 is deployed, then merge and deploy F2; deploy web and Nia together from C2 on). F3 (card mora and card Nia) is not started.
