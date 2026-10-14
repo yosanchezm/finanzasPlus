@@ -21,7 +21,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode',
+ * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -76,14 +76,23 @@ export function modeKeyboard(modes = MODES) {
   return modes.filter((mode) => MODES.includes(mode)).map((mode) => [button(MODE_LABELS[mode], `nia:mode:${mode}`)]);
 }
 
-/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode', value: (string|null) } | null} */
+/**
+ * One button per candidate charge, by position: charge ids can be long and a callback holds 64 bytes. At most 6, as for debts.
+ * @param {{ label: string }[]} charges In the same order as the `candidates` stored in the pending.
+ */
+export function chargeKeyboard(charges) {
+  return charges.slice(0, MAX_PICK_BUTTONS).map((charge, index) => [button(String(charge.label).slice(0, 40), `nia:chg:${index}`)]);
+}
+
+/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge', value: (string|number|null) } | null} */
 export function parseCallback(data) {
   if (data === 'nia:simpay') return { type: 'simpay', value: null };
-  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode):(.+)$/) : null;
+  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg):(.+)$/) : null;
   if (!match) return null;
   const [, kind, value] = match;
   if (kind === 'pick') return { type: 'pick', value };
   if (kind === 'strat') return STRATEGIES.includes(value) ? { type: 'strategy', value } : null;
   if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
+  if (kind === 'chg') return /^\d$/.test(value) ? { type: 'charge', value: Number(value) } : null;
   return CONVENTION_BUTTONS.includes(value) ? { type: 'convention', value } : null;
 }

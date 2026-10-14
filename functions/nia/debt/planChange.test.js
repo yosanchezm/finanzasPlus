@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { previewChange, project, resolveLegal, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
-import { BACKDATED_NOTE, TOO_LOW_NOTE, modesFor, previewRateChange, readPlanChange } from './planChange.js';
+import { BACKDATED_NOTE, TOO_LOW_NOTE, chargesInForce, describeChargeChange, findCharge, modesFor, previewChargeChange, previewRateChange, readChargeChange, readPlanChange, rebuildCharges } from './planChange.js';
 
 const TODAY = '2026-10-13';
 const EA = (value) => ({ value, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
@@ -173,5 +173,188 @@ describe('previewRateChange', () => {
     run({ events });
 
     expect(JSON.stringify(events)).toBe(before);
+  });
+});
+
+// ---- charge change (E2c) ----
+
+const CHARGES = [
+  { id: 'life', kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05, cadence: 'per_installment' },
+  { id: 'fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 10000, cadence: 'per_installment' },
+  { id: 'iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'fee', value: 19, cadence: 'per_installment' },
+];
+const chargedLoan = () => debtRow({ ...loanTerms, charges: CHARGES });
+const projectionOf = (debt, events = [disbursement]) => project(debt, events, TODAY);
+const runCharge = ({ debt = chargedLoan(), events = [disbursement], draft = {} } = {}) => previewChargeChange({ debt, events, today: TODAY, draft: { effectiveOn: TODAY, op: 'set', chargeRef: 'seguro de vida', newValue: 0.1, ...draft } });
+
+describe('readChargeChange', () => {
+  const read = (raw) => readChargeChange(raw, { today: TODAY });
+
+  it('reads a change of value, a removal and an addition, with the date defaulting to today', () => {
+    expect(read({ chargeRef: ' seguro de vida ', op: 'set', newValue: 0.1 })).toEqual({ effectiveOn: TODAY, chargeRef: 'seguro de vida', op: 'set', newValue: 0.1, missing: [], problems: [] });
+    expect(read({ chargeRef: 'seguro', op: 'remove', effectiveOn: '2026-11-01' })).toMatchObject({ effectiveOn: '2026-11-01', op: 'remove', newValue: null, missing: [] });
+    expect(read({ chargeRef: null, op: 'add', newValue: 50000 })).toMatchObject({ op: 'add', missing: [] });
+  });
+
+  it('infers a change of value when only a value came, and asks for what is missing', () => {
+    expect(read({ chargeRef: 'manejo', newValue: 12000 })).toMatchObject({ op: 'set', newValue: 12000, missing: [] });
+    expect(read({ chargeRef: 'manejo' }).missing).toEqual(['charge_action']);
+    expect(read({ op: 'remove' }).missing).toEqual(['charge']);
+    expect(read({ chargeRef: 'manejo', op: 'set' }).missing).toEqual(['charge_value']);
+    expect(read(null).missing).toEqual(['charge', 'charge_action']);
+  });
+
+  it('refuses a negative value and drops unknown operations', () => {
+    expect(read({ chargeRef: 'manejo', op: 'set', newValue: -5 })).toMatchObject({ problems: ['invalid_amount'], missing: [] });
+    expect(read({ chargeRef: 'manejo', op: 'delete' }).op).toBeNull();
+  });
+});
+
+describe('chargesInForce', () => {
+  it('is the charges of the terms for a loan', () => {
+    const debt = chargedLoan();
+
+    expect(chargesInForce(projectionOf(debt), [disbursement], TODAY).map((charge) => charge.id)).toEqual(['life', 'fee', 'iva']);
+  });
+
+  it('folds the active charge_change events up to today for a card, ignoring voided and future ones', () => {
+    const card = debtRow({ ...cardTerms, charges: CHARGES }, { kind: 'card' });
+    const change = (id, effectiveOn, ids) => event(id, 'charge_change', effectiveOn, 0, { charges: CHARGES.filter((charge) => ids.includes(charge.id)) });
+    const events = [change('c1', '2026-08-01', ['life', 'fee', 'iva']), change('c2', '2026-09-01', ['fee', 'iva']), change('c3', '2026-12-01', ['life'])];
+    const ids = (list) => chargesInForce(project(card, list, TODAY), list, TODAY).map((charge) => charge.id);
+
+    expect(ids(events)).toEqual(['fee', 'iva']);
+    expect(ids([...events, event('v1', 'void', '2026-09-15', 0, { targetEventId: 'c2' })])).toEqual(['life', 'fee', 'iva']);
+    expect(ids([])).toEqual(['life', 'fee', 'iva']);
+  });
+});
+
+describe('findCharge', () => {
+  it('matches by label ignoring case and accents, then by words of the label, then by kind', () => {
+    expect(findCharge(CHARGES, 'SEGURO DE VIDA')).toEqual({ match: CHARGES[0] });
+    expect(findCharge(CHARGES, 'cuota de manejó')).toEqual({ match: CHARGES[1] });
+    expect(findCharge(CHARGES, 'manejo')).toEqual({ match: CHARGES[1] });
+    expect(findCharge(CHARGES, 'el seguro')).toEqual({ match: CHARGES[0] });
+    expect(findCharge(CHARGES, 'impuesto')).toEqual({ match: CHARGES[2] });
+  });
+
+  it('returns the candidates when several match and none when nothing does', () => {
+    const two = [...CHARGES, { id: 'life2', kind: 'insurance', label: 'Seguro todo riesgo', basis: 'fixed', value: 5000, cadence: 'per_installment' }];
+
+    expect(findCharge(two, 'seguro')).toEqual({ candidates: [two[0], two[3]] });
+    expect(findCharge(CHARGES, 'gps')).toEqual({ none: true });
+    expect(findCharge(CHARGES, '')).toEqual({ none: true });
+  });
+});
+
+describe('previewChargeChange', () => {
+  it('previews the removal of an insurance with the next installment before and after, and writes nothing', () => {
+    const debt = chargedLoan();
+    const result = runCharge({ debt, draft: { op: 'remove', newValue: null } });
+    const expected = previewChange(debt, [disbursement], { kind: 'charge_change', effectiveOn: TODAY, charges: CHARGES.filter((charge) => charge.id !== 'life') }, { on: TODAY });
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({ effectiveOn: TODAY, chargeId: 'life', op: 'remove', newValue: null });
+    const text = plain(result.text);
+    expect(text).toContain('Cambio de cargos en Crédito Vehículo');
+    expect(text).toContain('Se quita: Seguro de vida');
+    expect(text).toContain(`Próxima cuota (con cargos): ${pesos(expected.before.nextTotalMinor)} → ${pesos(expected.after.nextTotalMinor)}`);
+    expect(text).toContain(`Cargos por pagar: ${pesos(expected.before.remainingChargesMinor)} → ${pesos(expected.after.remainingChargesMinor)}`);
+    expect(expected.after.nextTotalMinor).toBeLessThan(expected.before.nextTotalMinor);
+    expect(text).toContain('Aún no se guarda');
+  });
+
+  it('previews a new value for a charge', () => {
+    const result = runCharge({ draft: { chargeRef: 'cuota de manejo', op: 'set', newValue: 15000 } });
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toMatchObject({ chargeId: 'fee', op: 'set', newValue: 15000 });
+    expect(plain(result.text)).toContain(`Cuota de manejo: ${pesos(10000)} → ${pesos(15000)}`);
+  });
+
+  it('lists the charges that go with a removed one (IVA depends on the fee)', () => {
+    const result = runCharge({ draft: { chargeRef: 'cuota de manejo', op: 'remove', newValue: null } });
+
+    expect(plain(result.text)).toContain('Se quita: Cuota de manejo');
+    expect(plain(result.text)).toContain('También se quita lo que depende de él: IVA');
+  });
+
+  it('asks which charge when several match, and answers when none does or the debt has no charges', () => {
+    const two = debtRow({ ...loanTerms, charges: [...CHARGES, { id: 'life2', kind: 'insurance', label: 'Seguro todo riesgo', basis: 'fixed', value: 5000, cadence: 'per_installment' }] });
+    const several = runCharge({ debt: two, draft: { chargeRef: 'seguro' } });
+    const none = runCharge({ draft: { chargeRef: 'gps' } });
+    const empty = runCharge({ debt: debtRow(), draft: { chargeRef: 'seguro' } });
+
+    expect(several).toMatchObject({ ok: true, needsCharge: true });
+    expect(several.candidates.map((charge) => charge.id)).toEqual(['life', 'life2']);
+    expect(none).toMatchObject({ ok: false });
+    expect(plain(none.issue)).toContain('No encontré');
+    expect(plain(none.issue)).toContain('Seguro de vida');
+    expect(plain(empty.issue)).toContain('no tiene seguros ni cargos');
+  });
+
+  it('uses the chosen charge id instead of the words', () => {
+    const result = runCharge({ draft: { chargeRef: 'seguro', chargeId: 'fee', op: 'set', newValue: 12000 } });
+
+    expect(result.draft).toMatchObject({ chargeId: 'fee' });
+  });
+
+  it('says there is nothing to change when the value is the same', () => {
+    expect(runCharge({ draft: { newValue: 0.05 } })).toMatchObject({ ok: false, issue: expect.stringContaining('ya tiene ese valor') });
+  });
+
+  it('refuses values that the charge cannot take', () => {
+    expect(runCharge({ draft: { chargeRef: 'manejo', newValue: 12000.5 } }).issue).toContain('pesos enteros');
+    expect(runCharge({ draft: { newValue: 150 } }).issue).toContain('100');
+  });
+
+  it('adds the backdated note when a recorded payment changes cost, and not otherwise', () => {
+    const payment = event('p1', 'payment', '2026-10-10', 390381);
+    const past = runCharge({ events: [disbursement, payment], draft: { effectiveOn: '2026-09-10', op: 'remove', newValue: null } });
+    const now = runCharge({ events: [disbursement, payment], draft: { op: 'remove', newValue: null } });
+
+    expect(plain(past.text)).toContain(BACKDATED_NOTE);
+    expect(plain(now.text)).not.toContain(BACKDATED_NOTE);
+  });
+
+  it('works on a card: next minimum payment, charges folded from the stored changes', () => {
+    const card = debtRow({ ...cardTerms, charges: CHARGES }, { kind: 'card', name: 'Visa' });
+    const result = runCharge({ debt: card, events: [], draft: { chargeRef: 'cuota de manejo', op: 'set', newValue: 20000 } });
+
+    expect(result.ok).toBe(true);
+    expect(plain(result.text)).toContain('Cambio de cargos en Visa');
+    expect(plain(result.text)).toContain('Próximo pago mínimo');
+  });
+
+  it('reports an unreadable debt in Spanish', () => {
+    expect(runCharge({ debt: debtRow(loanTerms, { termsJson: '{' }) })).toMatchObject({ ok: false, issue: expect.stringContaining('No pude leer los términos') });
+  });
+});
+
+describe('rebuildCharges (Confirm)', () => {
+  it('rebuilds the whole charge set from the live debt: the stored draft only names the charge and the change', () => {
+    const debt = chargedLoan();
+    const projection = projectionOf(debt);
+
+    expect(rebuildCharges(chargesInForce(projection, [disbursement], TODAY), { chargeId: 'fee', op: 'set', newValue: 12000 }).charges.map((charge) => [charge.id, charge.value]))
+      .toEqual([['life', 0.05], ['fee', 12000], ['iva', 19]]);
+    expect(rebuildCharges(CHARGES, { chargeId: 'fee', op: 'remove' }).charges.map((charge) => charge.id)).toEqual(['life']);
+  });
+
+  it('fails when the charge is no longer there', () => {
+    expect(rebuildCharges(CHARGES.slice(1), { chargeId: 'life', op: 'remove' })).toMatchObject({ gone: true });
+  });
+});
+
+describe('describeChargeChange', () => {
+  it('reports what was written with the next installment before and after', () => {
+    const debt = chargedLoan();
+    const draft = { effectiveOn: TODAY, chargeId: 'life', op: 'remove', newValue: null };
+    const figures = previewChange(debt, [disbursement], { kind: 'charge_change', effectiveOn: TODAY, charges: CHARGES.slice(1) }, { on: TODAY });
+    const text = plain(describeChargeChange(debt, CHARGES[0], draft, figures));
+
+    expect(text).toContain('registré el cambio de cargos de Crédito Vehículo');
+    expect(text).toContain('quité Seguro de vida');
+    expect(text).toContain(`Próxima cuota (con cargos): ${pesos(figures.before.nextTotalMinor)} → ${pesos(figures.after.nextTotalMinor)}`);
   });
 });

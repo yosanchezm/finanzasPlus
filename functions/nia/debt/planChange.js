@@ -1,8 +1,9 @@
-import { ValidationError, isIsoDate, previewChange, project, rateLabel } from '../../../packages/finance-core/index.js';
+import { ValidationError, activeEvents, compareIso, isIsoDate, previewChange, project, rateLabel, removeCharge, sortEvents } from '../../../packages/finance-core/index.js';
+import { fold } from './findDebt.js';
 import { pesos } from './format.js';
 import { describeCoreError, usuryLines } from './preview.js';
 
-// Plan changes of Nia (NI2, NI7): `rate_change` now and `charge_change` next. The model only extracts; every
+// Plan changes of Nia (NI2, NI7): `rate_change` and `charge_change` (edit or remove an existing charge; adding one is web-only). The model only extracts; every
 // figure comes from the core's `previewChange`, the same replay the web dialogs use, so a preview equals the
 // projection once the event is saved. Nothing here writes. Pure and Node 16 safe.
 
@@ -126,6 +127,200 @@ export function describeRateChange(debt, draft, figures) {
   const lines = [`✅ Listo: registré el cambio de tasa de ${debt.name} a ${rateLabel(draft.rate)} desde ${draft.effectiveOn}.`];
   if (debt.kind === 'card') lines.push(`Próximo pago mínimo: ${money(before.nextTotalMinor, after.nextTotalMinor)}`);
   else lines.push(`Cuota: ${money(before.installmentMinor, after.installmentMinor)} · Cuotas restantes: ${after.remainingPeriods}`);
+  if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
+  return lines.join('\n');
+}
+
+// ---- charge change (NI2, NI6) ----
+
+const CHARGE_OPS = ['set', 'remove', 'add'];
+const EVENT_PAYLOAD_MAX_CHARS = 8000;
+const MAX_CHARGE_CANDIDATES = 6;
+// Words people use for each kind of charge (already folded), like the debt kinds of `findDebt`.
+const CHARGE_KIND_WORDS = {
+  insurance: ['seguro', 'seguros', 'poliza'],
+  fee: ['comision', 'manejo', 'cargo', 'cargos'],
+  tax: ['impuesto', 'impuestos', 'iva', 'gmf'],
+};
+const BASIS_LABELS = { pctOutstanding: 'del saldo', pctOriginal: 'del monto original', pctOfBase: 'de la base', pctOfSubtotal: 'del total de la cuota', pctOfCharge: 'de otro cargo' };
+
+export const ADD_IN_WEB = 'Por ahora solo puedo cambiar el valor de un seguro o cargo que ya existe, o quitarlo. Para agregar uno nuevo usa la web: en Deudas abre la deuda y elige «Más acciones» y «Cambiar seguros y cargos». No guardé nada.';
+const CHARGE_GONE = 'Ese cargo ya no existe en la deuda, así que no registré nada. Pídeme el cambio de nuevo.';
+const FIXED_WHOLE = 'El valor de un cargo fijo va en pesos enteros, sin decimales. Escríbelo de nuevo; no guardé nada.';
+const PCT_MAX = 'Un porcentaje no puede ser mayor que 100. Escríbelo de nuevo; no guardé nada.';
+const TOO_MANY = 'Son demasiados cargos para guardarlos en un solo cambio. Haz el cambio desde la web.';
+const CANNOT_PREVIEW_CHARGES = 'No pude calcular el cambio con esos cargos. Revisa el valor y la fecha.';
+
+const chargeText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+/**
+ * Reads what the model extracted about a charge change: the charge as the user named it, the operation
+ * (`set` a new value, `remove`, or `add`, which Nia refuses) and the value. `missing` names what to ask for and `problems`
+ * what is invalid (a negative value). The date is today when not said or not a real date.
+ * @param {object | null} raw The model's `planChange` object.
+ * @param {{ today: string }} options
+ */
+export function readChargeChange(raw, { today }) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const given = typeof input.newValue === 'number' && Number.isFinite(input.newValue);
+  const chargeRef = chargeText(input.chargeRef, 40) || null;
+  const op = CHARGE_OPS.includes(input.op) ? input.op : given && input.newValue >= 0 ? 'set' : null;
+  const missing = [];
+  const problems = [];
+  if (op !== 'add') {
+    if (!chargeRef) missing.push('charge');
+    if (op === null) missing.push('charge_action');
+    if (op === 'set' && !given) missing.push('charge_value');
+    if (op === 'set' && given && input.newValue < 0) problems.push('invalid_amount');
+  }
+  return { effectiveOn: isIsoDate(input.effectiveOn) ? input.effectiveOn : today, chargeRef, op, newValue: op === 'remove' || !given ? null : input.newValue, missing, problems };
+}
+
+/**
+ * The charges in force on `today`. A loan's projection already applies its stored changes, so its terms are the answer.
+ * A card's projection keeps the original terms, so the active `charge_change` events up to today are folded in here
+ * (the same rule as the web's `chargesInForce`).
+ * @param {object} projection `project(debt, events, today)`.
+ * @param {object[]} events The debt's event rows (voided ones are ignored).
+ * @param {string} today `YYYY-MM-DD`.
+ * @returns {object[]} Normalized charges.
+ */
+export function chargesInForce(projection, events, today) {
+  if (!projection.card) return projection.terms.charges;
+  return sortEvents(activeEvents(events)).reduce(
+    (charges, event) => (event.kind === 'charge_change' && compareIso(event.effectiveOn, today) <= 0 ? event.payload.charges : charges),
+    projection.terms.charges,
+  );
+}
+
+const hasWord = (ref, word) => ` ${ref} `.includes(` ${word} `);
+
+const CHARGE_TIERS = [
+  (charge, ref) => fold(charge.label) === ref,
+  (charge, ref) => (fold(charge.label).length >= 3 && fold(charge.label).includes(ref)) || hasWord(ref, fold(charge.label)),
+  (charge, ref) => (CHARGE_KIND_WORDS[charge.kind] || []).some((word) => hasWord(ref, word)),
+];
+
+/**
+ * Finds the charge a message talks about, by label and then by kind, ignoring case and accents.
+ * @param {object[]} charges The charges in force.
+ * @param {string} reference What the user called it ("seguro de vida", "manejo").
+ * @returns {{ match: object } | { candidates: object[] } | { none: true }} Priority: exact label, then label containing the words, then kind words.
+ */
+export function findCharge(charges, reference) {
+  const ref = fold(reference);
+  if (ref === '' || ref.length < 3) return { none: true };
+  for (const tier of CHARGE_TIERS) {
+    const found = charges.filter((charge) => tier(charge, ref));
+    if (found.length === 1) return { match: found[0] };
+    if (found.length > 1) return { candidates: found.slice(0, MAX_CHARGE_CANDIDATES) };
+  }
+  return { none: true };
+}
+
+/**
+ * The charge set after the change, rebuilt from the charges in force (the pending stores only the charge id, the operation and
+ * the value): a removal takes with it every charge that references the removed one (IVA on a fee).
+ * @param {object[]} charges The charges in force now.
+ * @param {{ chargeId: string, op: ('set' | 'remove'), newValue?: (number | null) }} change
+ * @returns {{ gone: true } | { target: object, charges: object[], dependents: object[] }}
+ */
+export function rebuildCharges(charges, { chargeId, op, newValue }) {
+  const target = charges.find((charge) => charge.id === chargeId);
+  if (!target) return { gone: true };
+  if (op === 'remove') {
+    const kept = removeCharge(charges, chargeId);
+    return { target, charges: kept, dependents: charges.filter((charge) => charge.id !== chargeId && !kept.includes(charge)) };
+  }
+  return { target, charges: charges.map((charge) => (charge.id === chargeId ? { ...charge, value: newValue } : charge)), dependents: [] };
+}
+
+const describeValue = (charge, value) => (charge.basis === 'fixed' ? pesos(value) : `${value}% ${BASIS_LABELS[charge.basis] || ''}`.trim());
+
+function valueIssue(charge, value) {
+  if (charge.basis === 'fixed') return Number.isSafeInteger(value) ? null : FIXED_WHOLE;
+  return value > 100 ? PCT_MAX : null;
+}
+
+const nextLabel = (isCard) => (isCard ? 'Próximo pago mínimo' : 'Próxima cuota (con cargos)');
+
+/**
+ * Preview of a charge change: the charge named (or chosen) is given a new value or removed from the effective date, and the
+ * core replays the debt to show the next installment (a card's minimum payment) before and after. Nothing is added: the
+ * handler refuses `add` before this. Read-only.
+ * @param {{ debt: object, events: object[], today: string,
+ *   draft: { effectiveOn: string, op: ('set' | 'remove'), newValue?: (number | null), chargeRef?: string, chargeId?: string } }} input
+ * @returns {{ ok: true, needsCharge: true, candidates: object[], text: string }
+ *   | { ok: true, needsCharge?: false, draft: { effectiveOn: string, chargeId: string, op: string, newValue: (number | null) }, text: string }
+ *   | { ok: false, issue: string }}
+ */
+export function previewChargeChange({ debt, events, today, draft }) {
+  let projection;
+  try {
+    projection = project(debt, events, today);
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return { ok: false, issue: describeCoreError(error) };
+  }
+  const charges = chargesInForce(projection, events, today);
+  if (charges.length === 0) return { ok: false, issue: `${debt.name} no tiene seguros ni cargos registrados. Para agregar uno nuevo usa la web: en Deudas abre la deuda y elige «Más acciones» y «Cambiar seguros y cargos».` };
+  let target;
+  if (draft.chargeId) {
+    target = charges.find((charge) => charge.id === draft.chargeId);
+    if (!target) return { ok: false, issue: CHARGE_GONE };
+  } else {
+    const found = findCharge(charges, draft.chargeRef);
+    if (found.candidates) return { ok: true, needsCharge: true, candidates: found.candidates, text: `¿Cuál cargo de ${debt.name} quieres ${draft.op === 'remove' ? 'quitar' : 'cambiar'}?` };
+    if (found.none) return { ok: false, issue: `No encontré un seguro o cargo que se parezca a «${draft.chargeRef}» en ${debt.name}. Los que tiene: ${charges.map((charge) => charge.label).join(', ')}. Solo puedo cambiar el valor de uno que ya exista o quitarlo; para agregar uno nuevo usa la web.` };
+    target = found.match;
+  }
+  const remove = draft.op === 'remove';
+  if (!remove) {
+    const issue = valueIssue(target, draft.newValue);
+    if (issue) return { ok: false, issue };
+    if (draft.newValue === target.value) return { ok: false, issue: `${target.label} ya tiene ese valor; no hay nada que cambiar.` };
+  }
+  const rebuilt = rebuildCharges(charges, { chargeId: target.id, op: draft.op, newValue: draft.newValue });
+  let figures;
+  try {
+    figures = previewChange(debt, events, { kind: 'charge_change', effectiveOn: draft.effectiveOn, charges: rebuilt.charges }, { on: today });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return { ok: false, issue: CANNOT_PREVIEW_CHARGES };
+  }
+  if (figures.payloadChars > EVENT_PAYLOAD_MAX_CHARS) return { ok: false, issue: TOO_MANY };
+
+  const { before, after, impacted } = figures;
+  const lines = [`🧾 Cambio de cargos en ${debt.name}`, `Desde: ${draft.effectiveOn}`];
+  if (remove) {
+    lines.push(`Se quita: ${target.label} (${describeValue(target, target.value)})`);
+    if (rebuilt.dependents.length > 0) lines.push(`También se quita lo que depende de él: ${rebuilt.dependents.map((charge) => charge.label).join(', ')}`);
+  } else {
+    lines.push(`${target.label}: ${describeValue(target, target.value)} → ${describeValue(target, draft.newValue)}`);
+  }
+  lines.push(`${nextLabel(Boolean(projection.card))}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`);
+  lines.push(`Cargos por pagar: ${money(before.remainingChargesMinor, after.remainingChargesMinor)}`);
+  if (impacted.length > 0) lines.push(`ℹ️ ${BACKDATED_NOTE}`);
+  lines.push('', '¿Quieres registrar el cambio así? Aún no se guarda.');
+  return { ok: true, draft: { effectiveOn: draft.effectiveOn, chargeId: target.id, op: draft.op, newValue: remove ? null : draft.newValue }, text: lines.join('\n') };
+}
+
+export const CHARGE_GONE_TEXT = CHARGE_GONE;
+
+/**
+ * The reply after a charge change was written, with the next installment of the debt as it is now.
+ * @param {object} debt The live `debts` row.
+ * @param {object} target The charge that was changed or removed (as it was).
+ * @param {{ effectiveOn: string, op: string, newValue?: (number | null) }} draft What was written.
+ * @param {ReturnType<typeof previewChange>} figures The core replay of the written change over the live events.
+ * @param {object[]} [dependents] The charges that went with a removed one.
+ */
+export function describeChargeChange(debt, target, draft, figures, dependents = []) {
+  const { before, after } = figures;
+  const what = draft.op === 'remove'
+    ? `quité ${target.label}${dependents.length > 0 ? ` (y ${dependents.map((charge) => charge.label).join(', ')})` : ''}`
+    : `${target.label} ahora vale ${describeValue(target, draft.newValue)}`;
+  const lines = [`✅ Listo: registré el cambio de cargos de ${debt.name} desde ${draft.effectiveOn}: ${what}.`, `${nextLabel(debt.kind === 'card')}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`];
   if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
   return lines.join('\n');
 }

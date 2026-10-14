@@ -301,3 +301,31 @@ describe('normaliseDebtExtraction: rate_change', () => {
     expect(prompt).toMatch(/nueva tasa va en rate/i);
   });
 });
+
+describe('normaliseDebtExtraction: charge_change', () => {
+  const change = { action: 'charge_change', debtRef: 'carro', planChange: { effectiveOn: null, mode: null, chargeRef: 'seguro de vida', op: 'remove', newValue: null } };
+
+  it('reads the charge, the operation and the value, with the date defaulting to today', () => {
+    expect(norm(change)).toMatchObject({ action: 'charge_change', debtRef: 'carro', missingFields: [], problems: [], planChange: { effectiveOn: TODAY, chargeRef: 'seguro de vida', op: 'remove', newValue: null } });
+    expect(norm({ ...change, planChange: { chargeRef: 'manejo', op: 'set', newValue: 12000, effectiveOn: '2026-11-01' } }).planChange).toEqual({ effectiveOn: '2026-11-01', chargeRef: 'manejo', op: 'set', newValue: 12000 });
+  });
+
+  it('keeps an add request so the handler can send the user to the web', () => {
+    expect(norm({ ...change, planChange: { op: 'add', chargeRef: 'seguro de desempleo', newValue: 20000 } })).toMatchObject({ missingFields: [], planChange: { op: 'add' } });
+  });
+
+  it('reports what is missing and what is invalid', () => {
+    expect(norm({ ...change, planChange: { chargeRef: null, op: 'remove' } }).missingFields).toEqual(['charge']);
+    expect(norm({ ...change, planChange: { chargeRef: 'manejo', op: 'set' } }).missingFields).toEqual(['charge_value']);
+    expect(norm({ ...change, planChange: { chargeRef: 'manejo', op: 'set', newValue: -1 } }).problems).toEqual(['invalid_amount']);
+  });
+
+  it('teaches the model the action, that the charge and the value go in planChange, and not to invent charges', () => {
+    const prompt = debtPrompt('quita el seguro de vida del carro', [], [], { today: TODAY });
+
+    expect(prompt).toContain('charge_change');
+    expect(prompt).toContain('chargeRef');
+    expect(prompt).toContain('"op"');
+    expect(prompt).toContain('newValue');
+  });
+});

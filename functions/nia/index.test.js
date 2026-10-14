@@ -395,3 +395,59 @@ describe('rate_change in the Nia entry point', () => {
     expect(sent()[sent().length - 1].text).toContain('No tengo una solicitud');
   });
 });
+
+describe('charge_change in the Nia entry point', () => {
+  const charges = [
+    { id: 'life', kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05, cadence: 'per_installment' },
+    { id: 'all', kind: 'insurance', label: 'Seguro todo riesgo', basis: 'fixed', value: 5000, cadence: 'per_installment' },
+    { id: 'fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 10000, cadence: 'per_installment' },
+  ];
+  const chargeAnswers = (planChange) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'charge_change', debtRef: 'vehiculo', planChange: { effectiveOn: null, mode: null, chargeRef: 'seguro', op: 'remove', newValue: null, ...planChange } },
+  ];
+  const chargeEvents = () => fake.tables.debt_events.filter((event) => event.kind === 'charge_change');
+  const seedCharged = () => seed([debtRow('d1', 'Crédito Vehículo', { termsJson: serializeTerms({ ...loanTerms, charges }) })]);
+
+  it('tells the classifier and the extractor about the charge change', async () => {
+    fake = makeNet(chargeAnswers({}));
+    seedCharged();
+
+    await run(message('quita el seguro del carro'));
+
+    expect(fake.prompts[0]).toContain('seguro o cargo');
+    expect(fake.prompts[1]).toContain('charge_change');
+  });
+
+  it('asks which insurance with nia:chg buttons, previews the removal, and a repeated Confirm writes one event', async () => {
+    fake = makeNet(chargeAnswers({}));
+    seedCharged();
+
+    await run(message('quita el seguro del carro'));
+    expect(buttons(sent()[0])).toEqual(['nia:chg:0', 'nia:chg:1']);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ action: 'charge_change', awaiting: 'charge', candidates: ['life', 'all'] });
+
+    await run(press('nia:chg:1'));
+    expect(sent()[1].text).toContain('Se quita: Seguro todo riesgo');
+    expect(chargeEvents()).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:chg:0')); // a stale button after the request was confirmed
+
+    expect(chargeEvents()).toEqual([expect.objectContaining({ dedupeKey: expect.stringMatching(/^debt:/), actorId: 'u7', source: 'telegram' })]);
+    expect(JSON.parse(chargeEvents()[0].payloadJson).charges.map((charge) => charge.id)).toEqual(['life', 'fee']);
+    expect(sent().slice(2).map((call) => /ya estaba registrado|No tengo una solicitud/.test(call.text))).toEqual([false, true, true]);
+  });
+
+  it('refuses to add a charge and points to the web', async () => {
+    fake = makeNet(chargeAnswers({ op: 'add', chargeRef: 'seguro de desempleo', newValue: 20000 }));
+    seedCharged();
+
+    await run(message('agrega un seguro de desempleo al carro'));
+
+    expect(sent()[0].text).toContain('web');
+    expect(chargeEvents()).toHaveLength(0);
+  });
+});

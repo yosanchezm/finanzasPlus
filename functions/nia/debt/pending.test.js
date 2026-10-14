@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PENDING_MAX_BYTES,
   buildPending,
+  chargeKeyboard,
   conventionKeyboard,
   debtRowId,
   dedupeKeyOf,
@@ -164,5 +165,38 @@ describe('plan change callbacks (E2)', () => {
     const confirm = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'rate_change', awaiting: 'confirm', debtId: candidates[0], draft: { effectiveOn: '2026-10-13', rate, mode: 'keep_installment' } });
 
     for (const pending of [picking, confirm]) expect(bytes(JSON.stringify(pending))).toBeLessThanOrEqual(PENDING_MAX_BYTES);
+  });
+});
+
+describe('charge change callbacks (E2c)', () => {
+  const charges = [{ id: 'life', label: 'Seguro de vida' }, { id: 'all', label: 'L'.repeat(60) }];
+
+  it('offers one button per charge by position (the ids can be long), with the label cut to 40 characters', () => {
+    const buttons = allButtons(chargeKeyboard(charges));
+
+    expect(buttons.map((item) => item.callback_data)).toEqual(['nia:chg:0', 'nia:chg:1']);
+    expect(buttons[1].text).toHaveLength(40);
+    for (const item of buttons) expect(bytes(item.callback_data)).toBeLessThanOrEqual(64);
+  });
+
+  it('offers at most 6 charges', () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({ id: `c${index}`, label: `Cargo ${index}` }));
+
+    expect(chargeKeyboard(many)).toHaveLength(6);
+  });
+
+  it('reads the position and refuses anything that is not a small number', () => {
+    expect(parseCallback('nia:chg:0')).toEqual({ type: 'charge', value: 0 });
+    expect(parseCallback('nia:chg:5')).toEqual({ type: 'charge', value: 5 });
+    expect(parseCallback('nia:chg:')).toBeNull();
+    expect(parseCallback('nia:chg:x')).toBeNull();
+    expect(parseCallback('nia:chg:12')).toBeNull();
+  });
+
+  it('keeps a charge change pending under 1.5 KB with the candidate charge ids', () => {
+    const candidates = Array.from({ length: 6 }, (_, index) => `charge-${index}-${'x'.repeat(20)}`);
+    const pending = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'charge_change', awaiting: 'charge', debtId: 'db0123456789abcdef0123456789abcdef01', candidates, draft: { effectiveOn: '2026-10-13', chargeRef: 'seguro de vida', op: 'set', newValue: 0.125 } });
+
+    expect(bytes(JSON.stringify(pending))).toBeLessThanOrEqual(PENDING_MAX_BYTES);
   });
 });

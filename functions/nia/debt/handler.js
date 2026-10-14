@@ -5,8 +5,8 @@ import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
-import { TOO_LOW_CONFIRM, describeRateChange, previewRateChange } from './planChange.js';
+import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
+import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, previewChargeChange, previewRateChange, rebuildCharges } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
@@ -21,7 +21,7 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';
 
@@ -48,6 +48,9 @@ const MISSING = {
   legal_kind: 'si es la tasa de usura, el IBC o el salario mínimo',
   legal_value: 'el valor',
   legal_month: 'el mes',
+  charge: 'el seguro o cargo',
+  charge_action: 'si quieres cambiar su valor o quitarlo',
+  charge_value: 'el nuevo valor',
 };
 
 const hasStatus = (error, status) => Boolean(error) && (error.status === status || error.code === status);
@@ -217,6 +220,27 @@ async function startRateChange(deps, ctx, request, debts) {
   return withDebt(deps, ctx, request, debts, { action: 'rate_change', draft, question: '¿A cuál deuda le cambio la tasa?' }, (id, debt) => continueRate(deps, ctx, id, debt, draft));
 }
 
+// A charge change (NI2, NI6): Nia edits the value of a charge the debt already has, or removes it; adding one is web-only. The pending
+// stores the charge id, the operation and the value; the whole charge set is rebuilt from the live debt at Confirm.
+async function continueCharge(deps, ctx, id, debt, draft) {
+  const preview = previewChargeChange({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
+  if (!preview.ok) return inform(deps, ctx, preview.issue);
+  if (preview.needsCharge) {
+    const pending = buildPending({ id, action: 'charge_change', awaiting: 'charge', debtId: debt.$id, candidates: preview.candidates.map((charge) => charge.id), draft });
+    return say(deps, ctx, { text: preview.text, keyboard: chargeKeyboard(preview.candidates), status: STATUS.charge, pending });
+  }
+  const pending = buildPending({ id, action: 'charge_change', awaiting: 'confirm', debtId: debt.$id, draft: preview.draft });
+  return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+async function startChargeChange(deps, ctx, request, debts) {
+  const { effectiveOn, chargeRef, op, newValue } = request.planChange;
+  if (op === 'add') return inform(deps, ctx, ADD_IN_WEB);
+  if (request.missingFields.length) return inform(deps, ctx, `Para cambiar un seguro o cargo necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const draft = { effectiveOn, chargeRef, op, newValue };
+  return withDebt(deps, ctx, request, debts, { action: 'charge_change', draft, question: '¿A cuál deuda le cambio el seguro o cargo?' }, (id, debt) => continueCharge(deps, ctx, id, debt, draft));
+}
+
 async function startPay(deps, ctx, request, debts) {
   if (request.amountMinor === null) return inform(deps, ctx, '¿Cuánto pagaste? Escríbeme el monto en pesos.');
   const draft = { amountMinor: request.amountMinor, effectiveOn: request.paidOn, ...(request.strategy ? { strategy: request.strategy } : {}) };
@@ -312,6 +336,7 @@ export async function handleDebt(deps, ctx) {
   }
   if (request.action === 'legal_rate') return startLegalRate(deps, ctx, request);
   if (request.action === 'rate_change') return startRateChange(deps, ctx, request, debts);
+  if (request.action === 'charge_change') return startChargeChange(deps, ctx, request, debts);
   return startAnalysis(deps, ctx, request, debts);
 }
 
@@ -342,14 +367,16 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (!action) return undefined;
   const { pending } = ctx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode' }[action.type];
-  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change')) return notify(deps, ctx, STALE_BUTTON);
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge' }[action.type];
+  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change')) return notify(deps, ctx, STALE_BUTTON);
   if (action.type === 'convention') return CONVENTION_NEXT[pending.action] ? CONVENTION_NEXT[pending.action](deps, ctx, pending, action.value) : notify(deps, ctx, STALE_BUTTON);
+  if (action.type === 'charge' && !pending.candidates[action.value]) return notify(deps, ctx, 'Ese cargo no es una de las opciones. Elige uno de la lista o escríbeme de nuevo.');
   if (action.type === 'pick' && !pending.candidates.includes(action.value)) return notify(deps, ctx, 'Esa deuda no es una de las opciones. Elige una de la lista o escríbeme de nuevo.');
   const debts = await loadDebts(deps);
   const debt = debts.find((item) => item.$id === (action.type === 'pick' ? action.value : pending.debtId));
   if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
   if (pending.action === 'rate_change') return continueRate(deps, ctx, pending.id, debt, action.type === 'mode' ? { ...pending.draft, mode: action.value } : pending.draft);
+  if (pending.action === 'charge_change') return continueCharge(deps, ctx, pending.id, debt, action.type === 'charge' ? { ...pending.draft, chargeId: pending.candidates[action.value] } : pending.draft);
   if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
   // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
   const draft = action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : action.type === 'simpay' ? { ...pending.draft, effectiveOn: today(deps) } : pending.draft;
@@ -435,8 +462,25 @@ async function commitRateChange(deps, ctx, pending) {
   return { duplicate: false, text: describeRateChange(debt, draft, previewChange(debt, events, draft, { on: asOf })) };
 }
 
-const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.' };
+// The charge set is rebuilt from the charges in force now, so a change made on the web after the preview is kept. A repeated Confirm
+// finds its event by the dedupe key first: after a removal the charge is no longer there to rebuild from.
+async function commitChargeChange(deps, ctx, pending) {
+  const asOf = today(deps);
+  if (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))) return { duplicate: true };
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
+  const events = await loadEvents(deps, debt.$id);
+  const rebuilt = rebuildCharges(chargesInForce(project(debt, events, asOf), events, asOf), pending.draft);
+  if (rebuilt.gone) return { text: CHARGE_GONE_TEXT, failed: true };
+  const draft = { kind: 'charge_change', effectiveOn: pending.draft.effectiveOn, charges: rebuilt.charges };
+  const plan = planCommit(debt, events, draft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
+  const { duplicate } = await commitPlan(debtPort(deps), plan);
+  if (duplicate) return { duplicate };
+  return { duplicate: false, text: describeChargeChange(debt, rebuilt.target, pending.draft, previewChange(debt, events, draft, { on: asOf }), rebuilt.dependents) };
+}
+
+const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its
