@@ -9,7 +9,7 @@ import { parseTerms, validateTerms } from '../terms.js';
 import { BUCKETS, emptyBuckets } from './allocate.js';
 import { activeEvents, readEvents, sortEvents } from './events.js';
 import { balanceAt, decorate, newRow, payBalanceOnly, payRows, paySplit, rowDue, rowOutstanding } from './rows.js';
-import { applyAdjustment, applyChargeChange, applyExtra, applyRateChange, applyRestructure } from './tail.js';
+import { applyAdjustment, applyChargeChange, applyExtra, applyLatePolicy, applyRateChange, applyRestructure } from './tail.js';
 
 // project(debt, events, asOf) is a pure replay (AD1): terms plus the active
 // events in chronological order give the whole state. Nothing is cached.
@@ -53,6 +53,7 @@ const HANDLERS = {
   rate_change: applyRateChange,
   charge_change: applyChargeChange,
   restructure: applyRestructure,
+  late_policy: applyLatePolicy,
   adjustment: applyAdjustment,
 };
 

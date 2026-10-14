@@ -8,7 +8,7 @@ import { snapshot } from './snapshot.js';
 // candidate event, as `simulateExtra` does for prepayments. Nothing is written
 // and no input is touched.
 
-const PREVIEW_KINDS = ['rate_change', 'charge_change', 'restructure'];
+const PREVIEW_KINDS = ['rate_change', 'charge_change', 'restructure', 'late_policy'];
 // The candidate is the newest event of its day, like the one planCommit will write.
 const CANDIDATE = Object.freeze({ id: 'preview:change', createdAt: '9999-12-31T23:59:59.999Z' });
 
@@ -33,7 +33,7 @@ function impactedBy(baseline, changed) {
  * projection once the event is saved. Pure and read-only.
  * @param {object} debt A `debts` row (see `project`).
  * @param {object[]} events The debt's `debt_events` rows.
- * @param {{ kind: 'rate_change' | 'charge_change' | 'restructure', effectiveOn: string }} draft The same shape
+ * @param {{ kind: 'rate_change' | 'charge_change' | 'restructure' | 'late_policy', effectiveOn: string }} draft The same shape
  *   `planCommit` takes: `{ kind, effectiveOn, ...payload }`.
  * @param {{ on: string }} options `on` is the reference date (usually today), `YYYY-MM-DD`.
  * @returns {{ before: object, after: object, backdated: boolean, payloadChars: number, notices: object[],

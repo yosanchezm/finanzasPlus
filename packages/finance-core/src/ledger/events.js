@@ -1,5 +1,6 @@
 import { compareIso, isIsoDate } from '../calendar.js';
 import { ValidationError } from '../errors.js';
+import { normalizeLate } from '../late/policy.js';
 import { assertMinor } from '../money.js';
 import { normalizeRate } from '../rates.js';
 import { normalizeCharges, validateTerms } from '../terms.js';
@@ -13,6 +14,7 @@ export const EVENT_KINDS = Object.freeze([
   'rate_change',
   'charge_change',
   'restructure',
+  'late_policy',
   'adjustment',
   'charge',
   'void',
@@ -95,7 +97,14 @@ function normalizePayload(kind, payload, amountMinor) {
       return { charges: normalizeCharges(payload.charges) };
     }
     case 'restructure': {
-      return { terms: validateTerms(payload.terms) };
+      const result = { terms: validateTerms(payload.terms) };
+      if (payload.waiveLate !== undefined && typeof payload.waiveLate !== 'boolean') throw invalid('restructure waiveLate must be true or false');
+      if (payload.waiveLate === true) result.waiveLate = true; // written only when set, so older payloads stay identical
+      return result;
+    }
+    case 'late_policy': {
+      if (payload.late === undefined) throw invalid('late_policy needs a late policy');
+      return { late: normalizeLate(payload.late) };
     }
     case 'adjustment': {
       return adjustment(payload);

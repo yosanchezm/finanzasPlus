@@ -108,21 +108,60 @@ export function applyChargeChange(state, event) {
 }
 
 /**
+ * late_policy: the mora policy in force from the effective date. Mora up to that date was accrued
+ * before the event with the previous policy, and the day after it is the first day of the new one.
+ */
+export function applyLatePolicy(state, event) {
+  state.work = { ...state.work, late: event.payload.late };
+  return {};
+}
+
+/**
+ * What a restructure on `date` would refinance, read from the rows as they stand (mora already accrued
+ * up to `date`): the balance (unpaid principal of every row) plus the unpaid interest, charges, taxes and
+ * mora of the rows due on or before `date`. `waivableLateMinor` is the unpaid mora alone (never negative per row).
+ * Pure: it only reads the state.
+ * @param {{ rows: object[], noneBalance: number }} state
+ * @param {string} date ISO date.
+ * @returns {{ balanceMinor: number, arrears: { interest: number, charges: number, taxes: number, lateInterest: number }, carriedMinor: number, waivableLateMinor: number }}
+ */
+export function carryOf(state, date) {
+  const balanceMinor = balanceAt(state.rows, state.noneBalance, date);
+  const arrears = { interest: 0, charges: 0, taxes: 0, lateInterest: 0 };
+  let waivableLateMinor = 0;
+  for (const row of state.rows) {
+    if (compareIso(row.dueOn, date) > 0 || rowOutstanding(row) === 0) continue;
+    const due = rowDue(row); // the unpaid principal is in the balance already
+    arrears.interest += due.interest;
+    arrears.charges += due.charges;
+    arrears.taxes += due.taxes;
+    arrears.lateInterest += due.lateInterest;
+    waivableLateMinor += Math.max(due.lateInterest, 0);
+  }
+  const carriedMinor = balanceMinor + arrears.interest + arrears.charges + arrears.taxes + arrears.lateInterest;
+  return { balanceMinor, arrears, carriedMinor, waivableLateMinor };
+}
+
+/**
  * restructure: new terms from the effective date. Installments due on or before
  * it stay as history (what they still owed is refinanced), later ones are
  * replaced by a schedule on the new terms over the balance carried forward
- * (principal plus the unpaid interest and charges of the refinanced rows).
+ * (principal plus the unpaid interest, charges, taxes and mora of the refinanced rows).
+ * With `waiveLate` the unpaid mora is forgiven instead: it is left out of the carried balance and
+ * reported as `waivedLateMinor`, with no cost. The new terms inherit the mora policy in force unless they set one.
  */
 export function applyRestructure(state, event) {
   const date = event.effectiveOn;
-  const terms = event.payload.terms;
-  let carried = balanceAt(state.rows, state.noneBalance, date);
+  const { terms: next, waiveLate = false } = event.payload;
+  const terms = next.late === undefined && state.work.late !== undefined ? { ...next, late: state.work.late } : next;
+  const carry = carryOf(state, date);
+  const waived = waiveLate ? carry.waivableLateMinor : 0;
+  const carried = carry.carriedMinor - waived;
   const kept = state.rows.filter((row) => compareIso(row.dueOn, date) <= 0);
   for (const row of kept) {
     const outstanding = rowOutstanding(row);
     if (outstanding === 0) continue;
-    carried += outstanding - rowDue(row).principal; // the unpaid principal is in the balance already
-    row.refinancedMinor = outstanding;
+    row.refinancedMinor = outstanding - (waiveLate ? Math.max(rowDue(row).lateInterest, 0) : 0);
     row.settled = true;
   }
   state.rows = kept;
@@ -135,7 +174,7 @@ export function applyRestructure(state, event) {
     const tail = buildSchedule(terms, { balanceMinor: carried });
     state.rows = kept.concat(tail.map((row) => newRow({ ...row, period: row.period + kept.length })));
   }
-  return { carriedMinor: carried };
+  return waiveLate ? { carriedMinor: carried, waivedLateMinor: waived } : { carriedMinor: carried };
 }
 
 /**

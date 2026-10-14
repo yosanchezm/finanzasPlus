@@ -33,7 +33,7 @@ const stored = (kind, effectiveOn, amountMinor, payload, id) => ({
   $createdAt: '2026-01-01T00:00:00.000Z',
 });
 const pay = (effectiveOn, amountMinor, id) => stored('payment', effectiveOn, amountMinor, {}, id);
-const lateAt = (effectiveOn, id = 'lp1') => stored('late_policy', effectiveOn, 0, { late: { mode: 'usury' } }, id);
+const futureAt = (effectiveOn, id = 'lp1') => stored('mora_schedule', effectiveOn, 0, { late: { mode: 'usury' } }, id);
 const code = (fn) => {
   try {
     fn();
@@ -50,8 +50,8 @@ describe('project with an unknown event kind', () => {
 
   it('returns the projection of the known events and adds one unknown_event_kind notice with id and kind', () => {
     const baseline = project(debt(), known, '2026-04-20');
-    const projection = project(debt(), [known[0], lateAt('2026-03-01'), known[1]], '2026-04-20');
-    expect(projection.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'lp1', kind: 'late_policy' }]);
+    const projection = project(debt(), [known[0], futureAt('2026-03-01'), known[1]], '2026-04-20');
+    expect(projection.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'lp1', kind: 'mora_schedule' }]);
     expect(withoutNotices(projection)).toEqual(withoutNotices(baseline));
     expect(projection.applied.map((entry) => entry.eventId)).toEqual(['p1', 'p2']);
     expect(projection.pastDueMinor).toBeGreaterThan(0);
@@ -59,33 +59,33 @@ describe('project with an unknown event kind', () => {
 
   it('adds one notice per skipped event and keeps the other notices', () => {
     const overpay = pay('2026-02-15', 20_000_000, 'big');
-    const projection = project(debt(), [overpay, lateAt('2026-03-01', 'a'), stored('mystery', '2026-03-02', 0, {}, 'b')], '2026-04-20');
+    const projection = project(debt(), [overpay, futureAt('2026-03-01', 'a'), stored('mystery', '2026-03-02', 0, {}, 'b')], '2026-04-20');
     expect(projection.notices.map((notice) => notice.code)).toEqual(['surplus', 'unknown_event_kind', 'unknown_event_kind']);
     expect(projection.notices.filter((notice) => notice.code === 'unknown_event_kind').map((notice) => [notice.eventId, notice.kind])).toEqual([
-      ['a', 'late_policy'],
+      ['a', 'mora_schedule'],
       ['b', 'mystery'],
     ]);
   });
 
   it('flags an unknown event dated after asOf too, because it will matter once its date arrives', () => {
     const projection = project(debt(), known, '2026-03-20');
-    const withFuture = project(debt(), [...known, lateAt('2026-12-01')], '2026-03-20');
+    const withFuture = project(debt(), [...known, futureAt('2026-12-01')], '2026-03-20');
     expect(projection.notices).toEqual([]);
-    expect(withFuture.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'lp1', kind: 'late_policy' }]);
+    expect(withFuture.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'lp1', kind: 'mora_schedule' }]);
     expect(withoutNotices(withFuture)).toEqual(withoutNotices(projection));
   });
 
   it('ignores a void whose target is an unknown event, without error', () => {
     const baseline = project(debt(), known, '2026-04-20');
     const voidUnknown = stored('void', '2026-03-05', 0, { targetEventId: 'lp1', reason: 'oops' }, 'v1');
-    const projection = project(debt(), [...known, lateAt('2026-03-01'), voidUnknown], '2026-04-20');
+    const projection = project(debt(), [...known, futureAt('2026-03-01'), voidUnknown], '2026-04-20');
     expect(withoutNotices(projection)).toEqual(withoutNotices(baseline));
     expect(projection.applied.map((entry) => entry.eventId)).toEqual(['p1', 'p2']);
   });
 
   it('still applies a void that targets a known event next to an unknown one', () => {
     const voidKnown = stored('void', '2026-03-17', 0, { targetEventId: 'p2' }, 'v2');
-    const projection = project(debt(), [...known, lateAt('2026-03-01'), voidKnown], '2026-04-20');
+    const projection = project(debt(), [...known, futureAt('2026-03-01'), voidKnown], '2026-04-20');
     expect(projection.applied.map((entry) => entry.eventId)).toEqual(['p1']);
     expect(projection.notices).toHaveLength(1);
   });
@@ -93,8 +93,8 @@ describe('project with an unknown event kind', () => {
   it('also covers the card projector', () => {
     const cardEvents = [stored('payment', '2026-03-10', 50_000, {}, 'c1')];
     const baseline = project(debt(cardTerms), cardEvents, '2026-04-20');
-    const projection = project(debt(cardTerms), [...cardEvents, lateAt('2026-03-12')], '2026-04-20');
-    expect(projection.notices).toEqual([...baseline.notices, { code: 'unknown_event_kind', eventId: 'lp1', kind: 'late_policy' }]);
+    const projection = project(debt(cardTerms), [...cardEvents, futureAt('2026-03-12')], '2026-04-20');
+    expect(projection.notices).toEqual([...baseline.notices, { code: 'unknown_event_kind', eventId: 'lp1', kind: 'mora_schedule' }]);
     expect(withoutNotices(projection)).toEqual(withoutNotices(baseline));
   });
 
@@ -107,7 +107,7 @@ describe('project with an unknown event kind', () => {
 });
 
 describe('sortEvents and activeEvents with an unknown event kind', () => {
-  const events = [pay('2026-03-16', 100_000, 'p2'), lateAt('2026-03-01'), pay('2026-02-15', 390_381, 'p1')];
+  const events = [pay('2026-03-16', 100_000, 'p2'), futureAt('2026-03-01'), pay('2026-02-15', 390_381, 'p1')];
 
   it('sortEvents drops the unknown event and orders the known ones', () => {
     expect(sortEvents(events).map((entry) => entry.id)).toEqual(['p1', 'p2']);
@@ -126,12 +126,12 @@ describe('sortEvents and activeEvents with an unknown event kind', () => {
 
 describe('writes stay strict', () => {
   it('validateEvent rejects an unknown kind (a lenient validator must fail this)', () => {
-    expect(code(() => validateEvent(lateAt('2026-03-01')))).toBe('invalid_event');
+    expect(code(() => validateEvent(futureAt('2026-03-01')))).toBe('invalid_event');
     expect(code(() => validateEvent(stored('mystery', '2026-03-01', 0, {}, 'm1')))).toBe('invalid_event');
   });
 
   it('planCommit refuses a draft of an unknown kind and writes nothing', () => {
-    const draft = { kind: 'late_policy', effectiveOn: '2026-03-01', amountMinor: 0, payload: { late: { mode: 'usury' } } };
+    const draft = { kind: 'mora_schedule', effectiveOn: '2026-03-01', amountMinor: 0, payload: { late: { mode: 'usury' } } };
     const ctx = { eventId: 'ev1', dedupeKey: 'web:n1', actorId: 'u1', source: 'web' };
     expect(code(() => planCommit(debt(), [], draft, ctx))).toBe('invalid_event');
   });
@@ -139,6 +139,6 @@ describe('writes stay strict', () => {
   it('planCommit cannot void an unknown event: it is not an active event for this bundle', () => {
     const draft = { kind: 'void', effectiveOn: '2026-03-05', amountMinor: 0, payload: { targetEventId: 'lp1' } };
     const ctx = { eventId: 'ev2', dedupeKey: 'web:n2', actorId: 'u1', source: 'web' };
-    expect(() => planCommit(debt(), [lateAt('2026-03-01')], draft, ctx)).toThrow(ValidationError);
+    expect(() => planCommit(debt(), [futureAt('2026-03-01')], draft, ctx)).toThrow(ValidationError);
   });
 });
