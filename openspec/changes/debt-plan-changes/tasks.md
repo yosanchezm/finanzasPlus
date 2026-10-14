@@ -101,11 +101,11 @@ Groups: B1a core (about 420), B1b web (about 400).
 ### B2 rate change dialog (design 750) · deps: B1
 Groups: B2a menu + model + afterSave (about 380), B2b dialog + wiring (about 370).
 
-- [ ] B2a.1 RED `MoreActionsMenu.test.jsx`: item list driven by kind (card omits "Reestructurar"), `aria-haspopup`, Escape and outside click close. RED `rateChangeModel.test.js`: 2% monthly nominal echoes about 26.8% EA; `keep_installment` only French; `installment_too_low` pre-selects `keep_term` with the specified message; past date lists impacted. RED `useCommitDialog`/`useDebtData`: `afterSave` runs reconcile on fresh `listDebtEvents`, toast counts rows; void of a plan change also reconciles. Reqs WM1 (partial), WM3, WM6, DL5.
-- [ ] B2a.2 GREEN `MoreActionsMenu.jsx`, `rateChangeModel.js`, `useCommitDialog.js`, `useDebtData.js`.
-- [ ] B2b.1 RED `RateChangeDialog.test.jsx`: preview before save; usury notice from resolved table; installment_too_low; backdated warning; double submit writes one `rate_change`; reconcile toast "2 filas". Reqs WM3, WM6, DL2, DL5, IR1.
-- [ ] B2b.2 GREEN `RateChangeDialog.jsx`, `DebtDetail.jsx`, `DebtDetailContainer.jsx`.
-- [ ] B2.CP checkpoint.
+- [x] B2a.1 RED `MoreActionsMenu.test.jsx`: item list driven by kind (card omits "Reestructurar"), `aria-haspopup`, Escape and outside click close. RED `rateChangeModel.test.js`: 2% monthly nominal echoes about 26.8% EA; `keep_installment` only French; `installment_too_low` pre-selects `keep_term` with the specified message; past date lists impacted. RED `useCommitDialog`/`useDebtData`: `afterSave` runs reconcile on fresh `listDebtEvents`, toast counts rows; void of a plan change also reconciles. Reqs WM1 (partial), WM3, WM6, DL5.
+- [x] B2a.2 GREEN `MoreActionsMenu.jsx`, `rateChangeModel.js`, `useCommitDialog.js`, `useDebtData.js`.
+- [x] B2b.1 RED `RateChangeDialog.test.jsx`: preview before save; usury notice from resolved table; installment_too_low; backdated warning; double submit writes one `rate_change`; reconcile toast "2 filas". Reqs WM3, WM6, DL2, DL5, IR1.
+- [x] B2b.2 GREEN `RateChangeDialog.jsx`, `DebtDetail.jsx`, `DebtDetailContainer.jsx`.
+- [x] B2.CP checkpoint.
 
 ### B3 charge change dialog (design 700) · deps: B2
 Groups: B3a editor + model (about 380), B3b dialog + wiring (about 320).

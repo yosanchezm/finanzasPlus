@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -226,3 +226,63 @@ None for B1 (no schema, no deploy order).
 ### Remaining
 
 B2 onward (not started).
+
+
+## Batch B2 (Más acciones menu, RateChangeDialog, post-save reconcile): COMPLETE
+
+Branch `feat/dpc-b2-rate-change` (from master d4e7c39). No live Appwrite call was made (web tests mock `src/appwrite`). No dev server was started, so the layout was not checked in a browser.
+
+### Tasks
+
+- [x] B2a.1 RED `MoreActionsMenu.test.jsx`, `rateChangeModel.test.js`, `useCommitDialog.test.jsx` (new), `useDebtData.test.jsx`, `debtDetailModel.test.js`, `DebtDetailContainer.test.jsx` (void reconcile)
+- [x] B2a.2 GREEN `MoreActionsMenu.jsx`, `rateChangeModel.js`, `useCommitDialog.js` (`afterSave`), `useDebtData.js` (`reconcileCosts(debtId, { fresh })`), `debtDetailModel.js` (`PLAN_CHANGE_KINDS`, `withReconcileNote`), `DebtDetailContainer.jsx` (void of a plan change reconciles), `wizardModel.js` (exports `toRate`, `usuryModality`)
+- [x] B2b.1 RED `RateChangeDialog.test.jsx`, container rate change flow in `DebtDetailContainer.test.jsx`, menu wiring in `DebtDetail.test.jsx` and `DebtDetail.card.test.jsx`
+- [x] B2b.2 GREEN `RateChangeDialog.jsx`, `DebtDetail.jsx`, `DebtDetailContainer.jsx`
+- [x] B2.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 7a0d581 `feat(debts): add the Más acciones menu, the rate change model and a post-save cost reconcile` | B2a | 13 files, 660 insertions, 12 deletions |
+| 7042611 `feat(debts): change the rate from Más acciones with a live before/after preview` | B2b | 7 files, 454 insertions, 5 deletions |
+
+Total vs master before this progress/tasks commit: 18 files, 1,114 insertions, 17 deletions = 1,131 changed lines (budget 2,000; each group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| B2a.1 / B2a.2 reconcile plumbing | Safety net `npx vitest run src/features/debts`: 25 files, 238 tests passed. New tests failed: `useCommitDialog.test.jsx` 5, `useDebtData.test.jsx` 3 (fresh read), `debtDetailModel.test.js` 4 (`withReconcileNote`, `PLAN_CHANGE_KINDS`), `DebtDetailContainer.test.jsx` 2 (void reconcile and its failure) | 4 files, 75 tests. One extra case surfaced in GREEN (a flow with `afterSave` that resolves nothing, such as a payment void, crashed the note builder): fixed in `withReconcileNote` and pinned with a unit test | Mutation: dropping `afterSave` from the already-saved branch failed 1 test; restored |
+| B2a.1 / B2a.2 model | `rateChangeModel.test.js` and `MoreActionsMenu.test.jsx` failed at import (modules did not exist) | 16 model tests and 8 menu tests. First run had 1 failure that was test data (a card rate change effective today moves no minimum payment): the scenario now backdates it | Mutations: no mode clamp failed the German case, a card keeping "Reestructurar" failed the card menu case; restored |
+| B2b.1 / B2b.2 dialog | `RateChangeDialog.test.jsx` failed at import; detail, card detail and container tests failed (no "Más acciones" button) | Dialog 12 tests, container flow 6 tests, detail 2 tests. Three first-run failures were wrong expectations, not code: the EA echo text is `26.82% EA`, the next installment excludes the fee (380,381 not 390,381), and the card case needed its payment | Mutations: hiding the too-low message failed 1 test, hiding the backdated block failed 3, dropping `afterSave` from the rate change failed 2; restored. Full `src/features/debts`: 29 files, 298 tests passed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run src/features/debts` exit 0: 29 files, 298 tests passed (baseline before B2: 25 files, 238). Full `npm test -- --maxWorkers=4`: 101 files, 1,300 tests passed on the first run (baseline before B2: 97 files, 1,240 tests) |
+| Runtime harness command/scenario and exact result | `npm run build` exit 0 (`DebtsContainer-*.js` emitted). `npm run package:nia` not required for B2 (no core or Nia change) |
+| Rollback boundary | Revert the two commits: `MoreActionsMenu.jsx`, `rateChangeModel.js`, `RateChangeDialog.jsx` with their tests, `afterSave` in `useCommitDialog.js`, the `fresh` option of `reconcileCosts`, `PLAN_CHANGE_KINDS` and `withReconcileNote`, the menu and rate change wiring in `DebtDetail.jsx` and `DebtDetailContainer.jsx`, and the two wizard exports. No stored data depends on them |
+
+### Decisions and deviations from design
+
+- Void reconcile is wired in B2a (not B2b): the B2a RED asks that a void of a plan change reconciles, and that needs the container. Only `rate_change`, `charge_change`, `restructure` and `late_policy` voids reconcile; a payment void does not (its cost row is already deleted by the void).
+- `afterSave({ input, context })` runs after `reload()` and before `onRefresh()` so the shell refresh sees the repaired cost rows. It never undoes a save: a rejection reaches `successMessage(input, after)` as `{ error }` and the toast says the costs were not refreshed. `after` is `{ value }`, `{ error }` or `undefined`.
+- `reconcileCosts(debtId, { fresh: true })` reads `listDebtEvents(debtId)` again (AD16). The default still reads the hook state, so the open-time repair costs no extra read.
+- Toast wording: `Cambio de tasa registrado. Se actualizaron 2 filas de Costos financieros.` (singular `1 fila`); nothing is added when no row changed.
+- "2% monthly" in the spec is the effective monthly convention `M.V.` (2% a month is 26.82% EA); `N.M.V.` 2% would be 2.02% EA. The tests use `M.V.`. The echo text is the wizard's `describeRate` (`2% MV ≈ 26.82% EA`), reused as is.
+- The effective date drives the usury notice (the cap in force that month), not today. The default date is today.
+- A card gets no mode choice and no "mantiene plazo" text; its preview compares the next minimum payment and interest still to pay and leaves out remaining installments. The draft it sends carries `mode: 'keep_term'`, which the card handler ignores.
+- `installment_too_low` is not an error the user sees under `keep_installment`: the dialog keeps the choice in its form, falls back to `keep_term` in the preview and the draft, and shows the specified message. Under `keep_term` the same error shows a different message (`CANNOT_AMORTIZE`) because the specified one tells the user we already chose `keep_term`.
+- A rate change that moves no figure shows "Este cambio no modifica ninguna cuota." and does not block saving.
+- `MoreActionsMenu` shows an item only when its handler is wired, so B2 shows "Cambiar tasa" alone; B3, D1 and D2 add the others. Picking an item focuses the trigger before the dialog opens so the dialog returns focus to a control that exists.
+- Extra exports beyond the design: `toRate` and `usuryModality` from `wizardModel.js`.
+
+### Owner gate
+
+None for B2 (no schema, no deploy order).
+
+### Remaining
+
+B3 onward (not started).
