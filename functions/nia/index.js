@@ -464,7 +464,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     `La moneda predeterminada del hogar es ${config.currency}.`,
     `En este chat el usuario está configurado como ${profile.alias}, con alcance predeterminado ${profile.ownerScope}.`,
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
-    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar o registrar una tasa legal: la usura, el IBC o el salario mínimo); conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar, registrar una tasa legal: la usura, el IBC o el salario mínimo, o cambiar la tasa de una deuda que ya existe); conversation para preguntas generales, capacidades, identidad o educación financiera.',
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
@@ -1157,7 +1157,7 @@ async function handleUpdate(update) {
     const actorId = String(callback.from.id);
     if (callback.data === 'nia:confirm') await confirmPending(chatId, actorId, profile, update.update_id);
     else if (callback.data === 'nia:cancel') await cancelPending(chatId, actorId);
-    else if (/^nia:(pick:|strat:|conv:|simpay$)/.test(callback.data || '')) {
+    else if (/^nia:(pick:|strat:|conv:|mode:|simpay$)/.test(callback.data || '')) {
       const session = await getSession(chatId);
       await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
     } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');

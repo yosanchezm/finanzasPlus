@@ -7,6 +7,7 @@ import {
   debtRowId,
   dedupeKeyOf,
   eventIdOf,
+  modeKeyboard,
   parseCallback,
   pickKeyboard,
   simulateKeyboard,
@@ -133,5 +134,35 @@ describe('parseCallback', () => {
     expect(parseCallback('nia:pick:')).toBeNull();
     expect(parseCallback('nia:confirm')).toBeNull();
     expect(parseCallback(undefined)).toBeNull();
+  });
+});
+
+describe('plan change callbacks (E2)', () => {
+  it('offers keep_term and keep_installment, each callback at most 25 bytes', () => {
+    const data = allButtons(modeKeyboard()).map((button) => button.callback_data);
+
+    expect(data).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+    for (const item of data) expect(bytes(item)).toBeLessThanOrEqual(25);
+  });
+
+  it('offers keep_installment only when the debt allows it (French loans)', () => {
+    expect(allButtons(modeKeyboard(['keep_term'])).map((button) => button.callback_data)).toEqual(['nia:mode:keep_term']);
+    expect(allButtons(modeKeyboard([]))).toEqual([]);
+  });
+
+  it('reads the two mode callbacks and refuses any other mode', () => {
+    expect(parseCallback('nia:mode:keep_term')).toEqual({ type: 'mode', value: 'keep_term' });
+    expect(parseCallback('nia:mode:keep_installment')).toEqual({ type: 'mode', value: 'keep_installment' });
+    expect(parseCallback('nia:mode:shorten')).toBeNull();
+    expect(parseCallback('nia:mode:')).toBeNull();
+  });
+
+  it('keeps a rate change pending, with the picker candidates or the full draft, under 1.5 KB', () => {
+    const rate = { value: 2.125, basis: 'nominal', periodicity: 'monthly', timing: 'advance' };
+    const candidates = Array.from({ length: 6 }, (_, index) => `db${String(index).padStart(34, 'x')}`);
+    const picking = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'rate_change', awaiting: 'pick', candidates, draft: { effectiveOn: '2026-10-13', rate, mode: 'keep_installment' } });
+    const confirm = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'rate_change', awaiting: 'confirm', debtId: candidates[0], draft: { effectiveOn: '2026-10-13', rate, mode: 'keep_installment' } });
+
+    for (const pending of [picking, confirm]) expect(bytes(JSON.stringify(pending))).toBeLessThanOrEqual(PENDING_MAX_BYTES);
   });
 });

@@ -13,6 +13,7 @@ const KEEP_INSTALLMENT = 'keep_installment';
 export const BACKDATED_NOTE = 'Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.';
 export const TOO_LOW_NOTE = 'Con la nueva tasa, la cuota actual ya no cubre los intereses o el plan pasaría de 2000 cuotas. Te muestro «mantener el plazo», que recalcula la cuota.';
 export const KEEP_TERM_ONLY_NOTE = 'Este sistema mantiene el plazo, así que recalculé la cuota.';
+export const TOO_LOW_CONFIRM = 'Con la tasa nueva la cuota actual ya no cubre los intereses o el plan pasaría de 2000 cuotas, así que no registré nada. Pídeme el cambio de nuevo y elige «mantener el plazo».';
 const CANNOT_AMORTIZE = 'Con esa tasa el plan no se puede calcular: los intereses superan la cuota o el plan pasaría de 2000 cuotas. Prueba con otra tasa.';
 const CANNOT_PREVIEW = 'No pude calcular el cambio con esos datos. Revisa la tasa y la fecha.';
 const MODE_LINES = {
@@ -74,8 +75,9 @@ function rateLines(projection, before, after, mode) {
  * falls back to `keep_term` with an explanation (`tooLow`). Read-only.
  * @param {{ debt: object, events: object[], today: string, draft: { effectiveOn: string, rate: object, mode?: (string | null) } }} input
  *   `debt` is a `debts` row decorated with `legal`; `events` its event rows.
- * @returns {{ ok: true, mode: string, tooLow: boolean, draft: { effectiveOn: string, rate: object, mode: string }, text: string }
- *   | { ok: false, issue: string }}
+ * @returns {{ ok: true, needsMode: true, modes: string[], text: string }
+ *   | { ok: true, needsMode?: false, mode: string, tooLow: boolean, draft: { effectiveOn: string, rate: object, mode: string }, text: string }
+ *   | { ok: false, issue: string }} `needsMode`: a French loan with no mode yet; the caller asks with `modeKeyboard(modes)`.
  */
 export function previewRateChange({ debt, events, today, draft }) {
   let projection;
@@ -86,6 +88,10 @@ export function previewRateChange({ debt, events, today, draft }) {
     return { ok: false, issue: describeCoreError(error) };
   }
   const offered = modesFor(projection);
+  if (offered.length > 1 && !draft.mode) {
+    const text = `Vas a cambiar la tasa de ${debt.name} a ${rateLabel(draft.rate)} desde ${draft.effectiveOn}. ¿Quieres mantener el plazo (la cuota se recalcula) o mantener la cuota (el plazo se recalcula)?`;
+    return { ok: true, needsMode: true, modes: offered, text };
+  }
   const requested = offered.includes(draft.mode) ? draft.mode : KEEP_TERM;
   const draftFor = (mode) => ({ kind: 'rate_change', effectiveOn: draft.effectiveOn, rate: draft.rate, mode });
   let mode = requested;
@@ -107,4 +113,19 @@ export function previewRateChange({ debt, events, today, draft }) {
   if (impacted.length > 0) lines.push(`ℹ️ ${BACKDATED_NOTE}`);
   lines.push('', '¿Quieres registrar el cambio así? Aún no se guarda.');
   return { ok: true, mode, tooLow, draft: { effectiveOn: draft.effectiveOn, rate: draft.rate, mode }, text: lines.join('\n') };
+}
+
+/**
+ * The reply after a rate change was written, with the figures of the debt as it is now.
+ * @param {object} debt The live `debts` row.
+ * @param {{ effectiveOn: string, rate: object }} draft What was written.
+ * @param {ReturnType<typeof previewChange>} figures The core replay of the written change over the live events.
+ */
+export function describeRateChange(debt, draft, figures) {
+  const { before, after } = figures;
+  const lines = [`✅ Listo: registré el cambio de tasa de ${debt.name} a ${rateLabel(draft.rate)} desde ${draft.effectiveOn}.`];
+  if (debt.kind === 'card') lines.push(`Próximo pago mínimo: ${money(before.nextTotalMinor, after.nextTotalMinor)}`);
+  else lines.push(`Cuota: ${money(before.installmentMinor, after.installmentMinor)} · Cuotas restantes: ${after.remainingPeriods}`);
+  if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
+  return lines.join('\n');
 }

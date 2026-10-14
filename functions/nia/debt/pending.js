@@ -1,4 +1,5 @@
 import { STRATEGIES } from './extract.js';
+import { MODES } from './planChange.js';
 
 // The pending payload that rides in `bot_sessions.pendingJson` and the inline
 // keyboards of the debt flow (NDA-4). Pure and Node 16 safe.
@@ -11,6 +12,7 @@ export const PENDING_ID_MAX = 24;
 
 export const CONVENTION_BUTTONS = ['EA', 'NAMV', 'MV', 'NATV', 'NATA'];
 const CONVENTION_LABELS = { EA: 'E.A.', NAMV: 'N.A.M.V.', MV: 'M.V.', NATV: 'N.A.T.V.', NATA: 'N.A.T.A.' };
+const MODE_LABELS = { keep_term: 'Mantener el plazo', keep_installment: 'Mantener la cuota' };
 const STRATEGY_LABELS = { reduce_term: 'Reducir plazo', reduce_installment: 'Reducir cuota', advance_installments: 'Adelantar cuotas' };
 
 function fail(code, message) {
@@ -19,7 +21,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay',
+ * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -66,13 +68,22 @@ export function conventionKeyboard() {
   return [buttons.slice(0, 3), buttons.slice(3)];
 }
 
-/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay', value: (string|null) } | null} */
+/**
+ * The mode buttons of a rate change: keep the term (the installment is recalculated) or keep the installment (the term is).
+ * @param {string[]} [modes] The modes the debt offers (`modesFor`); `keep_installment` only exists for French loans.
+ */
+export function modeKeyboard(modes = MODES) {
+  return modes.filter((mode) => MODES.includes(mode)).map((mode) => [button(MODE_LABELS[mode], `nia:mode:${mode}`)]);
+}
+
+/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode', value: (string|null) } | null} */
 export function parseCallback(data) {
   if (data === 'nia:simpay') return { type: 'simpay', value: null };
-  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv):(.+)$/) : null;
+  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode):(.+)$/) : null;
   if (!match) return null;
   const [, kind, value] = match;
   if (kind === 'pick') return { type: 'pick', value };
   if (kind === 'strat') return STRATEGIES.includes(value) ? { type: 'strategy', value } : null;
+  if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
   return CONVENTION_BUTTONS.includes(value) ? { type: 'convention', value } : null;
 }

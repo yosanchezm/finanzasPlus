@@ -1,12 +1,13 @@
-import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, planCommit, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, normalizeRate, planCommit, previewChange, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
-import { describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
+import { buildPending, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
+import { TOO_LOW_CONFIRM, describeRateChange, previewRateChange } from './planChange.js';
+import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
 // Debt flow of Nia (NDA-1, NDA-3, NDA-4). The model only extracts; every number comes
@@ -20,7 +21,7 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';
 
@@ -192,6 +193,30 @@ async function withDebt(deps, ctx, { debtRef }, debts, { action, draft, question
   return say(deps, ctx, { text: question, keyboard: pickKeyboard(options), status: STATUS.pick, pending });
 }
 
+// A rate change (NI2): the debt first, then the convention and the mode when they are missing, then the core preview.
+// The pending keeps only what the user chose (date, rate, mode); Confirm rebuilds everything from the live debt.
+async function continueRate(deps, ctx, id, debt, draft) {
+  if (!draft.rate) {
+    const pending = buildPending({ id, action: 'rate_change', awaiting: 'convention', debtId: debt.$id, draft });
+    return say(deps, ctx, { text: conventionQuestion(draft.rateValue), keyboard: conventionKeyboard(), status: STATUS.convention, pending });
+  }
+  const preview = previewRateChange({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
+  if (!preview.ok) return inform(deps, ctx, preview.issue);
+  if (preview.needsMode) {
+    const pending = buildPending({ id, action: 'rate_change', awaiting: 'mode', debtId: debt.$id, draft });
+    return say(deps, ctx, { text: preview.text, keyboard: modeKeyboard(preview.modes), status: STATUS.mode, pending });
+  }
+  const pending = buildPending({ id, action: 'rate_change', awaiting: 'confirm', debtId: debt.$id, draft: preview.draft });
+  return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+async function startRateChange(deps, ctx, request, debts) {
+  if (request.missingFields.length) return inform(deps, ctx, `Para cambiar la tasa necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const { effectiveOn, mode, rate, rateValue } = request.planChange;
+  const draft = { effectiveOn, ...(mode ? { mode } : {}), ...(rate ? { rate } : { rateValue }) };
+  return withDebt(deps, ctx, request, debts, { action: 'rate_change', draft, question: '¿A cuál deuda le cambio la tasa?' }, (id, debt) => continueRate(deps, ctx, id, debt, draft));
+}
+
 async function startPay(deps, ctx, request, debts) {
   if (request.amountMinor === null) return inform(deps, ctx, '¿Cuánto pagaste? Escríbeme el monto en pesos.');
   const draft = { amountMinor: request.amountMinor, effectiveOn: request.paidOn, ...(request.strategy ? { strategy: request.strategy } : {}) };
@@ -286,11 +311,28 @@ export async function handleDebt(deps, ctx) {
     return finishCreate(deps, ctx, deps.ids.pending(), request.create, legal);
   }
   if (request.action === 'legal_rate') return startLegalRate(deps, ctx, request);
+  if (request.action === 'rate_change') return startRateChange(deps, ctx, request, debts);
   return startAnalysis(deps, ctx, request, debts);
 }
 
+const STALE_BUTTON = 'Esa opción ya no aplica a la solicitud actual.';
+
+// Where a `nia:conv:` button leads, by the action of the pending request: create finishes the new debt, rate_change goes on to
+// the mode or the preview with the rate the user stated (the value is kept in the draft until the convention arrives).
+const CONVENTION_NEXT = {
+  create: (deps, ctx, pending, convention) => finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, convention)),
+  rate_change: async (deps, ctx, pending, convention) => {
+    const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+    if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
+    const { rateValue, ...draft } = pending.draft;
+    return continueRate(deps, ctx, pending.id, debt, { ...draft, rate: normalizeRate({ convention, value: rateValue }) });
+  },
+};
+
 /**
- * `nia:pick:`, `nia:strat:`, `nia:conv:` and `nia:simpay` buttons (`simpay` turns the last simulation into a payment preview).
+ * `nia:pick:`, `nia:strat:`, `nia:conv:`, `nia:mode:` and `nia:simpay` buttons (`simpay` turns the last simulation into a payment preview;
+ * `conv` goes to `CONVENTION_NEXT[pending.action]`; `mode` sets the mode of a pending rate change). A button that does not match the
+ * pending request (stale) is answered with a short message and writes nothing.
  * @param {object} deps
  * @param {{ chatId: string, actorId: string, profile: object, history: object[], pending: (object | null) }} ctx `pending` is the session's pending payload.
  * @param {string} data The callback data.
@@ -300,13 +342,14 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (!action) return undefined;
   const { pending } = ctx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay' }[action.type];
-  if (pending.awaiting !== stage) return notify(deps, ctx, 'Esa opción ya no aplica a la solicitud actual.');
-  if (action.type === 'convention') return finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, action.value));
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode' }[action.type];
+  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change')) return notify(deps, ctx, STALE_BUTTON);
+  if (action.type === 'convention') return CONVENTION_NEXT[pending.action] ? CONVENTION_NEXT[pending.action](deps, ctx, pending, action.value) : notify(deps, ctx, STALE_BUTTON);
   if (action.type === 'pick' && !pending.candidates.includes(action.value)) return notify(deps, ctx, 'Esa deuda no es una de las opciones. Elige una de la lista o escríbeme de nuevo.');
   const debts = await loadDebts(deps);
   const debt = debts.find((item) => item.$id === (action.type === 'pick' ? action.value : pending.debtId));
   if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
+  if (pending.action === 'rate_change') return continueRate(deps, ctx, pending.id, debt, action.type === 'mode' ? { ...pending.draft, mode: action.value } : pending.draft);
   if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
   // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
   const draft = action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : action.type === 'simpay' ? { ...pending.draft, effectiveOn: today(deps) } : pending.draft;
@@ -371,8 +414,29 @@ async function commitLegalRate(deps, ctx, pending) {
   return { duplicate: false, text: `✅ Listo: ${updated ? 'actualicé' : 'registré'} ${describeLegalRate(pending.draft)}.` };
 }
 
-const COMMIT = { create: commitCreate, legal_rate: commitLegalRate };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.' };
+// A rate change is rebuilt from the live debt and its events: what is written is the user's date, rate and mode, and the figures in
+// the reply are those of the debt as it is now (a payment recorded after the preview is part of them). The event is unique by
+// `debt:{pendingId}`, so a repeated Confirm finds it and answers that it was already recorded.
+async function commitRateChange(deps, ctx, pending) {
+  const asOf = today(deps);
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
+  const events = await loadEvents(deps, debt.$id);
+  const draft = { kind: 'rate_change', ...pending.draft };
+  let plan;
+  try {
+    plan = planCommit(debt, events, draft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
+  } catch (error) {
+    if (error instanceof ValidationError && error.code === 'installment_too_low') return { text: TOO_LOW_CONFIRM, failed: true };
+    throw error;
+  }
+  const { duplicate } = await commitPlan(debtPort(deps), plan);
+  if (duplicate) return { duplicate };
+  return { duplicate: false, text: describeRateChange(debt, draft, previewChange(debt, events, draft, { on: asOf })) };
+}
+
+const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its

@@ -863,3 +863,259 @@ describe('legal_rate (E1)', () => {
     expect(w.tables.legal_rates).toEqual([]);
   });
 });
+
+describe('rate_change (E2)', () => {
+  const rateAnswer = (extra = {}) => ({ action: 'rate_change', debtRef: 'vehiculo', rate: { value: 22, period: 'annual' }, planChange: { effectiveOn: null, mode: null }, ...extra });
+  const planOf = (planChange) => rateAnswer({ planChange: { effectiveOn: null, mode: null, ...planChange } });
+  const rateEvents = (w) => w.tables.debt_events.filter((event) => event.kind === 'rate_change');
+  const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+  const cardRow = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(cardTerms) });
+
+  // Starts a request for the French loan and answers the mode question: the way a user reaches the preview.
+  async function previewed(w, mode = 'keep_term') {
+    await handleDebt(w.deps, ctx({ text: 'bajó la tasa del carro a 22% EA' }));
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), `nia:mode:${mode}`);
+    return w.lastPending();
+  }
+
+  it('asks keep_term or keep_installment for a French loan, writing nothing', async () => {
+    const w = world({ answers: [rateAnswer()] });
+    await handleDebt(w.deps, ctx({ text: 'bajó la tasa del carro a 22% EA desde hoy' }));
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Crédito Vehículo');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+    expect(w.sessions[0].status).toBe('awaiting_clarification');
+    expect(w.lastPending()).toMatchObject({ kind: 'debt', id: 'p1', action: 'rate_change', awaiting: 'mode', debtId: 'd1', draft: { effectiveOn: '2026-10-13', rate: { value: 22, basis: 'effective', periodicity: 'annual', timing: 'arrears' } } });
+    expect(w.tables.debt_events).toHaveLength(1);
+  });
+
+  it('shows the preview after the mode button and waits for confirmation', async () => {
+    const w = world({ answers: [rateAnswer()] });
+    const pending = await previewed(w, 'keep_installment');
+
+    expect(w.sent[1].text).toContain('Cambio de tasa en Crédito Vehículo');
+    expect(w.sent[1].text).toContain('Nueva tasa: 22% EA');
+    expect(w.sent[1].text).toContain('Se mantiene la cuota');
+    expect(buttons(w.sent[1].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[1].status).toBe('awaiting_confirmation');
+    expect(pending).toMatchObject({ action: 'rate_change', awaiting: 'confirm', debtId: 'd1', draft: { effectiveOn: '2026-10-13', mode: 'keep_installment', rate: { value: 22 } } });
+    expect(Buffer.byteLength(JSON.stringify(pending), 'utf8')).toBeLessThanOrEqual(1500);
+    expect(rateEvents(w)).toHaveLength(0);
+  });
+
+  it('goes straight to the preview when the user already said the mode, or the system has no choice', async () => {
+    const said = world({ answers: [planOf({ mode: 'keep_term' })] });
+    await handleDebt(said.deps, ctx());
+    expect(said.sent[0].text).toContain('Se mantiene el plazo');
+    expect(said.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { mode: 'keep_term' } });
+
+    const german = debtRow('d1', 'Crédito Alemán', { termsJson: serializeTerms({ ...loanTerms, system: 'german' }) });
+    const fixed = world({ debts: [german], answers: [rateAnswer({ debtRef: 'aleman' })] });
+    await handleDebt(fixed.deps, ctx());
+    expect(buttons(fixed.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(fixed.lastPending().draft.mode).toBe('keep_term');
+  });
+
+  it('sends keep_term for a card and never asks for a mode', async () => {
+    const w = world({ debts: [cardRow()], answers: [rateAnswer({ debtRef: 'visa', rate: { value: 35, period: 'annual' } })] });
+    w.tables.debt_events = [];
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Cambio de tasa en Visa');
+    expect(w.sent[0].text).toContain('Próximo pago mínimo');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { mode: 'keep_term' } });
+
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+    expect(rateEvents(w)).toHaveLength(1);
+    expect(JSON.parse(rateEvents(w)[0].payloadJson)).toMatchObject({ mode: 'keep_term', rate: { value: 35 } });
+  });
+
+  it('asks for the convention first when the rate is ambiguous, then continues with the mode', async () => {
+    const w = world({ answers: [rateAnswer({ rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx({ text: 'la tasa ahora es 2% mensual' }));
+
+    expect(w.sent[0].text).toContain('2%');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+    expect(w.lastPending()).toMatchObject({ action: 'rate_change', awaiting: 'convention', debtId: 'd1', draft: { rateValue: 2, effectiveOn: '2026-10-13' } });
+    expect(w.lastPending().draft.rate).toBeUndefined();
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+    expect(buttons(w.sent[1].keyboard)).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+    expect(w.lastPending()).toMatchObject({ awaiting: 'mode', draft: { rate: { value: 2, basis: 'effective', periodicity: 'monthly', timing: 'arrears' } } });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:mode:keep_term');
+    expect(w.sent[2].text).toContain('Nueva tasa: 2% MV ≈ 26.82% EA');
+    expect(rateEvents(w)).toHaveLength(0);
+  });
+
+  it('still routes a create convention to the create flow', async () => {
+    const w = world({ answers: [loanAnswer({ rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx());
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+
+    expect(w.sent[1].text).toContain('Nueva deuda');
+    expect(w.lastPending()).toMatchObject({ action: 'create', awaiting: 'confirm' });
+  });
+
+  it('asks which debt first when several match, then continues the change', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [rateAnswer({ debtRef: 'banco' })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:pick:d1', 'nia:pick:d2']);
+    expect(w.lastPending()).toMatchObject({ action: 'rate_change', awaiting: 'pick', candidates: ['d1', 'd2'] });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:d2');
+    expect(buttons(w.sent[1].keyboard)).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+    expect(w.lastPending()).toMatchObject({ awaiting: 'mode', debtId: 'd2' });
+  });
+
+  it('asks for the new rate when it is missing', async () => {
+    const w = world({ answers: [rateAnswer({ rate: null })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('la tasa de interés');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+  });
+
+  it('explains installment_too_low and shows the keep_term preview instead', async () => {
+    const w = world({ answers: [rateAnswer({ rate: { value: 700, period: 'annual' } })] });
+    await previewed(w, 'keep_installment');
+
+    expect(w.sent[1].text).toContain('ya no cubre los intereses');
+    expect(w.sent[1].text).toContain('Se mantiene el plazo');
+    expect(w.lastPending().draft.mode).toBe('keep_term');
+    expect(rateEvents(w)).toHaveLength(0);
+  });
+
+  it('cites the household usury cap in the preview without blocking', async () => {
+    const cap = { $id: 'lr1', householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: 'Resolución', verified: true };
+    const w = world({ legalRows: [cap], answers: [rateAnswer({ rate: { value: 30, period: 'annual' } })] });
+    await previewed(w);
+
+    expect(w.sent[1].text).toContain('supera el tope de usura de 29% E.A.');
+    expect(buttons(w.sent[1].keyboard)).toContain('nia:confirm');
+  });
+
+  it('notes that earlier costs update on the web when a backdated change touches a recorded payment', async () => {
+    const w = world({ answers: [planOf({ effectiveOn: '2026-09-10' })] });
+    w.tables.debt_events.push({ ...disbursement('d1'), $id: 'pay1', kind: 'payment', effectiveOn: '2026-10-10', amountMinor: 380381, dedupeKey: 'seed:pay1' });
+    await previewed(w);
+
+    expect(w.sent[1].text).toContain('Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.');
+  });
+
+  describe('Confirm', () => {
+    it('writes one rate_change event with the pending-derived ids and reports the written figures', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(rateEvents(w)).toHaveLength(1);
+      expect(rateEvents(w)[0]).toMatchObject({ $id: 'dep1', dedupeKey: 'debt:p1', debtId: 'd1', effectiveOn: '2026-10-13', source: 'telegram', actorId: ACTOR });
+      expect(JSON.parse(rateEvents(w)[0].payloadJson)).toEqual({ rate: { value: 22, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' });
+      expect(costRows(w)).toHaveLength(0);
+      expect(w.sent[2].text).toContain('registré el cambio de tasa de Crédito Vehículo');
+      expect(w.sent[2].text).toContain('22% EA');
+      expect(w.sent[2].text).toContain('Cuota:');
+      expect(w.sessions[2]).toMatchObject({ status: 'completed', pending: { kind: 'debt', v: 1, id: 'p1', action: 'rate_change', done: true } });
+    });
+
+    it('answers "ya estaba registrado" to a second Confirm and writes one event for a double tap', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      await confirmDebt(w.deps, ctx(), pending); // Telegram retry that read the session before the done marker
+      await confirmDebt(w.deps, ctx(), w.lastPending()); // a tap after the first one finished
+
+      expect(rateEvents(w)).toHaveLength(1);
+      expect(w.sent.slice(2).map((call) => /ya estaba registrado/.test(call.text))).toEqual([false, true, true]);
+    });
+
+    it('writes one event when two Confirms race', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      await Promise.all([confirmDebt(w.deps, ctx(), pending), confirmDebt(w.deps, ctx(), pending)]);
+
+      expect(rateEvents(w)).toHaveLength(1);
+    });
+
+    it('rebuilds from the live debt: a payment recorded after the preview is part of the written figures', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      w.tables.debt_events.push({ ...disbursement('d1'), $id: 'pay1', kind: 'payment', effectiveOn: '2026-10-12', amountMinor: 380381, dedupeKey: 'seed:pay1' });
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(rateEvents(w)).toHaveLength(1);
+      expect(w.sent[2].text).toContain('Cuotas restantes: 35');
+    });
+
+    it('writes nothing and says so when the debt is gone', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      w.tables.debts = [];
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(rateEvents(w)).toHaveLength(0);
+      expect(w.sent[2].text).toContain('No encontré esa deuda');
+      expect(w.sessions).toHaveLength(2);
+    });
+
+    it('writes nothing and suggests keep_term when keep_installment no longer covers the interest', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w, 'keep_installment');
+      const forged = { ...pending, draft: { ...pending.draft, rate: { value: 700, basis: 'effective', periodicity: 'annual', timing: 'arrears' } } };
+      await confirmDebt(w.deps, ctx(), forged);
+
+      expect(rateEvents(w)).toHaveLength(0);
+      expect(w.sent[2].text).toContain('mantener el plazo');
+      expect(w.sessions).toHaveLength(2);
+    });
+
+    it('does not confirm while the mode or the convention is still pending', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      await handleDebt(w.deps, ctx());
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      expect(rateEvents(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('Antes de confirmar');
+    });
+  });
+
+  describe('stale buttons', () => {
+    it('ignores a mode button when the pending is already waiting for confirmation, with a short message and no write', async () => {
+      const w = world({ answers: [rateAnswer()] });
+      const pending = await previewed(w);
+      const before = w.sessions.length;
+      await handleDebtCallback(w.deps, ctx({ pending }), 'nia:mode:keep_installment');
+
+      expect(w.sent[2].text).toContain('ya no aplica');
+      expect(w.sessions).toHaveLength(before);
+      expect(rateEvents(w)).toHaveLength(0);
+    });
+
+    it('ignores a mode button from a confirmed pending and from another action', async () => {
+      const w = world({ answers: [rateAnswer(), payAnswer({ amountMinor: 1000000 })] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:mode:keep_term');
+      expect(w.sent[3].text).toContain('No tengo una solicitud');
+
+      await handleDebt(w.deps, ctx());
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:mode:keep_term'); // a payment waiting for its strategy
+      expect(w.sent[w.sent.length - 1].text).toContain('ya no aplica');
+      expect(rateEvents(w)).toHaveLength(1);
+    });
+
+    it('ignores a convention button for an action that takes no convention', async () => {
+      const w = world({ answers: [payAnswer({ amountMinor: 1000000 })] });
+      await handleDebt(w.deps, ctx());
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:EA');
+
+      expect(w.sent[1].text).toContain('ya no aplica');
+      expect(w.tables.debt_events).toHaveLength(1);
+    });
+  });
+});

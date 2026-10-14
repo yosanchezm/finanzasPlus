@@ -73,6 +73,18 @@ describe('previewRateChange', () => {
     expect(plain(result.text)).toContain('Nueva tasa: 2% MV ≈ 26.82% EA');
   });
 
+  it('asks for the mode (without computing a preview) when a French loan has none yet, and not for any other debt', () => {
+    const french = run({ draft: { mode: null } });
+    const german = run({ debt: debtRow({ ...loanTerms, system: 'german' }), draft: { mode: null } });
+
+    expect(french).toMatchObject({ ok: true, needsMode: true, modes: ['keep_term', 'keep_installment'] });
+    expect(plain(french.text)).toContain('mantener el plazo');
+    expect(plain(french.text)).toContain('mantener la cuota');
+    expect(plain(french.text)).toContain('22% EA');
+    expect(german.needsMode).toBeUndefined();
+    expect(german.mode).toBe('keep_term');
+  });
+
   it('keeps the installment and changes the number of installments for keep_installment', () => {
     const debt = debtRow();
     const result = run({ debt, draft: { mode: 'keep_installment' } });

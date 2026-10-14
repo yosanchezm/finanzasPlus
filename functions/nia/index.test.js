@@ -342,3 +342,56 @@ describe('legal_rate in the Nia entry point', () => {
     expect(legalPatches()).toEqual([]);
   });
 });
+
+describe('rate_change in the Nia entry point', () => {
+  const rateAnswers = (extra = {}) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'rate_change', debtRef: 'vehiculo', rate: { value: 22, period: 'annual' }, planChange: { effectiveOn: null, mode: null }, ...extra },
+  ];
+  const rateEvents = () => fake.tables.debt_events.filter((event) => event.kind === 'rate_change');
+
+  it('tells the classifier and the extractor about the rate change', async () => {
+    fake = makeNet(rateAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('bajó la tasa del carro a 22% EA'));
+
+    expect(fake.prompts[0]).toContain('cambiar la tasa');
+    expect(fake.prompts[1]).toContain('rate_change');
+  });
+
+  it('asks the mode with the nia:mode buttons, previews, and writes one event however many times Confirm arrives', async () => {
+    fake = makeNet(rateAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('bajó la tasa del carro a 22% EA'));
+    expect(buttons(sent()[0])).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ action: 'rate_change', awaiting: 'mode', debtId: 'd1' });
+
+    await run(press('nia:mode:keep_term'));
+    expect(sent()[1].text).toContain('Cambio de tasa en Crédito Vehículo');
+    expect(buttons(sent()[1])).toContain('nia:confirm');
+    expect(rateEvents()).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:confirm')); // and the user taps once more
+
+    expect(rateEvents()).toEqual([expect.objectContaining({ effectiveOn: '2026-10-13', dedupeKey: expect.stringMatching(/^debt:/), actorId: 'u7', source: 'telegram' })]);
+    expect(sent().slice(2).map((call) => /ya estaba registrado/.test(call.text))).toEqual([false, true, true]);
+  });
+
+  it('ignores a mode button that arrives after the request was confirmed', async () => {
+    fake = makeNet(rateAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('bajó la tasa del carro a 22% EA'));
+    await run(press('nia:mode:keep_term'));
+    await run(press('nia:confirm'));
+    await run(press('nia:mode:keep_installment'));
+
+    expect(rateEvents()).toHaveLength(1);
+    expect(sent()[sent().length - 1].text).toContain('No tengo una solicitud');
+  });
+});
