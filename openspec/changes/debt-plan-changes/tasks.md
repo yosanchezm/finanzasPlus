@@ -193,11 +193,11 @@ Groups: E2a rate change (about 350), E2b callbacks (about 300), E2c charge chang
 ### F1 Nia restructure (design 650) · deps: E2, C3
 Groups: F1a rebuild (about 330), F1b handler (about 320).
 
-- [ ] F1a.1 RED `planChange.test.js`: pending stores overrides only (<= 1.5 KB); terms rebuilt from the live debt at Confirm so a payment between preview and Confirm changes the written carried balance; invalid terms, unreadable event, or payload > 8000 write nothing and explain; `waiveLate`. Reqs NI3.
-- [ ] F1a.2 GREEN `planChange.js`, `extract.js`.
-- [ ] F1b.1 RED `handler.test.js`: "reestructura a 48 cuotas, primera cuota 2026-12-05" previews arrears, carried balance, new installment, usury notice; Confirm writes one `restructure`; double Confirm one; cards refused. Reqs NI3, NI6, NI7, NI8.
-- [ ] F1b.2 GREEN `handler.js`, `preview.js`.
-- [ ] F1.CP checkpoint.
+- [x] F1a.1 RED `planChange.test.js`: pending stores overrides only (<= 1.5 KB); terms rebuilt from the live debt at Confirm so a payment between preview and Confirm changes the written carried balance; invalid terms, unreadable event, or payload > 8000 write nothing and explain; `waiveLate`. Reqs NI3.
+- [x] F1a.2 GREEN `planChange.js`, `extract.js`.
+- [x] F1b.1 RED `handler.test.js`: "reestructura a 48 cuotas, primera cuota 2026-12-05" previews arrears, carried balance, new installment, usury notice; Confirm writes one `restructure`; double Confirm one; cards refused. Reqs NI3, NI6, NI7, NI8.
+- [x] F1b.2 GREEN `handler.js`, `preview.js`.
+- [x] F1.CP checkpoint.
 
 ### F2 Nia mora (design 450) · deps: C3, D2, A1 deployed on Nia
 - [ ] F2.0 GATE (owner): Nia tarball at or after A1 is deployed. Do not deploy F2 otherwise.

@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3), `feat/dpc-f1-nia-restructure` (F1; E1 and E2 live on their own branches in the stack).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -709,3 +709,60 @@ Deploy the new Nia tarball (`npm run package:nia`) with or after the web build. 
 ### Remaining
 
 D2 (owner gate D2.0), then F1-F3.
+
+## Batch F1 (Nia restructure: overrides-only pending, rebuild at Confirm, waiveLate, exactly-once): COMPLETE
+
+Branch `feat/dpc-f1-nia-restructure` (from master 9fa3b90). No live Appwrite, Gemini or Telegram was touched; `.env` was never read.
+
+### Tasks
+
+- [x] F1a.1 RED `planChange.test.js`, `extract.test.js`: overrides-only pending within 1.5 KB; terms rebuilt from the live debt (a payment after the preview changes the carried balance 10,192,251 to 10,092,251); invalid terms, a card, no balance, a payload over 8000 characters all return an explanation and no draft; `waiveLate` (10,190,876 carried, 390,381 refinanced). Reqs NI3
+- [x] F1a.2 GREEN `functions/nia/debt/planChange.js` (`readRestructure`, `restructureDraft`, `rebuildRestructure`, `previewRestructure`, `describeRestructure`), `extract.js` (action, schema, prompt, `restructure` branch), `preview.js` (labels exported for reuse)
+- [x] F1b.1 RED `handler.test.js`, `index.test.js`: "reestructura a 48 cuotas, primera cuota 2026-12-05" previews the arrears (with mora), carried balance, new installment, term and usury notice; the convention buttons for an ambiguous rate; pick; Confirm writes one `restructure` (`dep1`, `debt:p1`); payment between preview and Confirm; double tap and race write one; dedupe key checked before rebuilding; invalid terms, payload over 8000, card and missing debt write nothing; backdated note; stale buttons. Reqs NI3, NI6, NI7, NI8
+- [x] F1b.2 GREEN `handler.js` (`startRestructure`, `continueRestructure`, `commitRestructure`, `withStatedRate`), `pending.js` (type doc), `index.js` (classifier text), `functions/nia/README.md`. `preview.js` needed no further change (its labels were exported in F1a)
+- [x] F1.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 38679e6 `feat(nia): read a restructure from a message and rebuild its terms from the live debt, with the arrears breakdown and waiveLate` | F1a | 5 files, 482 insertions, 13 deletions |
+| 9b6cadc `feat(nia): preview and confirm a restructure once, rebuilt from the live debt at Confirm, and refuse cards` | F1b | 6 files, 390 insertions, 16 deletions |
+
+Total vs master before this progress/tasks commit: 11 files, 872 insertions, 29 deletions = 901 changed lines (budget 2,000; each group <= 800: F1a is 495, F1b is 406; design 650, worst case 1,300).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR / mutation |
+|---|---|---|---|
+| F1a.1 / F1a.2 extraction | 6 `extract.test.js` cases failed (action fell back to `list`, no `restructure` in the prompt) | `extract.test.js` 49 tests incl. the new `restructure` block: term, first due date, system, periodicity and waiveLate read; invalid ones dropped to null; `term` missing for 0, 12.5 or no planChange; rate in `rate` with the convention rules (ambiguous gives `needsConvention`, negative gives `invalid_rate`, zero accepted); charges kept only when stated | `SYSTEMS` moved to `planChange.js` and imported by `extract.js` (one list) |
+| F1a.1 / F1a.2 pure | 23 `planChange.test.js` cases failed (imports missing, so each call threw) | 59 tests in the file: `readRestructure`, `restructureDraft` (pending with 6 charges and every override stays under 1,500 bytes), `previewRestructure` golden (carried 10,192,251; overdue 391,756; mora 1,375; installment, remaining periods, interest and cost compared with the core pieces), `waiveLate` (10,190,876 and 390,381), rate echo `2.5% MV ≈ 34.49% EA` with the household cap 29, system and periodicity overrides, default first due date one period after the effective date, backdated note, card, early first due date, invalid periodicity, missing n, no balance, unreadable debt, `rebuildRestructure` after a payment (10,092,251), written terms and payload, 90 charges over 8000 characters, `describeRestructure` | Mutations: waiveLate not subtracted failed 3; payload check disabled failed 1; default first due date set to the effective date failed 1; terms and overdue measured on today instead of the effective date survived, so a backdated-restructure test was added and then failed 1 |
+| F1b.1 / F1b.2 handler | 20 `handler.test.js` cases failed (action unknown, no route, no commit) | `handler.test.js` 130 tests (20 for restructure): preview text and a pending of `{effectiveOn, n, firstDueOn}` under 300 bytes, mora shown and forgiven, usury notice, convention buttons then preview, missing n, early first due date, card, pick, charges kept, Confirm writes one `restructure` (`dep1`, `debt:p1`, principal 10,180,876) and reports it, waiveLate written, payment between preview and Confirm writes 9,800,495, double tap and race write one, dedupe key before rebuild, invalid terms, 90 charges, card or missing debt, premature Confirm, backdated note, stale buttons | Mutations: dedupe pre-check removed failed 1; waiveLate not applied failed 2. `withStatedRate` extracted so `rate_change` and `restructure` share the convention routing (the 110 earlier handler tests stayed green) |
+| F1b wiring | 1 `index.test.js` case failed (classifier text did not mention reestructurar) | `index.test.js` 21 tests: classifier and extractor prompts; the real entry point previews and three Confirms write one event | None needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions` exit 0: 12 files, 419 tests passed (baseline for `functions/nia/debt` before F1: 11 files, 348 tests). Full `npm test -- --maxWorkers=4`: 119 files, 1,818 tests passed on the first run (baseline before F1: 1,766) |
+| Runtime harness command/scenario and exact result | `index.test.js` runs the real entry point against a fake `undici.fetch` (Appwrite, Telegram, Gemini): the restructure preview and the repeated Confirm. `npm run build` exit 0. `npm run package:nia` exit 0 (`functions/nia.tar.gz` written, ignored by git; the packaging scan found no Node 16 incompatibility) |
+| Rollback boundary | Revert 9b6cadc (handler route, Confirm, README, classifier text), then 38679e6 (extraction and the pure rebuild). Reverting only 9b6cadc leaves `restructure` extractable and previewable by the pure layer but unrouted in the handler (the action would fall to the analysis branch). No stored data depends on them: Nia writes ordinary `restructure` events that the web reads and the core replays |
+
+### Decisions and deviations from design
+
+- Extraction: the restructure fields ride in `planChange` (`effectiveOn`, `n`, `system`, `periodicity`, `firstDueOn`, `waiveLate`) as the design lists; the new rate rides in the existing `rate` field, so the convention rules and the `nia:conv:` buttons are the same as for a new loan and a rate change, and the optional charge set rides in the top-level `charges` already used by create (they replace the current ones; removing all charges through a restructure is not expressible from Nia, use a charge change first).
+- `n` is required (asked as "el número de cuotas" when missing) because `buildRestructureTerms` does not carry the old plan shape and the old `n` would restart the original term. A first due date that was not said is one period after the effective date (`periodDates`), because the carried `firstDueOn` is in the past; the preview states it.
+- The terms in force and the overdue figure are measured on the effective date (not on today), the same date `restructureCarry` uses; a backdated restructure therefore shows what it refinances on that date.
+- "Cuotas vencidas que se refinancian" is the projection's past-due amount at the effective date (391,756 in the golden case, 390,381 with waiveLate); the breakdown lines come from `restructureCarry`.
+- Confirm checks the dedupe key before rebuilding (E2 lesson): once written, the restructure changes the debt that a repeated Confirm would rebuild from.
+- The pending cannot exceed 1.5 KB through extraction (6 charges of at most 40 characters stay near 1.3 KB), so `pending_too_large` is not caught for a restructure; the test of the pure `restructureDraft` with the largest possible set guards the limit.
+- Task F1b.2 lists `preview.js`: it was edited in F1a (labels exported) and needed nothing more; the new core error codes already had a path through `restructureIssue` in `planChange.js`, so `CORE_MESSAGES` was not extended.
+- A card with an ambiguous rate is asked for the convention before the refusal (the refusal comes from the core when the preview is built). Cosmetic; no write happens either way.
+
+### Owner gate
+
+Deploy the new Nia tarball (`npm run package:nia`) with or after the web build; a Nia that writes `restructure` needs the web at or after C3 and D1 to void or read it as designed. No schema change in F1. D2 (owner gate D2.0), F2 (A1 deployed on Nia) and F3 were not started.
+
+### Remaining
+
+D2 (owner gate D2.0), then F2 and F3.
