@@ -34,10 +34,11 @@ const TransactionsView = lazy(() => import('../features/transactions/Transaction
 const BudgetView = lazy(() => import('../features/budget/BudgetView'));
 const GoalsView = lazy(() => import('../features/goals/GoalsView'));
 const DebtsContainer = lazy(() => import('../features/debts/DebtsContainer'));
+const SettingsContainer = lazy(() => import('../features/settings/SettingsContainer'));
 
 const PERIOD_VIEWS = ['Resumen', 'Movimientos', 'Presupuesto'];
-// Debts are not month-scoped: the period switcher would suggest otherwise.
-const UNSCOPED_VIEWS = ['Deudas'];
+// Debts and settings are not month-scoped: the period switcher would suggest otherwise.
+const UNSCOPED_VIEWS = ['Deudas', 'Ajustes'];
 
 const resetForm = () => ({
   merchant: '', amount: '', categoryId: '', type: 'expense', owner: 'you', date: dateInputValue(), note: '',
@@ -273,6 +274,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             onNotify={notify}
           />
         );
+      case 'Ajustes':
+        return <SettingsContainer user={user} onNotify={notify} />;
       default:
         return (
           <DashboardView

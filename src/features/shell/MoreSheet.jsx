@@ -1,7 +1,7 @@
 import { LogOut, RefreshCw, Sparkles } from 'lucide-react';
 import { DialogContent, DialogTitle } from '../../shared/ui/Dialog';
 import { cn, focusRing } from '../../shared/ui/cn';
-import { navItem } from './navItems';
+import { SETTINGS_ITEM, navItem } from './navItems';
 
 const GoalsIcon = navItem('Metas').icon;
 const DebtsIcon = navItem('Deudas').icon;
@@ -17,6 +17,7 @@ export default function MoreSheet({ onClose, onNavigate, onOpenAssistant, onRefr
   const items = [
     { label: 'Metas', icon: GoalsIcon, action: () => onNavigate('Metas') },
     { label: 'Deudas', icon: DebtsIcon, action: () => onNavigate('Deudas') },
+    { label: SETTINGS_ITEM.label, icon: SETTINGS_ITEM.icon, action: () => onNavigate(SETTINGS_ITEM.label) },
     { label: 'Nia', icon: Sparkles, action: onOpenAssistant },
     { label: 'Actualizar datos', icon: RefreshCw, action: onRefresh },
   ];

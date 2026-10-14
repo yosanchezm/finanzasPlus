@@ -49,6 +49,25 @@ describe('Sidebar', () => {
     expect(props.onNavigate).toHaveBeenCalledWith('Deudas');
   });
 
+  it('offers an enabled Ajustes that marks itself current and navigates to it', async () => {
+    const { props, user } = renderSidebar({ activeView: 'Ajustes' });
+    const settings = screen.getByRole('button', { name: 'Ajustes' });
+
+    expect(settings).toBeEnabled();
+    expect(settings).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByText('Próximamente')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deudas' })).not.toHaveAttribute('aria-current');
+    await user.click(settings);
+
+    expect(props.onNavigate).toHaveBeenCalledWith('Ajustes');
+  });
+
+  it('does not mark Ajustes current on another view', () => {
+    renderSidebar({ activeView: 'Deudas' });
+
+    expect(screen.getByRole('button', { name: 'Ajustes' })).not.toHaveAttribute('aria-current');
+  });
+
   it('shows the transactions count next to Movimientos', () => {
     renderSidebar({ transactionsCount: 48 });
 

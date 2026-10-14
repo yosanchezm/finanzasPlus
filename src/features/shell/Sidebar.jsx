@@ -1,9 +1,9 @@
-import { LogOut, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { LogOut, Sparkles } from 'lucide-react';
 import { getInitials } from '../../shared/lib/initials';
 import { Avatar } from '../../shared/ui/Avatar';
 import { BrandLockup } from '../../shared/ui/BrandMark';
 import { cn, focusRingDark } from '../../shared/ui/cn';
-import { NAV_ITEMS } from './navItems';
+import { NAV_ITEMS, SETTINGS_ITEM } from './navItems';
 
 const itemClass = cn(
   'flex h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-sm font-medium text-sidebar-text transition-colors',
@@ -66,10 +66,14 @@ export default function Sidebar({
       </nav>
 
       <div className="mt-auto flex flex-col gap-0.5">
-        <button type="button" disabled className={cn(itemClass, 'cursor-not-allowed opacity-70 hover:bg-transparent hover:text-sidebar-text')}>
-          <SlidersHorizontal size={18} aria-hidden="true" />
-          <span>Ajustes</span>
-          <span className="ml-auto rounded-sm bg-white/6 px-1.5 py-0.5 text-xs text-sidebar-label">Próximamente</span>
+        <button
+          type="button"
+          aria-current={activeView === SETTINGS_ITEM.label ? 'page' : undefined}
+          onClick={() => onNavigate(SETTINGS_ITEM.label)}
+          className={itemClass}
+        >
+          <SETTINGS_ITEM.icon size={18} aria-hidden="true" />
+          <span>{SETTINGS_ITEM.label}</span>
         </button>
 
         <div className="mt-2.5 flex items-center gap-2.5 border-t border-sidebar-line px-2 pt-3">

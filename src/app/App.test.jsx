@@ -28,6 +28,8 @@ vi.mock('../appwrite', () => ({
   listDebtEvents: vi.fn(),
   createDebt: vi.fn(),
   debtPort: vi.fn(),
+  listLegalRates: vi.fn(),
+  upsertLegalRate: vi.fn(),
 }));
 
 const USER = { $id: 'u1', name: 'Camilo', email: 'camilo@example.com' };
@@ -164,6 +166,32 @@ describe('App debts section', () => {
     expect(await screen.findByText('Deuda registrada.')).toBeInTheDocument();
     expect(api.createDebt).toHaveBeenCalledWith({ id: expect.stringMatching(/^db/), data: expect.objectContaining({ householdId: 'h1', actorId: 'u1', name: 'Préstamo de papá' }) });
     expect(api.getWorkspace.mock.calls.length).toBeGreaterThan(refreshesBefore);
+  });
+});
+
+describe('App Ajustes section', () => {
+  it('lazily opens Ajustes from the sidebar without the period switcher and reads the legal rates once', async () => {
+    api.listLegalRates.mockResolvedValue([]);
+    const user = await renderReadyApp();
+    expect(api.listLegalRates).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('group', { name: 'Periodo' }).length).toBeGreaterThan(0);
+
+    await user.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Ajustes' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Ajustes' })).toBeInTheDocument();
+    await waitFor(() => expect(api.listLegalRates).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('group', { name: 'Periodo' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('complementary')).getByRole('button', { name: 'Ajustes' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('opens Ajustes from the mobile "Más" sheet', async () => {
+    api.listLegalRates.mockResolvedValue([]);
+    const user = await renderReadyApp();
+
+    await user.click(screen.getByRole('button', { name: 'Más' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Más opciones' })).getByRole('button', { name: 'Ajustes' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Ajustes' })).toBeInTheDocument();
   });
 });
 

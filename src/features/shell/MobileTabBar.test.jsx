@@ -95,6 +95,16 @@ describe('MobileTabBar', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('navigates to Ajustes from the sheet and closes it, without adding a tab', async () => {
+    const { props, user } = renderTabBar();
+    expect(screen.queryByRole('button', { name: 'Ajustes' })).not.toBeInTheDocument();
+
+    await user.click(within(await openSheet(user)).getByRole('button', { name: 'Ajustes' }));
+
+    expect(props.onNavigate).toHaveBeenCalledWith('Ajustes');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('calls onLogout from "Cerrar sesión" in the sheet', async () => {
     const { props, user } = renderTabBar();
     const sheet = await openSheet(user);
