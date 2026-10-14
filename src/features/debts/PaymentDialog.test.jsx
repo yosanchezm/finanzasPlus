@@ -3,7 +3,8 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import PaymentDialog from './PaymentDialog';
-import { makeBigLoan } from './debtFixtures';
+import { formatMoney } from '../../shared/lib/format';
+import { DAY_10, MORA_DISBURSEMENT, makeBigLoan, makeMoraLoan } from './debtFixtures';
 
 const TODAY = '2026-02-05';
 const IDLE = { status: 'idle', error: null };
@@ -81,5 +82,37 @@ describe('PaymentDialog', () => {
     render(<PaymentDialog debt={makeBigLoan()} events={[]} projection={project(makeBigLoan(), [], TODAY)} actorId="u1" today={TODAY} saveState={{ ...failed, locked: true }} onSubmit={vi.fn()} onClose={vi.fn()} />);
     expect(amountField()).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeEnabled();
+  });
+});
+
+describe('PaymentDialog with mora', () => {
+  const setupLate = (late) => {
+    const debt = makeMoraLoan({ late });
+    const events = [MORA_DISBURSEMENT];
+    const onSubmit = vi.fn();
+    render(<PaymentDialog debt={debt} events={events} projection={project(debt, events, DAY_10)} actorId="u1" today={DAY_10} saveState={IDLE} onSubmit={onSubmit} onClose={vi.fn()} />);
+    return { onSubmit, user: userEvent.setup() };
+  };
+  const line = (label) => within(screen.getByRole('group', { name: 'Vista previa' })).getByText(label).nextSibling;
+
+  it('previews the installment paid 10 days late with the mora on its own line: charges 10,000, mora 1,375, interest 180,876, principal 198,130, cost 192,251', async () => {
+    const { user, onSubmit } = setupLate({ mode: 'usury', graceDays: 0 });
+    await typeAmount(user, '390381');
+
+    expect(line('Capital')).toHaveTextContent(formatMoney(198130));
+    expect(line('Intereses')).toHaveTextContent(formatMoney(180876));
+    expect(line('Intereses de mora')).toHaveTextContent(formatMoney(1375));
+    expect(line('Cargos e impuestos')).toHaveTextContent(formatMoney(10000));
+    expect(line('Gasto en Costos financieros')).toHaveTextContent(formatMoney(192251));
+    await user.click(screen.getByRole('button', { name: 'Registrar pago' }));
+    expect(onSubmit).toHaveBeenCalledWith({ kind: 'payment', effectiveOn: DAY_10, amountMinor: 390381 });
+  });
+
+  it('shows no mora line when the debt has no policy', async () => {
+    const { user } = setupLate(null);
+    await typeAmount(user, '390381');
+
+    expect(line('Capital')).toHaveTextContent(formatMoney(199505));
+    expect(within(screen.getByRole('group', { name: 'Vista previa' })).queryByText('Intereses de mora')).not.toBeInTheDocument();
   });
 });

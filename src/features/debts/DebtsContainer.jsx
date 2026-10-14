@@ -17,7 +17,7 @@ const IDLE = { status: 'idle', error: null };
  * A failed save keeps the wizard open with its inputs and its nonce, so "Reintentar" repeats the same
  * ids (idempotent); if the user edited the draft in between, it is a different debt and gets a new nonce.
  */
-export default function DebtsContainer({ inScope, currentOwnerScope, scopeControl, householdId, user, onRefresh, onNotify, createNonce = defaultNonce }) {
+export default function DebtsContainer({ inScope, currentOwnerScope, scopeControl, householdId, user, onRefresh, onNotify, onNavigate, createNonce = defaultNonce }) {
   const data = useDebtData();
   const [creating, setCreating] = useState(null); // { nonce, signature } of the last attempt
   const [saveState, setSaveState] = useState(IDLE);
@@ -67,6 +67,7 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
         currentOwnerScope={currentOwnerScope}
         user={user}
         onBack={() => setOpenId(null)}
+        onOpenSettings={onNavigate ? () => onNavigate('Ajustes') : undefined}
         onRefresh={onRefresh}
         onNotify={onNotify}
         createNonce={createNonce}

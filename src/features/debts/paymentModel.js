@@ -53,7 +53,8 @@ export function previewPayment({ debt, events, projection, actorId, today, amoun
         amountMinor,
         principalMinor: allocation.principal, // for an extra payment it already includes what goes beyond the installment
         interestMinor: allocation.interest,
-        feesMinor: allocation.charges + allocation.taxes + allocation.lateInterest,
+        feesMinor: allocation.charges + allocation.taxes,
+        lateMinor: allocation.lateInterest,
         costMinor,
         surplusMinor: allocation.surplus,
         balanceAfterMinor: plan.projection.balanceMinor,

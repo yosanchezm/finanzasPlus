@@ -18,6 +18,10 @@ const STATUS = {
 
 const itemizedLines = (row) => row.charges.filter((line) => line.display === 'itemized');
 const feesOf = (row) => row.chargesMinor + row.taxesMinor;
+const lateOf = (row) => row.lateMinor ?? 0;
+const totalOf = (row) => row.totalDueMinor + lateOf(row); // the installment plus the mora it accrued
+const daysLabel = (days) => `${days} ${days === 1 ? 'día' : 'días'}`;
+const lateDetail = (row) => `${daysLabel(row.lateDays)} · base ${formatMoney(row.lateBaseMinor)}`;
 
 function StatusChip({ row }) {
   const { label, tone } = STATUS[row.status];
@@ -35,7 +39,12 @@ function ChargeLines({ row }) {
   ));
 }
 
-function Table({ rows }) {
+function LateCell({ row }) {
+  if (lateOf(row) === 0) return <span aria-hidden="true">–</span>;
+  return <span className="flex flex-col gap-0.5"><span>{formatMoney(lateOf(row))}</span><span className="text-xs text-ink-muted">{lateDetail(row)}</span></span>;
+}
+
+function Table({ rows, withLate }) {
   const head = 'px-3 py-2 text-right text-[13px] font-medium text-ink-muted';
   return (
     <div className="overflow-x-auto">
@@ -44,7 +53,7 @@ function Table({ rows }) {
           <tr className="border-b border-border">
             <th scope="col" className={`${head} text-left`}>Cuota</th>
             <th scope="col" className={`${head} text-left`}>Vence</th>
-            {['Capital', 'Intereses', 'Cargos', 'Total', 'Saldo'].map((label) => <th key={label} scope="col" className={head}>{label}</th>)}
+            {['Capital', 'Intereses', ...(withLate ? ['Mora'] : []), 'Cargos', 'Total', 'Saldo'].map((label) => <th key={label} scope="col" className={head}>{label}</th>)}
             <th scope="col" className={`${head} text-left`}>Estado</th>
           </tr>
         </thead>
@@ -55,8 +64,9 @@ function Table({ rows }) {
               <td className="px-3 py-2.5 whitespace-nowrap">{formatDueDate(row.dueOn)}</td>
               <td className="px-3 py-2.5 text-right">{formatMoney(row.principalMinor)}</td>
               <td className="px-3 py-2.5 text-right">{formatMoney(row.interestMinor)}</td>
+              {withLate && <td className="px-3 py-2.5 text-right"><LateCell row={row} /></td>}
               <td className="px-3 py-2.5 text-right"><span className="flex flex-col gap-0.5"><span>{formatMoney(feesOf(row))}</span><ChargeLines row={row} /></span></td>
-              <td className="px-3 py-2.5 text-right font-semibold">{formatMoney(row.totalDueMinor)}</td>
+              <td className="px-3 py-2.5 text-right font-semibold">{formatMoney(totalOf(row))}</td>
               <td className="px-3 py-2.5 text-right">{formatMoney(row.closingMinor)}</td>
               <td className="px-3 py-2.5"><StatusChip row={row} /></td>
             </tr>
@@ -77,10 +87,11 @@ function Cards({ rows }) {
             <span className="text-sm font-semibold text-ink">Cuota {row.period}<span className="ml-2 font-normal text-ink-muted">{formatDueDate(row.dueOn)}</span></span>
             <StatusChip row={row} />
           </div>
-          <b className="text-lg font-semibold text-ink tabular-nums">{formatMoney(row.totalDueMinor)}</b>
+          <b className="text-lg font-semibold text-ink tabular-nums">{formatMoney(totalOf(row))}</b>
           <dl className="flex flex-col gap-1 text-[13px]">
             {figure('Capital', formatMoney(row.principalMinor))}
             {figure('Intereses', formatMoney(row.interestMinor))}
+            {lateOf(row) > 0 && figure('Mora', <span className="flex flex-col items-end gap-0.5"><span>{formatMoney(lateOf(row))}</span><span className="text-xs text-ink-muted">{lateDetail(row)}</span></span>)}
             {feesOf(row) > 0 && figure('Cargos', <span className="flex flex-col items-end gap-0.5"><span>{formatMoney(feesOf(row))}</span><ChargeLines row={row} /></span>)}
             {figure('Saldo', formatMoney(row.closingMinor))}
           </dl>
@@ -93,13 +104,14 @@ function Cards({ rows }) {
 /** The full plan (`projection.plan`) with a status chip per row, paged by 12. A table on wide screens, condensed cards on phones. */
 export default function PlanTable({ plan }) {
   const wide = useMediaQuery('(min-width: 640px)');
+  const withLate = plan.some((row) => lateOf(row) > 0); // the Mora column only exists once some row accrued mora
   const firstOpen = plan.findIndex((row) => row.status !== 'paid');
   const [requested, setRequested] = useState(Math.floor(Math.max(firstOpen, 0) / PAGE_SIZE) + 1);
   const { pageItems, page, pageCount, start, end, total } = paginate(plan, requested, PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-3">
-      {wide ? <Table rows={pageItems} /> : <Cards rows={pageItems} />}
+      {wide ? <Table rows={pageItems} withLate={withLate} /> : <Cards rows={pageItems} />}
       {pageCount > 1 && (
         <div className="flex items-center justify-between gap-3">
           <span className="text-[13px] text-ink-muted tabular-nums">Cuotas {start}–{end} de {total}</span>

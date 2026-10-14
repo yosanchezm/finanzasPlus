@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { project } from '@finance-core';
 import { describe, expect, it } from 'vitest';
-import { makeBigLoan, makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { DAY_10, MORA_DISBURSEMENT, makeBigLoan, makeDebt, makeEvent, makeMoraLoan, makePayment } from './debtFixtures';
 import { describeCoreError, dueNow, previewPayment } from './paymentModel';
 
 const TODAY = '2026-02-05';
@@ -59,5 +59,32 @@ describe('describeCoreError', () => {
     expect(describeCoreError({ code: 'installment_too_low' })).toMatch(/no alcanza a cubrir los intereses/);
     expect(describeCoreError({ code: 'manual_plan_below_interest' })).toMatch(/plan manual/);
     expect(describeCoreError({ code: 'something_else' })).toBe('No se pudo calcular con esos datos. Revisa el monto y la fecha.');
+  });
+});
+
+describe('previewPayment with mora', () => {
+  const lateOn = (late) => makeMoraLoan({ late });
+
+  it('shows the mora apart from charges and taxes: 390,381 paid on day 10 is 10,000 / 1,375 / 180,876 / 198,130 with cost 192,251', () => {
+    const { preview: split, issue } = previewPayment({
+      debt: lateOn(), events: [MORA_DISBURSEMENT], projection: project(lateOn(), [MORA_DISBURSEMENT], DAY_10), actorId: 'u1', today: DAY_10, amount: '390381', effectiveOn: DAY_10, strategy: null,
+    });
+
+    expect(issue).toBeNull();
+    expect(split).toMatchObject({ feesMinor: 10000, lateMinor: 1375, interestMinor: 180876, principalMinor: 198130, costMinor: 192251 });
+  });
+
+  it('counts the mora in what is due now: the overdue row with mora (391,756) plus the next installment (390,381)', () => {
+    expect(dueNow(project(lateOn(), [MORA_DISBURSEMENT], DAY_10))).toBe(391756 + 390381);
+    expect(dueNow(project(lateOn(null), [MORA_DISBURSEMENT], DAY_10))).toBe(390381 + 390381);
+  });
+
+  it('has no mora line without a policy: the same payment is 199,505 of principal and cost 190,876', () => {
+    const debt = lateOn(null);
+    const { preview: split } = previewPayment({
+      debt, events: [MORA_DISBURSEMENT], projection: project(debt, [MORA_DISBURSEMENT], DAY_10), actorId: 'u1', today: DAY_10, amount: '390381', effectiveOn: DAY_10, strategy: null,
+    });
+
+    expect(split).toMatchObject({ feesMinor: 10000, lateMinor: 0, interestMinor: 180876, principalMinor: 199505, costMinor: 190876 });
   });
 });

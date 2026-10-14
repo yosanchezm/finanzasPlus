@@ -79,6 +79,7 @@ export default function PaymentDialog({ debt, events, projection, actorId, today
                 <dl className="flex flex-col gap-2 text-sm">
                   <Line label="Capital" value={formatMoney(preview.principalMinor)} />
                   <Line label="Intereses" value={formatMoney(preview.interestMinor)} />
+                  {preview.lateMinor > 0 && <Line label="Intereses de mora" value={formatMoney(preview.lateMinor)} />}
                   <Line label="Cargos e impuestos" value={formatMoney(preview.feesMinor)} />
                   <Line label="Gasto en Costos financieros" value={formatMoney(preview.costMinor)} strong />
                   <Line label="Saldo después del pago" value={formatMoney(preview.balanceAfterMinor)} />

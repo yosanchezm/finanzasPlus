@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
-import { makeBigLoan, makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { DAY_10, MORA_DISBURSEMENT, makeBigLoan, makeDebt, makeEvent, makeMoraLoan, makePayment, usuryLegal } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn(), findDebtEventByDedupe: vi.fn() }));
 
@@ -646,5 +646,31 @@ describe('DebtDetailContainer simulator', () => {
     await simulate(user);
 
     expect(await screen.findByText(/Tu margen mensual promedio es \$ 50\.000/)).toBeInTheDocument();
+  });
+});
+
+describe('DebtDetailContainer mora', () => {
+  it('writes one payment event and one cost row of 192,251 (mora 1,375 included) when the save button is tapped twice', async () => {
+    const { user } = setup({ debt: makeMoraLoan(), events: [MORA_DISBURSEMENT], today: DAY_10 });
+    await openPayment(user);
+    const amount = screen.getByLabelText('Monto del pago');
+    await user.clear(amount);
+    await user.type(amount, '390381');
+    expect(within(screen.getByRole('group', { name: 'Vista previa' })).getByText('Intereses de mora').nextSibling).toHaveTextContent('$ 1.375');
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Registrar pago' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    expect(port.createEvent).toHaveBeenCalledWith({ id: 'den1', data: expect.objectContaining({ kind: 'payment', amountMinor: 390381, effectiveOn: DAY_10 }) });
+    expect(port.createCostRow).toHaveBeenCalledTimes(1);
+    expect(port.createCostRow).toHaveBeenCalledWith({ id: 'dcden1', data: expect.objectContaining({ amountMinor: 192251 }) });
+  });
+
+  it('opens Ajustes from the stale usury cap notice', async () => {
+    const stale = makeMoraLoan({ legal: usuryLegal(['2025-01-01', '2026-01-31', 28.59]) });
+    const { user, onOpenSettings } = setup({ debt: stale, events: [MORA_DISBURSEMENT], today: DAY_10, onOpenSettings: vi.fn() });
+    await user.click(screen.getByRole('button', { name: 'Actualizar los topes en Ajustes' }));
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

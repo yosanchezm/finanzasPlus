@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import DebtDetail from './DebtDetail';
 import { buildDebtDetail } from './debtDetailModel';
-import { makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { formatMoney, formatMonthLabel } from '../../shared/lib/format';
+import { DAY_10, MORA_DISBURSEMENT, makeDebt, makeEvent, makeMoraLoan, makePayment, usuryLegal } from './debtFixtures';
 
 const DISBURSEMENT = makeEvent('e0', 'disbursement', '2026-01-05', 1000000);
 const THREE_PAYMENTS = [DISBURSEMENT, makePayment('e1', '2026-02-05'), makePayment('e2', '2026-03-05'), makePayment('e3', '2026-04-05')];
@@ -132,5 +133,89 @@ describe('DebtDetail load-time notices', () => {
   it('shows no newer-version warning when every event is known', () => {
     renderDetail();
     expect(screen.queryByText(UNKNOWN_COPY)).not.toBeInTheDocument();
+  });
+});
+
+describe('DebtDetail mora', () => {
+  const moraDetail = (options = {}, events = [MORA_DISBURSEMENT], asOf = DAY_10) => {
+    const debt = makeMoraLoan(options);
+    return { debt, detail: buildDebtDetail({ debt, events, asOf }) };
+  };
+  const NO_CAP = usuryLegal(['2026-01-01', '2026-12-31', 30, 'mortgage']);
+
+  it('shows the accrued mora as a figure, in the cost and in the overdue call-out (1,375 after 10 days)', () => {
+    renderDetail(moraDetail());
+
+    const state = screen.getByRole('region', { name: 'Estado de la deuda' });
+    expect(within(state).getByText('Mora acumulada').nextSibling).toHaveTextContent(formatMoney(1375));
+    expect(within(screen.getByRole('region', { name: 'Costo real del crédito' })).getByText('Intereses de mora').nextSibling).toHaveTextContent(formatMoney(1375));
+    expect(screen.getByRole('alert')).toHaveTextContent(`Tienes ${formatMoney(391756)} vencidos, con ${formatMoney(1375)} de mora.`);
+    expect(screen.getByRole('columnheader', { name: 'Mora' })).toBeInTheDocument();
+  });
+
+  it('shows no mora figure for a debt without a policy, and the call-out keeps its plain wording', () => {
+    renderDetail(moraDetail({ late: null }));
+
+    expect(screen.queryByText('Mora acumulada')).not.toBeInTheDocument();
+    expect(screen.queryByText('Intereses de mora')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(`Tienes ${formatMoney(390381)} vencidos. Registra el pago`);
+    expect(screen.queryByRole('columnheader', { name: 'Mora' })).not.toBeInTheDocument();
+  });
+
+  it('adds the mora to the total cost', () => {
+    renderDetail(moraDetail());
+    const { detail } = moraDetail();
+    const cost = within(screen.getByRole('region', { name: 'Costo real del crédito' }));
+
+    expect(cost.getByText('Costo total').nextSibling).toHaveTextContent(formatMoney(detail.cost.totalMinor));
+    expect(detail.cost.totalMinor).toBe(detail.cost.interestMinor + detail.cost.chargesMinor + detail.cost.taxesMinor + 1375);
+  });
+
+  it('tells the user a carried-forward cap is stale and links to Ajustes, without blocking anything', async () => {
+    const onOpenSettings = vi.fn();
+    renderDetail({ ...moraDetail({ legal: usuryLegal(['2025-01-01', '2026-01-31', 28.59]) }), onOpenSettings, onPay: vi.fn() });
+
+    const notice = screen.getByText((text) => text.includes(`la mora usa el último tope vigente (hasta ${formatMonthLabel('2026-01')})`));
+    expect(notice).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Registrar pago' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Actualizar los topes en Ajustes' }));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('says when no usury cap is known for the modality, and links to Ajustes', () => {
+    renderDetail({ ...moraDetail({ legal: NO_CAP }), onOpenSettings: vi.fn() });
+
+    expect(screen.getByText(/No hay un tope de usura registrado para esta modalidad; la mora usa la tasa del contrato/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actualizar los topes en Ajustes' })).toBeInTheDocument();
+  });
+
+  it('warns that a mortgage mora does not apply Ley 546, next to the missing mortgage cap, and keeps both non-blocking', () => {
+    renderDetail({ ...moraDetail({ kind: 'mortgage' }), onPay: vi.fn() });
+
+    expect(screen.getByText(/En créditos hipotecarios la mora no aplica las reglas de la Ley 546 de 1999/)).toBeInTheDocument();
+    expect(screen.getByText(/No hay un tope de usura registrado para esta modalidad/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Registrar pago' })).toBeEnabled();
+  });
+
+  it('shows the Ley 546 notice for a mortgage even when its cap is known', () => {
+    renderDetail(moraDetail({ kind: 'mortgage', legal: NO_CAP }));
+
+    expect(screen.getByText(/En créditos hipotecarios la mora no aplica las reglas de la Ley 546 de 1999/)).toBeInTheDocument();
+    expect(screen.queryByText(/No hay un tope de usura/)).not.toBeInTheDocument();
+  });
+
+  it('shows no legal notice when the cap is current, and omits the Ajustes link without a handler', () => {
+    renderDetail(moraDetail());
+
+    expect(screen.queryByText(/último tope vigente/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No hay un tope de usura/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actualizar los topes en Ajustes' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the history line of a late_policy event instead of an amount', () => {
+    const policy = makeEvent('lp', 'late_policy', '2026-02-01', 0, { late: { mode: 'usury', graceDays: 0 } });
+    renderDetail(moraDetail({ late: null }, [MORA_DISBURSEMENT, policy], '2026-02-15'));
+
+    expect(within(screen.getByRole('region', { name: 'Historial' })).getByText(/^Mora: tasa de usura desde /)).toBeInTheDocument();
   });
 });

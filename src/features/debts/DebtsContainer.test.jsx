@@ -257,6 +257,20 @@ describe('DebtsContainer household legal rates', () => {
     expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(13);
   });
 
+  it('sends the user to Ajustes from the usury cap notice of an overdue debt with mora', async () => {
+    // Whatever day the suite runs, the code tables cannot cover every overdue day since February: the notice is unknown or stale.
+    api.listLegalRates.mockResolvedValue([]);
+    api.listDebts.mockResolvedValue([makeDebt({}, { late: { mode: 'usury', graceDays: 0 } })]);
+    api.listDebtEvents.mockResolvedValue(EVENTS);
+    const onNavigate = vi.fn();
+    render(<DebtsContainer {...props} onNavigate={onNavigate} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Crédito de consumo' }));
+    await user.click(await screen.findByRole('button', { name: 'Actualizar los topes en Ajustes' }));
+
+    expect(onNavigate).toHaveBeenCalledWith('Ajustes');
+  });
+
   it('shows no notice when the table is readable', async () => {
     const user = await open();
 

@@ -272,6 +272,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             user={user}
             onRefresh={refreshInPlace}
             onNotify={notify}
+            onNavigate={setActiveView}
           />
         );
       case 'Ajustes':

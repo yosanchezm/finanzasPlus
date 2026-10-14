@@ -2,7 +2,8 @@ import { project } from '@finance-core';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { formatMoney } from '../../shared/lib/format';
+import { DAY_10, MORA_DISBURSEMENT, makeDebt, makeEvent, makeMoraLoan, makePayment } from './debtFixtures';
 import PlanTable from './PlanTable';
 
 const planOf = (events, asOf, terms) => project(makeDebt({}, terms), events, asOf).plan;
@@ -80,5 +81,45 @@ describe('PlanTable', () => {
     expect(within(cards[0]).getByText('Pagada')).toBeInTheDocument();
     expect(within(cards[3]).getByText('Próxima')).toBeInTheDocument();
     expect(within(cards[3]).getByText('Cuota 4')).toBeInTheDocument();
+  });
+});
+
+describe('PlanTable mora', () => {
+  const moraPlan = (late, asOf = DAY_10) => project(makeMoraLoan({ late }), [MORA_DISBURSEMENT], asOf).plan;
+
+  it('adds a Mora column with the amount, the days and the base of the overdue row (1,375, 10 days, base 199,505)', () => {
+    render(<PlanTable plan={moraPlan({ mode: 'usury', graceDays: 0 })} />);
+
+    expect(screen.getByRole('columnheader', { name: 'Mora' })).toBeInTheDocument();
+    const first = within(rowOf(1));
+    expect(first.getByText(formatMoney(1375))).toBeInTheDocument();
+    expect(first.getByText(`10 días · base ${formatMoney(199505)}`)).toBeInTheDocument();
+    expect(first.getByText(formatMoney(391756))).toBeInTheDocument(); // the row's total includes the mora
+  });
+
+  it('writes one day in the singular', () => {
+    render(<PlanTable plan={moraPlan({ mode: 'usury', graceDays: 0 }, '2026-02-06')} />);
+
+    expect(within(rowOf(1)).getByText(`1 día · base ${formatMoney(199505)}`)).toBeInTheDocument();
+  });
+
+  it('leaves the table as it was when no row has accrued mora: no policy, or not overdue yet', () => {
+    const { unmount } = render(<PlanTable plan={moraPlan(null)} />);
+    expect(screen.queryByRole('columnheader', { name: 'Mora' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(8);
+    unmount();
+
+    render(<PlanTable plan={moraPlan({ mode: 'usury', graceDays: 0 }, '2026-02-05')} />);
+    expect(screen.queryByRole('columnheader', { name: 'Mora' })).not.toBeInTheDocument();
+  });
+
+  it('shows the mora line in the cards of a phone, only for rows that accrued it', () => {
+    window.innerWidth = 400;
+    render(<PlanTable plan={moraPlan({ mode: 'usury', graceDays: 0 })} />);
+
+    const [first, second] = screen.getAllByRole('listitem');
+    expect(within(first).getByText('Mora').nextSibling).toHaveTextContent(formatMoney(1375));
+    expect(within(first).getByText(`10 días · base ${formatMoney(199505)}`)).toBeInTheDocument();
+    expect(within(second).queryByText('Mora')).not.toBeInTheDocument();
   });
 });

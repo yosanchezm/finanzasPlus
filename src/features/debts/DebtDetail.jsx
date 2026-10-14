@@ -9,6 +9,7 @@ import { PageHeader } from '../../shared/ui/PageHeader';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
 import CardPanel from './CardPanel';
 import EventHistory from './EventHistory';
+import LateNotices from './LateNotices';
 import LegalRatesNotice from './LegalRatesNotice';
 import MoreActionsMenu from './MoreActionsMenu';
 import PlanTable from './PlanTable';
@@ -41,8 +42,9 @@ function Section({ title, children }) {
  * or null when the stored terms cannot be read. Actions only appear when their handler is passed; the plan-change
  * handlers (`onRateChange`, `onChargeChange`, `onLatePolicy`, `onRestructure`) fill the "Más acciones" menu.
  * `legalStatus` ('ok' | 'missing' | 'unavailable') adds the legal rates notice; events of a newer app version add their own.
+ * `onOpenSettings` lets the usury-cap notices of the mora link to Ajustes.
  */
-export default function DebtDetail({ debt, detail, currentOwnerScope, notice, legalStatus, onBack, onPay, onSimulate, onVoid, onStatement, onCharge, onRateChange, onChargeChange, onLatePolicy, onRestructure }) {
+export default function DebtDetail({ debt, detail, currentOwnerScope, notice, legalStatus, onBack, onPay, onSimulate, onVoid, onStatement, onCharge, onRateChange, onChargeChange, onLatePolicy, onRestructure, onOpenSettings }) {
   const { label } = kindInfo(debt.kind);
   const back = <Button variant="ghost" onClick={onBack} className="self-start"><ArrowLeft size={16} aria-hidden="true" />Volver a deudas</Button>;
 
@@ -55,6 +57,7 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
   const hasPlan = plan.length > 0;
   const hasUnknownEvents = projection.notices.some((item) => item.code === 'unknown_event_kind');
   const open = projection.balanceMinor > 0;
+  const lateMinor = projection.lateInterestMinor ?? 0;
   const rate = formatEa(toEffectiveAnnual(projection.terms.rate));
   const progress = debt.principalMinor > 0 ? Math.max(0, Math.min(100, ((debt.principalMinor - projection.balanceMinor) / debt.principalMinor) * 100)) : 0;
   const planChanges = { onRateChange, onChargeChange, onLatePolicy, onRestructure };
@@ -75,10 +78,11 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
       <PageHeader title={debt.name} subtitle={`${debt.lender || label} · ${rate}`} actions={actions} />
       {projection.pastDueMinor > 0 && (
         <p role="alert" className="rounded-sm bg-danger-soft px-3 py-2.5 text-sm font-medium text-[#9a3412]">
-          Tienes {formatMoney(projection.pastDueMinor)} vencidos. Registra el pago para ponerte al día.
+          Tienes {formatMoney(projection.pastDueMinor)} vencidos{lateMinor > 0 ? `, con ${formatMoney(lateMinor)} de mora` : ''}. Registra el pago para ponerte al día.
         </p>
       )}
       <LegalRatesNotice legalStatus={legalStatus} />
+      <LateNotices notices={projection.notices} onOpenSettings={onOpenSettings} />
       {hasUnknownEvents && <p role="status" className="rounded-sm bg-shared-soft px-3 py-2.5 text-[13px] text-shared">{UNKNOWN_EVENTS}</p>}
       {notice && <p role="status" className="rounded-sm bg-shared-soft px-3 py-2.5 text-[13px] text-shared">{notice}</p>}
 
@@ -98,6 +102,7 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
           {card ? <Figure label="Pago total del extracto">{formatMoney(card.payInFullMinor)}</Figure> : hasPlan
             ? <Figure label="Cuotas restantes"><span>{projection.remainingPeriods}</span></Figure>
             : <Figure label="Dueño"><OwnerChip ownerScope={debt.ownerScope} currentOwnerScope={currentOwnerScope} /></Figure>}
+          {lateMinor > 0 && <Figure label="Mora acumulada">{formatMoney(lateMinor)}</Figure>}
         </div>
         {!card && (
           <div className="flex flex-col gap-1.5">
@@ -113,6 +118,7 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
             <Figure label="Intereses">{formatMoney(cost.interestMinor)}</Figure>
             <Figure label="Cargos y seguros">{formatMoney(cost.chargesMinor)}</Figure>
             <Figure label="Impuestos">{formatMoney(cost.taxesMinor)}</Figure>
+            {cost.lateMinor > 0 && <Figure label="Intereses de mora">{formatMoney(cost.lateMinor)}</Figure>}
             <Figure label="Costo total">{formatMoney(cost.totalMinor)}</Figure>
           </div>
           <span className="text-[13px] text-ink-muted tabular-nums">Ya pagaste {formatMoney(cost.paidMinor)} de este costo.</span>

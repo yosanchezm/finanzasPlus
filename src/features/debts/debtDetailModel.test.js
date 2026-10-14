@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { PLAN_CHANGE_KINDS, buildDebtDetail, voidRuleOf, voidSuccessMessage, withReconcileNote } from './debtDetailModel';
-import { INSTALLMENT, makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { DAY_10, INSTALLMENT, MORA_DISBURSEMENT, makeDebt, makeEvent, makeMoraLoan, makePayment } from './debtFixtures';
 
 const disbursement = makeEvent('e0', 'disbursement', '2026-01-05', 1000000);
 
@@ -186,5 +186,31 @@ describe('PLAN_CHANGE_KINDS', () => {
   it('names the events whose save or void moves the cost of other events', () => {
     expect(PLAN_CHANGE_KINDS).toEqual(['rate_change', 'charge_change', 'restructure', 'late_policy']);
     expect(PLAN_CHANGE_KINDS).not.toContain('payment');
+  });
+});
+
+describe('buildDebtDetail: mora in the real cost', () => {
+  const detailOf = (late, events = [MORA_DISBURSEMENT], asOf = DAY_10) => buildDebtDetail({ debt: makeMoraLoan({ late }), events, asOf });
+
+  it('adds the accrued mora (1,375 after 10 days) to the cost and to the total', () => {
+    const withMora = detailOf({ mode: 'usury', graceDays: 0 });
+    const without = detailOf(null);
+
+    expect(withMora.cost.lateMinor).toBe(1375);
+    expect(withMora.cost.totalMinor).toBe(without.cost.totalMinor + 1375);
+    expect(withMora.cost.totalMinor).toBe(withMora.cost.interestMinor + withMora.cost.chargesMinor + withMora.cost.taxesMinor + withMora.cost.lateMinor);
+    expect(withMora.cost.paidMinor).toBe(0);
+  });
+
+  it('keeps the paid mora in the paid part of the cost once the overdue row is settled', () => {
+    const paid = makeEvent('p1', 'payment', DAY_10, 391756);
+    const { cost } = detailOf({ mode: 'usury', graceDays: 0 }, [MORA_DISBURSEMENT, paid]);
+
+    expect(cost.lateMinor).toBe(1375);
+    expect(cost.paidMinor).toBe(180876 + 10000 + 1375);
+  });
+
+  it('is zero without a policy', () => {
+    expect(detailOf(null).cost.lateMinor).toBe(0);
   });
 });

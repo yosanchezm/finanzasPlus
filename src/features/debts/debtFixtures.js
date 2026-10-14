@@ -1,4 +1,4 @@
-import { serializeTerms } from '@finance-core';
+import { resolveLegal, serializeTerms } from '@finance-core';
 
 // Shared builders for the debt UI tests: a 12-installment French loan at 24% EA
 // (installment 93,453; first interest 18,088, second 16,724).
@@ -46,3 +46,14 @@ export const makeCard = (overrides = {}) => ({
   $id: 'c1', householdId: 'h1', name: 'Visa Gold', lender: 'Banco Andino', kind: 'card', ownerScope: 'you', status: 'active', currency: 'COP',
   principalMinor: 500000, openedOn: '2026-04-01', termsVersion: 1, actorId: 'u1', termsJson: serializeTerms(CARD_TERMS), ...overrides,
 });
+
+// The same loan with mora on. With the 28.59% EA usury cap of the spec, on 2026-02-15 (10 days after the first due date)
+// the mora on principal 199,505 is 1,375 and the whole row is 391,756.
+export const MORA_FEE = { id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 10000, cadence: 'per_installment' };
+export const usuryLegal = (...caps) => resolveLegal([], { usuryTable: caps.map(([validFrom, validTo, capEA, modality = 'consumer']) => ({ modality, validFrom, validTo, capEA, source: 'test', verified: true })) });
+export const MORA_LEGAL = usuryLegal(['2026-01-01', '2026-12-31', 28.59]);
+export const makeMoraLoan = ({ late = { mode: 'usury', graceDays: 0 }, legal = MORA_LEGAL, kind = 'consumer' } = {}) => makeDebt({ principalMinor: 10000000, kind, legal }, {
+  kind, principalMinor: 10000000, n: 36, charges: [MORA_FEE], ...(late ? { late } : {}),
+});
+export const DAY_10 = '2026-02-15';
+export const MORA_DISBURSEMENT = makeEvent('e0', 'disbursement', '2026-01-05', 10000000);
