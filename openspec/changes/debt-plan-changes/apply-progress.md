@@ -398,3 +398,63 @@ None for C1 (no schema, no deploy order). From C2 on, web and Nia deploy togethe
 ### Remaining
 
 C2 onward (not started).
+
+## Batch C2 (mora accrual inside project): COMPLETE
+
+Branch `feat/dpc-c2-late-accrual` (from master 23042cb). Core only: no web, Nia, schema or deploy change in code, but from this slice on the web build and the Nia tarball deploy together (owner action 3).
+
+### Tasks
+
+- [x] C2a.1 RED `test/late/accrue.test.js` (23 tests), `test/ledger/rows.test.js` (6 tests), `node16.test.js` (source list)
+- [x] C2a.2 GREEN `src/late/accrue.js`, `src/ledger/rows.js`
+- [x] C2b.1 RED fixture `late-28.59-golden.json`, `test/ledger/project.late.test.js` (23 tests), `test/late/properties.test.js` (7 tests, 200 seeded loans), `test/ledger/project.parity.test.js` (9 tests)
+- [x] C2b.2 GREEN `src/ledger/project.js` (clock, calls before each event and at `asOf`, fields, notices), `rows.js` (`decorate` fields)
+- [x] C2.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| fadf984 `feat(finance-core): accrue late interest per overdue row on unpaid principal with one rounding and expose it in the row amounts due` | C2a | 5 files, 403 insertions, 4 deletions |
+| 050ba5d `feat(finance-core): project mora per row with goldens for the 28.59% installment, notices and invariant properties` | C2b | 7 files, 510 insertions, 6 deletions |
+
+Total vs master before this progress/tasks commit: 10 files, 911 insertions, 8 deletions = 919 changed lines (budget 2,000; each group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| C2a.1 / C2a.2 `accrue.js` | Safety net `packages/finance-core`: 24 files, 439 tests passed. `accrue.test.js` failed at import (module did not exist) and `node16.test.js` failed 1 (source list) | `accrue.test.js`: 23 tests. Goldens 1,375 (exact 1,374.92), 4,125, grace 3 gives 7 days, mid-way cap 1,352 (687.46 + 664.18), a gap between caps carries the earlier one with `late_cap_stale`, fixed 40% equals usury, none / absent / 0% contract multiple give 0, day clock (due date and payment day), no cap gives contract EA + `late_cap_unknown`, base is unpaid principal only, settled and capitalizing rows give 0, path independence | Imports ordered; `addLateNotices` split out. Mutations: `days + 1` failed 17, `row.late.days += 1` failed 5, notices raised on every segment failed 18, cutting segments at `validFrom` instead of the day before failed 1 (added the gap test after the first version of that mutation survived); all restored |
+| C2a.1 / C2a.2 `rows.js` | `rows.test.js` failed 6 (`lateMinor` undefined, no `late` accumulator) | 6 tests: new row, accrued mora in `rowDue` and `rowOutstanding`, paid mora per bucket, rounding unit, settled row, no `late` leak in `decorate` | None needed |
+| C2b.1 / C2b.2 parity | Approval test written before any production change: 8 scenarios hashed on master code (untouched, late and partial payments, bank split + extra payment, rate/charge change + restructure, interest-free + adjustment, manual plan, balance-only, total grace). The first baseline missed `nextDue` (a plan row), so it was re-hashed on the master code once with the final stripping helper | 9 tests green on the new code: every pre-existing field byte-identical and all mora fields 0 | None needed |
+| C2b.1 / C2b.2 `project.late.test.js` | 35 failed in the first RED run (new fields undefined) | 23 tests: the 5 fixture cases (pastDue 391,756; 390,381 on day 10 gives 10,000 / 1,375 / 180,876 / 198,130 and cost 192,251; 100,000; 300,000 then 632), no compounding, bank-stated 5,000 under none, fixed below cap, interest-only, rate change segment (5 days at 24% + 5 at 20%), payment on the due date and the day after, restructure carries the mora (1,375), notices (stale, unknown, mortgage unverified, ordering with `surplus`), interest-free, balance-only. Mutations: removing the call before each event failed 9, removing the call at `asOf` failed 12, dropping `remainingLateInterest` failed 4; all restored | None needed |
+| C2b.1 / C2b.2 `properties.test.js` | Failed with the rest of the RED run | 7 properties over 200 seeded loans (mulberry32): non-negative and monotonic, bounded by the 28.59% cap, zero for none / 0% / before due, independent of charges and taxes, interest-only rows before the last give 0, +/-1 peso with a no-op boundary (>= 195 of 200 identical), non-negative with payments | None needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/late packages/finance-core/test/ledger` exit 0: 13 files, 224 tests passed. `npx vitest run packages/finance-core`: 29 files, 507 tests passed (baseline 24 files, 439). Full `npm test -- --maxWorkers=4`: 111 files, 1,473 tests passed on the first run (baseline before C2: 106 files, 1,405) |
+| Runtime harness command/scenario and exact result | `npm run package:nia` exit 0 (core is bundled into the Nia package). `npm run build` exit 0 |
+| Rollback boundary | Revert the two commits (C2b then C2a): `src/late/accrue.js`, the `late` accumulator, `lateMinor`, `lateInterest` in `rowDue` and the mora term in `rowOutstanding` (`rows.js`), the clock, calls, notices and fields in `project.js`, plus the five test files, the fixture and the node16 source-list line. No stored data depends on them: only debts with `terms.late` (none can be created before D2/F2/C3) project any mora |
+
+### Decisions and deviations from design
+
+- `accrueLate(state, to, legal)` is internal: it is not exported from the barrel (the design file map lists no barrel change for C2) and `node16.test.js` only gained the source-list entry. `addLateNotices` is exported from `accrue.js` for `project.js`.
+- State shape: `lateClock` starts at `terms.openedOn` (rows accrue only after their own `dueOn + graceDays`, so the start only bounds the first window) and `lateNotices` is a deduplicated array on the state. The dedupe key is `code | modality | lastValidTo`; the first occurrence is kept, so its `asOf` is the first day that raised it.
+- Cap notices (`late_cap_stale`, `late_cap_unknown`) are raised only for segments where some row actually had a base, so a debt that is not overdue shows none. `late_mortgage_unverified` is raised whenever the mode in force at `asOf` is not `none` and the modality is `mortgage`, overdue or not (design wording).
+- Segments are cut at the day before every `validFrom` and at every `validTo` of the modality's cap entries, so a gap between two caps is evaluated as carried (stale) and the next cap starts exactly on its `validFrom`. Rows get their own start (`dueOn + graceDays`) inside each segment. Contract-rate changes need no extra cut because accrual runs before every event.
+- `row.late = { exact, days, unit }`: the rounding unit is stored by `accrueLate` (`terms.roundingUnit`), because rows do not know the terms. `lateMinor(row) = roundUnit(exact, unit)` (exported from `rows.js`).
+- `lateBaseMinor` of a plan row is the unpaid principal now, shown only when the row has accrued days (`lateDays > 0`), so a row that was never overdue shows 0; the golden "base 199,505" and "base 91,756" hold.
+- `decorate` hides the private `late` accumulator and adds `lateMinor`, `lateDays`, `lateBaseMinor` to every plan row, so `nextDue` (a plan row) carries them too. The spec wording "new fields 0" was followed literally: the fields exist and are 0 for debts without a policy (the parity test strips them and compares the rest byte for byte).
+- The daily rate keeps the C1 form `(1 + EA)^(1/365) - 1` (the orchestrator brief) rather than the `expm1/log1p` of AD10; both give 0.0006891657555 at 28.59% to the precision the goldens need.
+- A restructure needs no change for C2: arrears (including accrued mora) are already capitalized through `rowOutstanding`; one test pins the 1,375 difference. `waiveLate` and the no-mora-on-replaced-rows checks stay in C3.
+- The fixture holds its own usury table (2026, 28.59%) and the tests inject it through `opts.legal`, so the goldens do not depend on the code table.
+
+### Owner gate
+
+From C2 on, deploy the web build and the Nia tarball together every time (owner action 3): both runtimes must use the same mora engine or reconcile will flip cost rows. Nothing creates a mora policy yet (C3 adds `late_policy`, D2 and F2 add the UIs), so no stored data changes with this slice.
+
+### Remaining
+
+C3 onward (not started).
