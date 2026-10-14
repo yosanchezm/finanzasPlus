@@ -515,7 +515,7 @@ describe('DebtDetailContainer restructure flow', () => {
     const { user } = setup();
     await user.click(screen.getByRole('button', { name: 'Más acciones' }));
 
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Reestructurar']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Reestructurar']);
   });
 
   it('writes nothing until the summary is confirmed, then one restructure event with the new terms and no cost row', async () => {
@@ -672,5 +672,102 @@ describe('DebtDetailContainer mora', () => {
     await user.click(screen.getByRole('button', { name: 'Actualizar los topes en Ajustes' }));
 
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DebtDetailContainer late policy flow', () => {
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const DUE_DAY = '2026-02-05';
+  const moraSetup = (overrides = {}) => setup({ debt: makeMoraLoan({ late: null }), events: [MORA_DISBURSEMENT], today: DAY_10, ...overrides });
+  const openLatePolicy = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Configurar mora' }));
+    return screen.getByRole('dialog');
+  };
+  const chooseUsury = async (user) => {
+    await user.selectOptions(screen.getByLabelText('Interés de mora'), 'usury');
+    fireEvent.change(screen.getByLabelText('Vigente desde'), { target: { value: DUE_DAY } });
+  };
+  const saveMora = (user, name = 'Guardar mora') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+
+  it('offers Configurar mora in the menu of a loan', async () => {
+    const { user } = moraSetup();
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Reestructurar']);
+  });
+
+  it('writes one late_policy event (no cost row) equal to the preview: usury effective on the due date gives mora 1,375', async () => {
+    const { user } = moraSetup();
+    await openLatePolicy(user);
+    await chooseUsury(user);
+    expect(within(screen.getByRole('group', { name: 'Vista previa' })).getByRole('row', { name: /Mora acumulada/ })).toHaveTextContent('$ 0$ 1.375');
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before saving
+    await saveMora(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('den1');
+    expect(data).toMatchObject({ debtId: 'd1', kind: 'late_policy', effectiveOn: DUE_DAY, amountMinor: 0, dedupeKey: 'web:n1', source: 'web', actorId: 'u1' });
+    expect(JSON.parse(data.payloadJson)).toEqual({ late: { mode: 'usury', graceDays: 0 } });
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('reloads, then reconciles the cost rows on fresh events, then refreshes, and reports the rows it changed', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 1 } : NONE; });
+    const { user, onNotify } = moraSetup({ reconcileCosts });
+    await openLatePolicy(user);
+    await chooseUsury(user);
+    await saveMora(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Mora configurada. Se actualizó 1 fila de Costos financieros.');
+  });
+
+  it('creates one late_policy when the save button is tapped twice', async () => {
+    const { user } = moraSetup();
+    await openLatePolicy(user);
+    await chooseUsury(user);
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar mora' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the dialog when the write fails and the retry repeats the same event id and key, finding nothing saved first', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, createNonce, reload, onNotify } = moraSetup();
+    await openLatePolicy(user);
+    await chooseUsury(user);
+    await saveMora(user);
+
+    expect(await screen.findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(onNotify).not.toHaveBeenCalledWith(expect.stringContaining('Mora configurada'));
+    await saveMora(user, 'Reintentar');
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(createNonce).toHaveBeenCalledTimes(1);
+    expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.dedupeKey])).toEqual([['den1', 'web:n1'], ['den1', 'web:n1']]);
+  });
+
+  it('writes nothing more when the form was edited after a lost response that had in fact been saved', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Tiempo agotado'), { code: 500 }));
+    api.findDebtEventByDedupe.mockResolvedValue({ $id: 'den1' });
+    const { user, onNotify } = moraSetup();
+    await openLatePolicy(user);
+    await chooseUsury(user);
+    await saveMora(user);
+    await screen.findByText('Tiempo agotado');
+    await user.clear(screen.getByLabelText('Días de gracia antes de cobrar mora'));
+    await user.type(screen.getByLabelText('Días de gracia antes de cobrar mora'), '3');
+    await saveMora(user, 'Reintentar');
+
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith('La política de mora ya se había registrado, así que no se guardó de nuevo. Revisa el historial.'));
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
   });
 });
