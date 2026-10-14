@@ -171,11 +171,11 @@ Groups: D2a wizard (about 250), D2b detail + payment (about 330), D2c `LatePolic
 ### E1 Nia `legal_rate` (design 700) · deps: A2
 Groups: E1a `legal.js` + extraction (about 350), E1b handler/pending/seam (about 350).
 
-- [ ] E1a.1 RED `functions/nia/debt/legal.test.js`, `extract.test.js`: "la usura de noviembre es 28.2" gives usury 28.20 `consumer` 2026-11; month without year resolves within +/-6 months; 2.82 refused; preview echoes kind, modality, month, value; LLM extracts phrase only. Reqs NI1, NI6.
-- [ ] E1a.2 GREEN `functions/nia/debt/legal.js`, `extract.js`.
-- [ ] E1b.1 RED `handler.test.js`, `pending.test.js`, wiring test: Confirm writes once; second Confirm one row; existing row updates and is reported as update (409 then `deps.updateRow`); nothing written before Confirm; pending <= 1.5 KB; `DEBT_ROW_ACTIONS.legal_rates = ['read','update']` and `PATCH /rows/{id}` seam. Reqs NI1, NI6, NI8.
-- [ ] E1b.2 GREEN `handler.js`, `pending.js`, `index.js`.
-- [ ] E1.CP checkpoint.
+- [x] E1a.1 RED `functions/nia/debt/legal.test.js`, `extract.test.js`: "la usura de noviembre es 28.2" gives usury 28.20 `consumer` 2026-11; month without year resolves within +/-6 months; 2.82 refused; preview echoes kind, modality, month, value; LLM extracts phrase only. Reqs NI1, NI6.
+- [x] E1a.2 GREEN `functions/nia/debt/legal.js`, `extract.js`.
+- [x] E1b.1 RED `handler.test.js`, `pending.test.js`, wiring test: Confirm writes once; second Confirm one row; existing row updates and is reported as update (409 then `deps.updateRow`); nothing written before Confirm; pending <= 1.5 KB; `DEBT_ROW_ACTIONS.legal_rates = ['read','update']` and `PATCH /rows/{id}` seam. Reqs NI1, NI6, NI8.
+- [x] E1b.2 GREEN `handler.js`, `pending.js`, `index.js`.
+- [x] E1.CP checkpoint.
 
 ### E2 Nia rate and charge change (design 1,000) · deps: E1, B1
 Groups: E2a rate change (about 350), E2b callbacks (about 300), E2c charge change + note (about 350).

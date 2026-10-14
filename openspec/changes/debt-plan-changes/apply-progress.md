@@ -582,3 +582,64 @@ None for D1 (no schema, no deploy order). D2 still has its own gate (D2.0: A1 de
 ### Remaining
 
 D2 onward (not started; D2.0 is an owner gate).
+
+## Batch E1 (Nia `legal_rate`: extraction, preview, Confirm with update on 409): COMPLETE
+
+Ran before D2 because D2 is gated by the owner (D2.0: A1 deployed on web and Nia). E1 depends only on A2, so the order is safe. Branch `feat/dpc-e1-nia-legal` (from master ea28fd8, which already holds A to D1).
+
+### Tasks
+
+- [x] E1a.1 RED `functions/nia/debt/legal.test.js` (54 tests in total after E1b), `extract.test.js` (6 new): "la usura de noviembre es 28.2" gives usury 2820 bp, `consumer`, 2026-11; month without year resolves within 6 months of today; 2.82 refused; preview echoes kind, modality, month, value; the model extracts the phrase only
+- [x] E1a.2 GREEN `functions/nia/debt/legal.js`, `extract.js`; plus the shared `legalRateId` and `legalValueInRange` in `packages/finance-core/src/legal.js` (barrel, exact keys test), imported by `src/appwrite.js`
+- [x] E1b.1 RED `handler.test.js` (17 new), `pending.test.js` (1 characterization), `legal.test.js` (`isStorableLegalRate`, `describeLegalRate`), `index.test.js` wiring (4 new): Confirm writes once; a second Confirm leaves one row; an existing row updates and is reported as an update (409 then `deps.updateRow`); nothing is written before Confirm; pending under 300 bytes; row permissions `read` + `update`; `PATCH /rows/{id}`
+- [x] E1b.2 GREEN `handler.js`, `pending.js` (type comment only), `index.js` (`DEBT_ROW_ACTIONS.legal_rates`, `updateRow` in `debtDeps`, classifier text)
+- [x] E1.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 5a4d4b6 `refactor(core): share the legal rate row id and value range between the web and Nia` | E1a (shared core) | 5 files, 106 insertions, 17 deletions |
+| d352cb7 `feat(nia): read a legal rate from a message with the month resolved in code, range guards and a preview` | E1a | 4 files, 414 insertions, 3 deletions |
+| d02512b `feat(nia): confirm a legal rate once, update the existing row on a repeated key, and grant the row team update` | E1b | 8 files, 402 insertions, 17 deletions |
+
+Total vs master before this progress/tasks commit: 15 files, 917 insertions, 32 deletions = 949 changed lines (budget 2,000; each group <= 800). Net growth is smaller than the sum of the commits because `legal.js` and `legal.test.js` were touched by two of them.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| E1a shared core `legalRateId` / `legalValueInRange` | Safety net `functions packages src/appwrite.test.js`: 42 files, 792 tests passed. `legal.row.test.js` 7 failed (`legalRateId is not a function`) | 7 tests: id `lruco202611household-test`, `lrico...`, `lrumg202612...`, `lrsal202701...`, each modality code, cut at 25 characters of household, same key same id; value ranges 500..10000 bp and 100,000..100,000,000 pesos with edges, fractional and string refused, unknown kind refused. `src/appwrite.test.js` stays green (its old `legalRateId` and range tests pass through the core). `packages` 559 tests green | `src/appwrite.js` lost its own id tables, ranges and `isOwn`; `legalRateId` is now a wrapper that defaults the household |
+| E1a.1 / E1a.2 `legal.js` | `legal.test.js` failed at import (module did not exist); 6 `extract.test.js` cases failed (action fell back to `list`) | `legal.test.js` 43 tests at this point: 7 month resolutions on both sides of today, tie goes to the past, explicit year, accents/abbreviations/numbers/`YYYY-MM`, bad months and years; usury 28.2 gives 2820, February in a leap year, IBC 19.49 gives 1949, `"28,2"`, Spanish modality names, unknown modality, 9 refused values, edges 5 and 100, mortgage IBC refused, missing/invalid month; SMMLV year/default year/refusals; missing kind and value; preview echo, IBC-derived cap 19.49 gives 29.24 and 19.06 gives 28.59, no cap for mortgage. `extract.test.js` 6 tests including the prompt wording | Mutations: tie `<` to `<=` failed 1; mortgage code removed failed 1; two-decimal check removed failed 1; the mortgage guard in the preview survived until one more test was added, then failed 1 |
+| E1b.1 / E1b.2 handler | 17 failed in the first RED run (`world()` gained `updateRow`; no `legal_rate` action) | `handler.test.js` 74 tests (17 new): preview with nothing written and a 300-byte pending; Confirm row (id `lruco202611h1`, basis points, `verified: false`, author); second Confirm "ya estaba registrad"; same pending confirmed twice before the done marker leaves one row; 409 then `updateRow` reported as "actualicé"; other month/modality is another row; failed update keeps the pending; IBC preview with derived cap; SMMLV for a year; month resolution in the preview; 2.82 refused with `pending` kept null; SMMLV range and mortgage IBC refusals; missing fields; legal rates unreadable still previews; tampered pending refused; wrong-stage button ignored | Mutations: always "registré" failed 1; storable check disabled failed 1; `verified: true` failed 2; missing-field question disabled failed 1 |
+| E1b.1 / E1b.2 `pending.js` | `pending.test.js` legal rate case | Characterization of the generic `buildPending` (both a monthly and a yearly draft stay under 300 bytes). It passes before and after because the payload builder is generic; the real contract is covered by the handler and wiring tests. Triangulation skipped for the type comment | None needed |
+| E1b.1 / E1b.2 `index.js` wiring | 3 of 4 wiring tests failed (permissions `read` only, no `updateRow` in the deps) | `index.test.js` 13 tests (4 new): classifier prompt names the legal rate; preview then Confirm writes one row with `read("team:t1")` and `update("team:t1")` and three Confirms (one repeated update) keep one row; existing key goes through `PATCH /rows/lruco202611h1` and is reported as an update; 2.82 writes nothing | None needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions scripts` exit 0: 16 files, 328 tests passed (baseline for `functions packages src/appwrite.test.js` before E1: 42 files, 792). Full `npm test -- --maxWorkers=4`: 118 files, 1,670 tests passed on the first run (baseline before E1: 116 files, 1,581) |
+| Runtime harness command/scenario and exact result | `index.test.js` runs the real entry point against a fake `undici.fetch` (Appwrite, Telegram, Gemini): preview, Confirm, repeated Confirm, `PATCH`. `npm run build` exit 0. `npm run package:nia` exit 0 (`functions/nia.tar.gz` written, ignored by git) |
+| Rollback boundary | Revert d02512b (handler, pending comment, index wiring), then d352cb7 (`legal.js`, extraction), then 5a4d4b6 (core id and range). Reverting only d02512b leaves `legal_rate` extracted and previewed but not confirmable (its pending would reach the pay commit and answer that the debt was not found), so revert E1b and E1a together. No stored data depends on them: the table and its unique index are A2, and rows written from Nia are ordinary `legal_rates` rows that the web reads |
+
+### Decisions and deviations from design
+
+- The design named the seam `debtUpdateRow`. The existing `updateRow(table, rowId, data)` already is the `PATCH /rows/{id}` helper, so `debtDeps()` passes it as `updateRow` and no new function was added.
+- `legalRateId` and `legalValueInRange` live in `packages/finance-core/src/legal.js` and the barrel (two new public keys). `src/appwrite.js` keeps exporting `legalRateId(key, householdId = configured)` as a thin wrapper so its callers and tests do not change. The kind/modality validity check in `assertLegalRow` now uses `['ibc','usury','smmlv']` and `'all'` plus `LEGAL_MODALITIES`, which is the same set as the old code tables.
+- Values: the model sends the percent as the user said it (28.2) and code stores basis points (2820); a value with more than two decimals is refused with the same message as an out-of-range one. SMMLV is whole pesos, numbers only.
+- A month without a year resolves to the year that puts it within 6 months of today. At an exact 6-month distance the past wins (October 2026 + "abril" gives April 2026), because a cap is certified before it is typed in. The preview always shows the resolved year.
+- Not asked in the spec, chosen here: the modality defaults to consumer; the month is required for IBC and usury (it is asked, never defaulted); an SMMLV without a year means this year; a mortgage IBC is refused with an explanation, because an IBC never derives a mortgage cap.
+- Exactly-once: the row id is the key. There is no event, so `debt:{pendingId}` is not used; the existing done marker (`pending.done`) answers "ya estaba registrada" and a retry before the marker is saved collides (409) into an update with the same values, which leaves one row.
+- Rows written from Nia carry `source: 'Nia (Telegram)'` and `verified: false`, so an update from Nia of a verified row clears the verified flag (the usury notice then adds "no verificado oficialmente").
+- Confirm re-checks the draft with `isStorableLegalRate` because the pending comes back from the session, not from the reader.
+- The preview does not say whether the key already has a row; Confirm reports "actualicé" instead of "registré" when it does. The design asks for the report, not a pre-read.
+- Nia's reply shows the resolved legal phrase, for example "la tasa de usura (consumo y ordinario) de noviembre de 2026: 28.20% E.A.".
+
+### Owner gate
+
+None for E1. Rows written from Nia need the `legal_rates` table (A2, `npm run migrate:appwrite`) and the new Nia tarball (`npm run package:nia`). Without the table the preview works and Confirm fails with the generic Nia error. D2 still has its own gate (D2.0: A1 deployed on web and Nia) and was not started; E2 was not started either.
+
+### Remaining
+
+E2 onward and D2 (not started; D2.0 is an owner gate).
