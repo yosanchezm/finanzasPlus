@@ -1,6 +1,8 @@
 import { compareIso, hasPeriodicity, isIsoDate } from './calendar.js';
 import { normalizeCard } from './card/config.js';
 import { TermsTooLarge, ValidationError } from './errors.js';
+import { normalizeLate } from './late/policy.js';
+import { LEGAL_MODALITIES } from './legal.js';
 import { assertMinor } from './money.js';
 import { normalizeRate } from './rates.js';
 
@@ -189,6 +191,9 @@ export function validateTerms(input) {
   if (!isInteger(roundingUnit, 1)) throw fail('invalid_terms', `roundingUnit must be a positive whole number, got ${String(roundingUnit)}`);
   terms.roundingUnit = roundingUnit;
   if (input.lateRate !== undefined) terms.lateRate = normalizeRate(input.lateRate);
+  // Only written when present, so terms stored before mora existed serialize byte-identically.
+  if (input.late !== undefined) terms.late = normalizeLate(input.late);
+  if (input.modality !== undefined) terms.modality = oneOf(input.modality, LEGAL_MODALITIES, 'modality');
   if (input.card !== undefined || kind === 'card') terms.card = normalizeCard(input.card);
   return terms;
 }

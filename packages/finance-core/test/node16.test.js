@@ -111,6 +111,7 @@ describe('finance-core sources', () => {
         'src/ledger/rows.js',
         'src/ledger/snapshot.js',
         'src/ledger/tail.js',
+        'src/late/policy.js',
         'src/legal.js',
         'src/money.js',
         'src/prepay/compare.js',
@@ -153,6 +154,7 @@ describe('public barrel (index.js)', () => {
         'CommitError',
         'DEFAULT_LEGAL',
         'EVENT_KINDS',
+        'LATE_MODES',
         'LEGAL_MODALITIES',
         'PERIODICITIES',
         'SMMLV_TABLE',
@@ -176,13 +178,19 @@ describe('public barrel (index.js)', () => {
         'compareStrategies',
         'convertRate',
         'cycleDates',
+        'dailyRate',
         'daysBetween',
+        'defaultLateFor',
         'evaluateCharges',
         'isIsoDate',
+        'lateEAOn',
+        'lateRateOn',
         'legalOf',
         'ley1555Notice',
         'minimumPayment',
+        'modalityOf',
         'normalizeCharges',
+        'normalizeLate',
         'normalizeRate',
         'parseTerms',
         'periodDates',
@@ -224,5 +232,11 @@ describe('public barrel (index.js)', () => {
     expect(api.removeCharge([{ id: 'a', basis: 'fixed' }, { id: 'b', basis: 'pctOfCharge', refId: 'a' }], 'a')).toEqual([]);
     expect(api.normalizeCharges([{ id: 'a', kind: 'fee', basis: 'fixed', value: 10 }])[0]).toMatchObject({ id: 'a', cadence: 'per_installment' });
     expect(typeof api.previewChange).toBe('function');
+    expect(api.dailyRate(28.59)).toBeCloseTo(0.00068917, 8);
+    expect(api.defaultLateFor('mortgage')).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(api.modalityOf({ kind: 'mortgage' })).toBe('mortgage');
+    expect(api.lateEAOn({ kind: 'consumer', rate: api.normalizeRate({ convention: 'EA', value: 24 }), late: { mode: 'usury', graceDays: 0 } }, '2026-10-20').ea).toBe(28.59);
+    expect(api.normalizeLate(undefined)).toEqual({ mode: 'none', graceDays: 0 });
+    expect(api.LATE_MODES).toContain('contract_multiple');
   });
 });

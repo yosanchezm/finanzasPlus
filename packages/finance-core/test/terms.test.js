@@ -226,3 +226,41 @@ describe('serializeTerms / parseTerms', () => {
     expect(codeOf(() => parseTerms(undefined))).toBe('invalid_terms_json');
   });
 });
+
+describe('validateTerms: late policy and modality', () => {
+  it('leaves both keys out when the input has none, so stored terms stay byte-identical', () => {
+    const terms = validateTerms(base());
+    expect('late' in terms).toBe(false);
+    expect('modality' in terms).toBe(false);
+  });
+
+  it('keeps a normalized late policy and the modality override', () => {
+    const terms = validateTerms({ ...base(), late: { mode: 'usury' }, modality: 'low_amount' });
+    expect(terms.late).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(terms.modality).toBe('low_amount');
+    const fixed = validateTerms({ ...base(), late: { mode: 'fixed', rate: { convention: 'EA', value: 40 }, graceDays: 3 } });
+    expect(fixed.late).toEqual({ mode: 'fixed', rate: { value: 40, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, graceDays: 3 });
+  });
+
+  it('survives serialize and parse (the stored JSON keeps late and modality)', () => {
+    const input = { ...base(), kind: 'mortgage', late: { mode: 'contract_multiple', multiple: 1.5, graceDays: 2 }, modality: 'mortgage' };
+    const stored = JSON.parse(serializeTerms(input));
+    expect(stored.late).toEqual({ mode: 'contract_multiple', multiple: 1.5, graceDays: 2 });
+    expect(stored.modality).toBe('mortgage');
+    expect(parseTerms(serializeTerms(input))).toEqual(validateTerms(input));
+  });
+
+  it('rejects an invalid late policy and an unknown modality with typed errors', () => {
+    expect(codeOf(() => validateTerms({ ...base(), late: { mode: 'fixed' } }))).toBe('invalid_late');
+    expect(codeOf(() => validateTerms({ ...base(), late: { mode: 'contract_multiple', multiple: 4 } }))).toBe('invalid_late');
+    expect(codeOf(() => validateTerms({ ...base(), late: { mode: 'usury', graceDays: 91 } }))).toBe('invalid_late');
+    expect(codeOf(() => validateTerms({ ...base(), modality: 'platinum' }))).toBe('invalid_terms');
+    expect(codeOf(() => serializeTerms({ ...base(), late: { mode: 'bogus' } }))).toBe('invalid_late');
+  });
+
+  it('does not mutate the input late object', () => {
+    const input = { ...base(), late: { mode: 'fixed', rate: { convention: 'EA', value: 40 } } };
+    validateTerms(input);
+    expect(input.late).toEqual({ mode: 'fixed', rate: { convention: 'EA', value: 40 } });
+  });
+});

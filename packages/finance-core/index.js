@@ -33,6 +33,7 @@ export {
   usuryFromIbcBp,
   usuryNotice,
 } from './src/legal.js';
+export { LATE_MODES, dailyRate, defaultLateFor, lateEAOn, lateRateOn, modalityOf, normalizeLate } from './src/late/policy.js';
 export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, normalizeCharges, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
 export { evaluateCharges, removeCharge } from './src/charges.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
