@@ -390,3 +390,63 @@ describe('normaliseDebtExtraction: restructure', () => {
     expect(prompt).toMatch(/reestructur/i);
   });
 });
+
+describe('normaliseDebtExtraction: late_policy (F2)', () => {
+  const late = (extra = {}, input = {}) => norm({ action: 'late_policy', debtRef: 'carro', late: { mode: 'usury', ...extra }, ...input });
+  const annual = (value) => ({ value, period: 'annual', compounding: null, timing: null });
+
+  it('reads the usury mode with today as the effective date and no grace days', () => {
+    const result = late();
+
+    expect(result).toMatchObject({ action: 'late_policy', debtRef: 'carro', needsConvention: false, missingFields: [], problems: [] });
+    expect(result.latePolicy).toEqual({ effectiveOn: TODAY, late: { mode: 'usury', graceDays: 0 } });
+  });
+
+  it('reads the four modes, each with only its own field', () => {
+    expect(late({ mode: 'none' }).latePolicy.late).toEqual({ mode: 'none', graceDays: 0 });
+    expect(late({ mode: 'fixed', rate: annual(40) }).latePolicy.late).toEqual({ mode: 'fixed', graceDays: 0, rate: { value: 40, basis: 'effective', periodicity: 'annual', timing: 'arrears' } });
+    expect(late({ mode: 'contract_multiple', multiple: 1.5 }).latePolicy.late).toEqual({ mode: 'contract_multiple', graceDays: 0, multiple: 1.5 });
+    expect(late({ mode: 'usury', multiple: 2, rate: annual(40) }).latePolicy.late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
+  it('keeps a valid effective date and grace days, and falls back to today for a date that is not real', () => {
+    expect(late({ effectiveOn: '2026-10-03', graceDays: 5 }).latePolicy).toEqual({ effectiveOn: '2026-10-03', late: { mode: 'usury', graceDays: 5 } });
+    expect(late({ effectiveOn: 'mañana' }).latePolicy.effectiveOn).toBe(TODAY);
+  });
+
+  it('asks for the mode when the model did not extract a known one', () => {
+    expect(late({ mode: null }).missingFields).toEqual(['late_mode']);
+    expect(late({ mode: 'abusive' }).missingFields).toEqual(['late_mode']);
+    expect(norm({ action: 'late_policy', debtRef: 'carro', late: null }).missingFields).toEqual(['late_mode']);
+  });
+
+  it('asks for the rate of a fixed mora and for the multiple of a contract_multiple mora', () => {
+    expect(late({ mode: 'fixed' }).missingFields).toEqual(['late_rate']);
+    expect(late({ mode: 'contract_multiple' }).missingFields).toEqual(['late_multiple']);
+  });
+
+  it('keeps a fixed rate with no stated convention aside and asks for it with the buttons', () => {
+    const result = late({ mode: 'fixed', rate: { value: 3, period: 'monthly', compounding: null, timing: null } });
+
+    expect(result.needsConvention).toBe(true);
+    expect(result.missingFields).toEqual([]);
+    expect(result.latePolicy).toEqual({ effectiveOn: TODAY, late: { mode: 'fixed', graceDays: 0 }, rateValue: 3 });
+  });
+
+  it('flags a multiple outside 0-3, grace days outside 0-90 and a fixed rate of zero as problems', () => {
+    expect(late({ mode: 'contract_multiple', multiple: 4 }).problems).toEqual(['late_invalid_multiple']);
+    expect(late({ mode: 'contract_multiple', multiple: 0 }).problems).toEqual(['late_invalid_multiple']);
+    expect(late({ graceDays: 91 }).problems).toEqual(['late_invalid_grace']);
+    expect(late({ graceDays: 2.5 }).problems).toEqual(['late_invalid_grace']);
+    expect(late({ mode: 'fixed', rate: annual(0) }).problems).toEqual(['late_invalid']);
+  });
+
+  it('teaches the model the action and the late object', () => {
+    const prompt = debtPrompt('activa mora a la usura', [], [], { today: TODAY });
+
+    expect(prompt).toContain('late_policy');
+    expect(prompt).toContain('contract_multiple');
+    expect(prompt).toContain('graceDays');
+    expect(prompt).toMatch(/mora/i);
+  });
+});
