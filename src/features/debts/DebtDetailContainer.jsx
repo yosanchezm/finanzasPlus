@@ -6,6 +6,7 @@ import DebtDetail from './DebtDetail';
 import PaymentDialog from './PaymentDialog';
 import PrepaymentSimulator from './PrepaymentSimulator';
 import RateChangeDialog from './RateChangeDialog';
+import RestructureDialog from './RestructureDialog';
 import VoidDialog from './VoidDialog';
 import { findDebtEventByDedupe } from '../../appwrite';
 import { loadCashflow } from './cashflow';
@@ -65,6 +66,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
   const statement = useCommitDialog(eventWriter('Extracto registrado.', 'El extracto ya se había registrado, así que no se guardó de nuevo.'));
   const purchase = useCommitDialog(eventWriter('Compra registrada.', 'La compra ya se había registrado, así que no se guardó de nuevo.'));
   const isCard = Boolean(detail?.projection.card);
+  const canRestructure = Boolean(detail) && !isCard && detail.projection.terms.system !== 'none'; // a plan with installments to replace
 
   // After a plan change is saved or voided the cost of past payments can move: repair the cost rows on fresh events (AD16).
   const reconcileAfter = () => reconcileCosts(debt.$id, { fresh: true });
@@ -87,6 +89,15 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
     save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
   });
 
+  const restructure = useCommitDialog({
+    ...flow,
+    afterSave: reconcileAfter,
+    successMessage: (_input, after) => withReconcileNote('Reestructuración registrada.', after),
+    alreadySaved: 'La reestructuración ya se había registrado, así que no se guardó de nuevo. Revisa el historial.',
+    findSaved: ({ nonce }) => findDebtEventByDedupe(`web:${nonce}`),
+    save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
+  });
+
   const voiding = useCommitDialog({
     ...flow,
     afterSave: ({ input }) => (PLAN_CHANGE_KINDS.includes(input.kind) ? reconcileAfter() : undefined),
@@ -104,7 +115,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} onRestructure={canRestructure ? () => restructure.open() : undefined} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}
@@ -129,6 +140,9 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
       )}
       {chargeChange.dialog && detail && (
         <ChargeChangeDialog debt={debt} events={events} projection={detail.projection} today={today} saveState={chargeChange.saveState} onSubmit={chargeChange.submit} onClose={chargeChange.close} />
+      )}
+      {restructure.dialog && detail && (
+        <RestructureDialog debt={debt} events={events} projection={detail.projection} today={today} saveState={restructure.saveState} onSubmit={restructure.submit} onClose={restructure.close} />
       )}
       {simulator && detail && (
         <PrepaymentSimulator

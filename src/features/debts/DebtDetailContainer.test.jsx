@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
@@ -414,13 +414,6 @@ describe('DebtDetailContainer charge change flow', () => {
   };
   const saveCharges = (user, name = 'Guardar cambio') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
 
-  it('lists both plan changes in Más acciones for a loan', async () => {
-    const { user } = setup();
-    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
-
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos']);
-  });
-
   it('previews a fee raised to 12,000 and writes one charge_change event with the real charges, no cost row', async () => {
     const { user } = setup();
     await openChargeChange(user);
@@ -504,6 +497,117 @@ describe('DebtDetailContainer charge change flow', () => {
     expect(within(screen.getByRole('group', { name: 'IVA' })).getByText(/necesita un cargo anterior como base/)).toBeInTheDocument();
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambio' })).toBeDisabled();
     expect(port.createEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('DebtDetailContainer restructure flow', () => {
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const openRestructure = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Reestructurar' }));
+    return screen.getByRole('dialog');
+  };
+  const next = (user) => user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Siguiente' }));
+  const toSummary = async (user) => { await openRestructure(user); await next(user); await next(user); };
+  const saveRestructure = (user, name = 'Guardar reestructuración') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+
+  it('offers "Reestructurar" to a loan, last in Más acciones', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Reestructurar']);
+  });
+
+  it('writes nothing until the summary is confirmed, then one restructure event with the new terms and no cost row', async () => {
+    const { user } = setup();
+    await openRestructure(user);
+    expect(screen.getByText('Paso 1 de 3: Situación actual')).toBeInTheDocument();
+    await next(user);
+    await next(user);
+    const preview = within(screen.getByRole('group', { name: 'Vista previa' }));
+    expect(preview.getByRole('row', { name: /Saldo/ })).toHaveTextContent('$ 10.000.000$ 10.190.876');
+    expect(port.createEvent).not.toHaveBeenCalled();
+    await saveRestructure(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('den1');
+    expect(data).toMatchObject({ debtId: 'd1', kind: 'restructure', effectiveOn: TODAY, amountMinor: 0, dedupeKey: 'web:n1', source: 'web', actorId: 'u1' });
+    const { terms } = JSON.parse(data.payloadJson);
+    expect(terms).toMatchObject({ principalMinor: 10190876, openedOn: TODAY, n: 36, firstDueOn: '2026-03-05' });
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('reloads, then reconciles the cost rows on fresh events, then refreshes, and reports the rows it changed', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+    const { user, onNotify } = setup({ reconcileCosts });
+    await toSummary(user);
+    await saveRestructure(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Reestructuración registrada. Se actualizaron 2 filas de Costos financieros.');
+  });
+
+  it('creates one restructure when the save button is tapped twice', async () => {
+    const { user } = setup();
+    await toSummary(user);
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar reestructuración' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the summary when the write fails and the retry repeats the same event id and key', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, createNonce, reload } = setup();
+    await toSummary(user);
+    await saveRestructure(user);
+
+    expect(await screen.findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Vista previa' })).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+
+    await saveRestructure(user, 'Reintentar');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(createNonce).toHaveBeenCalledTimes(1);
+    expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.dedupeKey])).toEqual([['den1', 'web:n1'], ['den1', 'web:n1']]);
+  });
+
+  it('keeps the saved restructure and says the costs were not refreshed when the reconcile fails', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('sin red'));
+    const { user, onNotify } = setup({ reconcileCosts });
+    await toSummary(user);
+    await saveRestructure(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onNotify).toHaveBeenCalledWith('Reestructuración registrada. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+
+  it('writes a restructure that can be voided while nothing follows it, and a later payment then blocks the void and is named', async () => {
+    const { user } = setup();
+    await toSummary(user);
+    await saveRestructure(user);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    const saved = { $id: id, $createdAt: `${TODAY}T10:00:00.000Z`, ...data };
+    cleanup();
+
+    setup({ events: [...EVENTS, saved] });
+    await user.click(screen.getByRole('button', { name: 'Anular reestructuración del 5 feb' }));
+    expect(within(screen.getByRole('alertdialog')).getByRole('checkbox')).toBeInTheDocument(); // allowed: the confirmation is asked
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancelar' }));
+    cleanup();
+
+    setup({ events: [...EVENTS, saved, makePayment('p9', '2026-02-20', 380381)], today: '2026-02-25' });
+    await user.click(screen.getByRole('button', { name: 'Anular reestructuración del 5 feb' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('No se puede anular: la bloquean el pago del 20 feb.');
+    expect(within(dialog).queryByRole('button', { name: /^Anular/ })).not.toBeInTheDocument();
+    expect(port.createEvent).toHaveBeenCalledTimes(1); // only the restructure itself
   });
 });
 

@@ -3,7 +3,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import RestructureDialog from './RestructureDialog';
-import { makeDebt, makeEvent } from './debtFixtures';
+import { makeDebt, makeEvent, makePayment } from './debtFixtures';
+import { PAYLOAD_TOO_LARGE } from './restructureModel';
 
 // The reference loan of the plan-change specs: 10,000,000 at 24% EA over 36 months with a 10,000 fee, first installment
 // 390,381 due on 2026-02-05. On 2026-02-15 it is 10 days late and the mora is 1,375.
@@ -192,5 +193,132 @@ describe('RestructureDialog step 2: the new conditions', () => {
     await user.clear(fee());
     await user.type(fee(), '12000');
     expect(next()).toBeEnabled();
+  });
+});
+
+describe('RestructureDialog step 3: the summary', () => {
+  const toSummary = async (user) => { await toTerms(user); await user.click(next()); };
+  const previewRow = (name) => within(screen.getByRole('group', { name: 'Vista previa' })).getByRole('row', { name: new RegExp(name) });
+  const saveButton = () => screen.getByRole('button', { name: 'Guardar reestructuración' });
+
+  it('previews the debt before and after, and saves the restructure it built', async () => {
+    const { user, onSubmit } = setup();
+    await toTerms(user);
+    await typeInto(user, 'Número de cuotas', '48');
+    await user.click(next());
+
+    expect(screen.getByText('Paso 3 de 3: Resumen')).toBeInTheDocument();
+    expect(previewRow('Saldo')).toHaveTextContent('$ 10.000.000$ 10.192.251');
+    expect(previewRow('Vencido')).toHaveTextContent('$ 391.756$ 0');
+    expect(previewRow('Mora por pagar')).toHaveTextContent('$ 1.375$ 0');
+    expect(previewRow('Cuotas restantes')).toHaveTextContent('3648');
+    expect(previewRow('Próxima cuota')).toHaveTextContent('$ 380.381$ 319.488');
+    expect(screen.getByRole('group', { name: 'Nuevo plan' })).toHaveTextContent('48 cuotas mensuales');
+    expect(onSubmit).not.toHaveBeenCalled(); // nothing is saved before the button
+
+    await user.click(saveButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const [draft] = onSubmit.mock.calls[0];
+    expect(draft).toMatchObject({ kind: 'restructure', effectiveOn: DAY_10, terms: { principalMinor: 10192251, openedOn: DAY_10, n: 48, firstDueOn: '2026-03-15', rate: { value: 24 }, late: { mode: 'usury' } } });
+    expect(draft).not.toHaveProperty('waiveLate');
+  });
+
+  it('leaves the mora out of the balance and sends waiveLate when it is forgiven', async () => {
+    const { user, onSubmit } = setup();
+    await toTerms(user);
+    await user.click(screen.getByRole('checkbox', { name: /Condonar los intereses de mora/ }));
+    await user.click(next());
+
+    expect(previewRow('Saldo')).toHaveTextContent('$ 10.000.000$ 10.190.876');
+    expect(screen.getByRole('group', { name: 'Nuevo plan' })).toHaveTextContent('Mora condonada$ 1.375');
+    await user.click(saveButton());
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'restructure', waiveLate: true }));
+  });
+
+  it('shows no waived mora when it was kept', async () => {
+    const { user } = setup();
+    await toSummary(user);
+
+    expect(screen.queryByText('Mora condonada')).not.toBeInTheDocument();
+  });
+
+  it('warns that a rate above the usury cap is informational, and does not block saving', async () => {
+    const { user, onSubmit } = setup();
+    await toTerms(user);
+    await typeInto(user, 'Valor de la tasa', '40');
+    await user.click(next());
+
+    expect(screen.getByRole('note')).toHaveTextContent(/supera el tope de usura/);
+    await user.click(saveButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no usury notice for a rate under the cap', async () => {
+    const { user } = setup();
+    await toSummary(user);
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('lists the payment a backdated restructure changes the cost of', async () => {
+    const { user } = setup({ events: [DISBURSEMENT, makePayment('p1', '2026-02-20', 392000)], today: '2026-02-25' });
+    setDate('Vigente desde', '2026-02-10');
+    await toSummary(user);
+
+    const notice = screen.getByRole('region', { name: 'Cambio con fecha pasada' });
+    expect(within(notice).getByText(/Pago del 20 feb/)).toBeInTheDocument();
+  });
+
+  it('blocks saving with a message when the event would not fit its column (payload_too_large)', async () => {
+    const make = (pad) => makeDebt({ principalMinor: 10000000, legal: LEGAL }, { principalMinor: 10000000, n: 36, late: { mode: 'usury' }, charges: [{ ...FEE, label: `Comisión${'x'.repeat(pad)}` }] });
+    const heavy = make(7995 - make(0).termsJson.length); // a terms document of 7,995 characters: the restructure payload goes over 8,000
+    expect(heavy.termsJson.length).toBeLessThanOrEqual(8000);
+    const { user, onSubmit } = setup({ debt: heavy });
+    await toSummary(user);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(PAYLOAD_TOO_LARGE);
+    expect(saveButton()).toBeDisabled();
+    await user.click(saveButton());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('goes back to change the terms and previews the new ones', async () => {
+    const { user } = setup();
+    await toSummary(user);
+    await user.click(screen.getByRole('button', { name: 'Atrás' }));
+    await typeInto(user, 'Número de cuotas', '60');
+    await user.click(next());
+
+    expect(previewRow('Cuotas restantes')).toHaveTextContent('3660');
+  });
+});
+
+describe('RestructureDialog while saving', () => {
+  const summaryWith = async (saveState) => {
+    const debt = moraLoan();
+    const events = [DISBURSEMENT];
+    const user = userEvent.setup();
+    const props = { debt, events, projection: project(debt, events, DAY_10), today: DAY_10, onSubmit: vi.fn(), onClose: vi.fn() };
+    const view = render(<RestructureDialog {...props} saveState={IDLE} />);
+    await user.click(next());
+    await user.click(next());
+    view.rerender(<RestructureDialog {...props} saveState={saveState} />);
+    return { props, user };
+  };
+
+  it('disables the buttons and says it is saving', async () => {
+    await summaryWith({ status: 'saving', error: null, locked: false });
+
+    expect(screen.getByRole('button', { name: 'Guardando…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Atrás' })).toBeDisabled();
+  });
+
+  it('keeps the summary and offers to retry after a failed save', async () => {
+    const { props, user } = await summaryWith({ status: 'error', error: 'Servidor no disponible', locked: false });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Servidor no disponible');
+    expect(screen.getByRole('group', { name: 'Vista previa' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
   });
 });
