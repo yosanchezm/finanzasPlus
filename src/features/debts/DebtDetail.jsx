@@ -10,6 +10,7 @@ import { ProgressBar } from '../../shared/ui/ProgressBar';
 import CardPanel from './CardPanel';
 import EventHistory from './EventHistory';
 import LegalRatesNotice from './LegalRatesNotice';
+import MoreActionsMenu from './MoreActionsMenu';
 import PlanTable from './PlanTable';
 import { formatDueDate, formatEa, kindInfo } from './debtLabels';
 
@@ -37,10 +38,11 @@ function Section({ title, children }) {
 /**
  * Detail of one debt: state, real cost, the full plan and the history. Presentational; it renders
  * the projection it is given and nothing else (no optimistic figures). `detail` is `buildDebtDetail(...)`
- * or null when the stored terms cannot be read. Actions only appear when their handler is passed.
+ * or null when the stored terms cannot be read. Actions only appear when their handler is passed; the plan-change
+ * handlers (`onRateChange`, `onChargeChange`, `onLatePolicy`, `onRestructure`) fill the "Más acciones" menu.
  * `legalStatus` ('ok' | 'missing' | 'unavailable') adds the legal rates notice; events of a newer app version add their own.
  */
-export default function DebtDetail({ debt, detail, currentOwnerScope, notice, legalStatus, onBack, onPay, onSimulate, onVoid, onStatement, onCharge }) {
+export default function DebtDetail({ debt, detail, currentOwnerScope, notice, legalStatus, onBack, onPay, onSimulate, onVoid, onStatement, onCharge, onRateChange, onChargeChange, onLatePolicy, onRestructure }) {
   const { label } = kindInfo(debt.kind);
   const back = <Button variant="ghost" onClick={onBack} className="self-start"><ArrowLeft size={16} aria-hidden="true" />Volver a deudas</Button>;
 
@@ -55,11 +57,14 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
   const open = projection.balanceMinor > 0;
   const rate = formatEa(toEffectiveAnnual(projection.terms.rate));
   const progress = debt.principalMinor > 0 ? Math.max(0, Math.min(100, ((debt.principalMinor - projection.balanceMinor) / debt.principalMinor) * 100)) : 0;
-  const actions = (onPay || onSimulate || onStatement || onCharge) && (
+  const planChanges = { onRateChange, onChargeChange, onLatePolicy, onRestructure };
+  const hasPlanChanges = Object.values(planChanges).some(Boolean);
+  const actions = (onPay || onSimulate || onStatement || onCharge || hasPlanChanges) && (
     <>
       {onStatement && <Button variant="secondary" onClick={onStatement}>Registrar extracto</Button>}
       {onCharge && <Button variant="secondary" onClick={onCharge}>Registrar compra</Button>}
       {onSimulate && !card && hasPlan && open && <Button variant="secondary" onClick={onSimulate}><Calculator size={16} aria-hidden="true" />Simular abono</Button>}
+      {hasPlanChanges && <MoreActionsMenu isCard={Boolean(card)} {...planChanges} />}
       {onPay && <Button onClick={onPay} disabled={!open}><Wallet size={16} aria-hidden="true" />Registrar pago</Button>}
     </>
   );

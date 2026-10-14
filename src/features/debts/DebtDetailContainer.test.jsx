@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
@@ -303,6 +303,100 @@ describe('DebtDetailContainer void flow', () => {
 
     expect(screen.queryByRole('button', { name: /Anular/ })).not.toBeInTheDocument();
     expect(screen.getByText('Anulado')).toBeInTheDocument();
+  });
+});
+
+describe('DebtDetailContainer rate change flow', () => {
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const openRateChange = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Cambiar tasa' }));
+    return screen.getByRole('dialog');
+  };
+  const typeRate = async (user, text) => {
+    const field = screen.getByLabelText('Valor de la tasa');
+    await user.clear(field);
+    await user.type(field, text);
+  };
+  const saveRate = (user, name = 'Guardar cambio') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+
+  it('offers the rate change from Más acciones, previews it and writes one rate_change event, no cost row', async () => {
+    const { user } = setup();
+    await openRateChange(user);
+    await typeRate(user, '20');
+    expect(within(screen.getByRole('group', { name: 'Vista previa' })).getByRole('row', { name: /Próxima cuota/ })).toHaveTextContent('$ 380.381$ 363.790');
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before saving
+    await saveRate(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('den1');
+    expect(data).toMatchObject({ debtId: 'd1', kind: 'rate_change', effectiveOn: TODAY, amountMinor: 0, dedupeKey: 'web:n1', source: 'web', actorId: 'u1' });
+    expect(JSON.parse(data.payloadJson)).toEqual({ rate: { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' });
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('reloads, then reconciles the cost rows on fresh events, then refreshes, and reports the rows it changed', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+    const { user, onNotify } = setup({ reconcileCosts });
+    await openRateChange(user);
+    await typeRate(user, '20');
+    await saveRate(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Cambio de tasa registrado. Se actualizaron 2 filas de Costos financieros.');
+  });
+
+  it('creates one rate_change when the save button is tapped twice', async () => {
+    const { user } = setup();
+    await openRateChange(user);
+    await typeRate(user, '20');
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambio' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the dialog when the write fails and the retry repeats the same event id and key', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, createNonce, reload, onNotify } = setup();
+    await openRateChange(user);
+    await typeRate(user, '20');
+    await saveRate(user);
+
+    expect(await screen.findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(onNotify).not.toHaveBeenCalledWith(expect.stringContaining('Cambio de tasa registrado'));
+
+    await saveRate(user, 'Reintentar');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(createNonce).toHaveBeenCalledTimes(1);
+    expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.dedupeKey])).toEqual([['den1', 'web:n1'], ['den1', 'web:n1']]);
+  });
+
+  it('keeps the saved change and says the costs were not refreshed when the reconcile fails', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('sin red'));
+    const { user, onNotify, reload } = setup({ reconcileCosts });
+    await openRateChange(user);
+    await typeRate(user, '20');
+    await saveRate(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith('Cambio de tasa registrado. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+
+  it('lists a backdated change over a recorded payment as impacted before saving', async () => {
+    const { user } = setup({ events: [...EVENTS, makePayment('e1', TODAY, 390381)], today: '2026-03-10' });
+    await openRateChange(user);
+    await typeRate(user, '30');
+    fireEvent.change(screen.getByLabelText('Vigente desde'), { target: { value: '2026-01-20' } });
+
+    expect(within(screen.getByRole('region', { name: 'Cambio con fecha pasada' })).getByText(/Pago del 5 feb/)).toBeInTheDocument();
   });
 });
 

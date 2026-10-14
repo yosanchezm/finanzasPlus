@@ -73,6 +73,19 @@ describe('DebtDetail', () => {
     expect(screen.getByRole('button', { name: 'Simular abono' })).toBeInTheDocument();
   });
 
+  it('shows Más acciones only when an action is wired, and runs the one chosen', async () => {
+    const onRateChange = vi.fn();
+    const { unmount } = renderDetail();
+    expect(screen.queryByRole('button', { name: 'Más acciones' })).not.toBeInTheDocument();
+    unmount();
+
+    renderDetail({ onRateChange });
+    await userEvent.click(screen.getByRole('button', { name: 'Más acciones' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa']);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Cambiar tasa' }));
+    expect(onRateChange).toHaveBeenCalledTimes(1);
+  });
+
   it('reports a debt it cannot read', () => {
     renderDetail({ detail: null });
 
