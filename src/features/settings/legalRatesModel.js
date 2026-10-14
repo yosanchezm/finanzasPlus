@@ -125,7 +125,7 @@ function rateRow(entry) {
   const month = entry.validFrom.slice(0, 7);
   const badges = [ORIGIN_BADGES[entry.origin] ?? ORIGIN_BADGES.default];
   if (entry.verified !== true) badges.push(UNVERIFIED_BADGE);
-  return { key: `${entry.modality}|${entry.validFrom}`, month, monthLabel: formatMonth(month), capEA: entry.capEA, ibcEA: entry.ibcEA ?? null, origin: entry.origin, source: entry.source ?? '', badges };
+  return { key: `${entry.modality}|${entry.validFrom}`, month, monthLabel: formatMonth(month), capEA: entry.capEA, ibcEA: entry.ibcEA ?? null, origin: entry.origin, source: entry.source ?? '', verified: entry.verified === true, badges };
 }
 
 function staleCap(usuryTable, modality, today) {
@@ -141,7 +141,7 @@ function smmlvView(smmlvTable, today) {
     const badges = [];
     if (entry.origin === 'default') badges.push(ORIGIN_BADGES.default);
     if (entry.verified !== true) badges.push(UNVERIFIED_BADGE);
-    return { year: entry.year, valueMinor: entry.valueMinor, source: entry.source ?? '', origin: entry.origin, badges };
+    return { year: entry.year, valueMinor: entry.valueMinor, source: entry.source ?? '', verified: entry.verified === true, origin: entry.origin, badges };
   });
   const currentYear = Number(today.slice(0, 4));
   const found = smmlvFor(smmlvTable, currentYear);
