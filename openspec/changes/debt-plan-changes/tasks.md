@@ -180,13 +180,13 @@ Groups: E1a `legal.js` + extraction (about 350), E1b handler/pending/seam (about
 ### E2 Nia rate and charge change (design 1,000) · deps: E1, B1
 Groups: E2a rate change (about 350), E2b callbacks (about 300), E2c charge change + note (about 350).
 
-- [ ] E2a.1 RED `planChange.test.js`, `extract.test.js`: `planChange{effectiveOn, mode, newValue, ...}` extraction; effective date default today; preview EA echo, household-cap usury notice (cap 29.00, 30% EA); `installment_too_low` explained with `keep_term` offered; cards skip mode. Reqs NI2, NI7.
-- [ ] E2a.2 GREEN `functions/nia/debt/planChange.js`, `extract.js`, `preview.js`.
-- [ ] E2b.1 RED `pending.test.js`: `nia:mode:keep_term`/`keep_installment` <= 25 bytes, `keep_installment` only French; `nia:conv:*` routed by `CONVENTION_NEXT[pending.action]`; stale button ignored with message and no write; event id `de{id}`, key `debt:{id}`, done marker answers "ya estaba registrado"; double Confirm one event; pending <= 1.5 KB. Reqs NI5, NI8, NI2.
-- [ ] E2b.2 GREEN `pending.js` (`modeKeyboard`, `parseCallback`), `handler.js` (`CONVENTION_NEXT`).
-- [ ] E2c.1 RED charge change: match by label/kind ignoring case and accents; remove "seguro de vida" previews removal and new installment; adding refused with web pointer; backdated note when `impacted.length > 0`; charges rebuilt from live debt at Confirm. Reqs NI2, NI6.
-- [ ] E2c.2 GREEN `planChange.js`, `handler.js`, `preview.js`.
-- [ ] E2.CP checkpoint.
+- [x] E2a.1 RED `planChange.test.js`, `extract.test.js`: `planChange{effectiveOn, mode, newValue, ...}` extraction; effective date default today; preview EA echo, household-cap usury notice (cap 29.00, 30% EA); `installment_too_low` explained with `keep_term` offered; cards skip mode. Reqs NI2, NI7.
+- [x] E2a.2 GREEN `functions/nia/debt/planChange.js`, `extract.js`, `preview.js`.
+- [x] E2b.1 RED `pending.test.js`: `nia:mode:keep_term`/`keep_installment` <= 25 bytes, `keep_installment` only French; `nia:conv:*` routed by `CONVENTION_NEXT[pending.action]`; stale button ignored with message and no write; event id `de{id}`, key `debt:{id}`, done marker answers "ya estaba registrado"; double Confirm one event; pending <= 1.5 KB. Reqs NI5, NI8, NI2.
+- [x] E2b.2 GREEN `pending.js` (`modeKeyboard`, `parseCallback`), `handler.js` (`CONVENTION_NEXT`).
+- [x] E2c.1 RED charge change: match by label/kind ignoring case and accents; remove "seguro de vida" previews removal and new installment; adding refused with web pointer; backdated note when `impacted.length > 0`; charges rebuilt from live debt at Confirm. Reqs NI2, NI6.
+- [x] E2c.2 GREEN `planChange.js`, `handler.js`, `preview.js`.
+- [x] E2.CP checkpoint.
 
 ## Phase F: Nia restructure, Nia mora, card mora (deps: C, D, E)
 

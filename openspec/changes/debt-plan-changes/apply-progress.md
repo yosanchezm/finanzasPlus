@@ -643,3 +643,69 @@ None for E1. Rows written from Nia need the `legal_rates` table (A2, `npm run mi
 ### Remaining
 
 E2 onward and D2 (not started; D2.0 is an owner gate).
+
+## Batch E2 (Nia `rate_change` and `charge_change`: previews, mode and convention callbacks, exactly-once): COMPLETE
+
+Ran after E1 and still before D2 (D2 stays gated by the owner, D2.0). Branch `feat/dpc-e2-nia-changes` (from master e34e354, which already holds A to D1 and E1). No live Appwrite, Gemini or Telegram call was made; the wiring tests run the real entry point against a fake `undici.fetch`. `.env` was never read.
+
+### Tasks
+
+- [x] E2a.1 RED `planChange.test.js`, `extract.test.js`: extraction of `planChange{effectiveOn, mode}` plus the rate; effective date default today; preview EA echo (`2% MV ≈ 26.82% EA`), household cap usury notice (cap 29, 30% EA still previews), `installment_too_low` explained with `keep_term` shown; cards skip the mode. Reqs NI2, NI7
+- [x] E2a.2 GREEN `functions/nia/debt/planChange.js` (new), `extract.js`, `preview.js` (`usuryLines`, `conventionQuestion` extracted for reuse)
+- [x] E2b.1 RED `pending.test.js`, `handler.test.js`, `index.test.js`: `nia:mode:*` (25 bytes), mode asked only for French loans, `nia:conv:*` routed by `CONVENTION_NEXT[pending.action]`, stale buttons ignored with a short message and no write, event id `de{id}`, key `debt:{id}`, "ya estaba registrado", double Confirm and race one event, pending under 1.5 KB. Reqs NI5, NI8, NI2
+- [x] E2b.2 GREEN `pending.js` (`modeKeyboard`, `parseCallback`), `handler.js` (`CONVENTION_NEXT`, `continueRate`, `commitRateChange`), `index.js` (callback regex, classifier text)
+- [x] E2c.1 RED charge change: match by label/kind ignoring case and accents; removal previews the removed charge (and dependents) and the next installment; adding refused with a web pointer before any debt lookup; backdated note when `impacted.length > 0`; charges rebuilt from the live debt at Confirm. Reqs NI2, NI6
+- [x] E2c.2 GREEN `planChange.js`, `handler.js`, `pending.js` (`chargeKeyboard`, `nia:chg:`), `extract.js`, `index.js`
+- [x] E2.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| df9cb88 `feat(nia): read a rate change from a message and preview it with the core replay, EA echo, usury notice and backdated note` | E2a | 5 files, 352 insertions, 10 deletions |
+| 0e20578 `feat(nia): confirm a rate change once from mode and convention buttons, and ignore stale buttons` | E2b | 8 files, 465 insertions, 17 deletions |
+| 06ad32c `feat(nia): change or remove an existing insurance or charge with a preview of the next installment, and send additions to the web` | E2c | 10 files, 770 insertions, 20 deletions |
+| 1ef4bf4 `docs(nia): document the legal rate, rate change and charge change actions` | docs | 1 file, 5 insertions, 2 deletions |
+
+Total vs master before this progress/tasks commit: 12 files, 1,570 insertions, 27 deletions = 1,597 changed lines (budget 2,000; each group <= 800: E2c is 790).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR / mutation |
+|---|---|---|---|
+| E2a.1 / E2a.2 extraction | 7 `extract.test.js` cases failed (action fell back to `list`, prompt without `rate_change`) | `extract.test.js` 40 tests incl. the new `rate_change` block | None needed |
+| E2a.1 / E2a.2 preview | `planChange.test.js` failed at import (module did not exist) | 14 tests: lower rate keeps term (installment, remaining periods, interest before and after, from the core), `keep_installment`, household cap 29.00 with a 30% EA rate, unavailable-tables line, `installment_too_low` falls back to `keep_term` with the explanation, non-French downgrade note, card without mode, backdated note only when a payment's cost changes, unreadable debt, read-only | Mutations: backdated note always on failed 1; fallback condition disabled failed 1. `usuryLines` extracted from `noticeLines` (the create preview tests stayed green) |
+| E2b.1 / E2b.2 pending | `pending.test.js` failed (no `modeKeyboard`, `parseCallback` returned null for `nia:mode:`) | 4 new tests: both buttons <= 25 bytes, only `keep_term` offered for non-French, parse and refuse other modes, 6-candidate and full-draft pendings under 1.5 KB | None needed |
+| E2b.1 / E2b.2 handler | 22 failed in the first RED run (no `rate_change` route, no `mode` stage) | `handler.test.js` 110 tests (about 21 for rate change): mode question for French, preview after the button, straight to preview when the mode was said or the system has no choice, card sends `keep_term`, convention then mode then preview, create convention still works, pick then continue, missing rate, `installment_too_low`, household cap, backdated note, Confirm writes one event with ids `dep1` / `debt:p1`, "ya estaba registrado" on retry and tap, race writes one, rebuild with a payment recorded after the preview, debt gone, `keep_installment` no longer viable at Confirm writes nothing and suggests `keep_term`, premature Confirm, three stale-button cases | Pre-existing handler tests all green. Mutation on the rate path not needed (each branch has its own test) |
+| E2b wiring | 3 `index.test.js` wiring tests failed (classifier text, `nia:mode` not routed) | `index.test.js`: classifier and extractor prompts, mode buttons, preview, three Confirms write one event, stale mode button after confirm | None needed |
+| E2c.1 / E2c.2 pure | `planChange.test.js` and `extract.test.js` charge blocks failed (imports missing / action fell back to `list`) | `readChargeChange`, `chargesInForce` (loan = terms; card folds active events up to today, ignores voided and future), `findCharge` (label, words, kind, several, none), `rebuildCharges`, `previewChargeChange` (remove, set, dependents, ask which, none, no charges, same value, fixed decimals, over 100, backdated note, card, unreadable), `describeChargeChange` | Mutations: removal without dependents failed 3; same-value check removed failed 1. A test fixture hard-coded `$ 10.000` with a plain space (Intl uses a no-break space): changed to `pesos()` |
+| E2c.1 / E2c.2 handler | 41 failed in the combined RED run (charge action unknown, no `nia:chg:`) | `handler.test.js` 110 tests (about 13 for charge change): removal preview with a pending under 400 bytes, add refused with the web pointer and no debt lookup, missing fields, no match lists the charges, several matches use `nia:chg:` buttons, bad or out-of-turn button ignored, debt pick then continue, backdated note, card, Confirm writes the rebuilt set (IVA goes with the fee), double tap and race write one event, web change after the preview is kept, charge or debt gone writes nothing | Mutation: removing the dedupe pre-check at Confirm survived all tests, so a test was added (repeat Confirm of a removal says "ya estaba registrado", not "ya no existe"); the mutation then failed 1 |
+| E2c wiring | `index.test.js` wiring failed once `chg:` was taken out of the callback regex | 3 wiring tests: classifier text, which-insurance buttons, preview, repeated Confirm writes one event, stale `nia:chg` after confirm, add refused | None needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions` exit 0: 12 files, 367 tests passed. Full `npm test -- --maxWorkers=4`: 119 files, 1,766 tests passed on the first run (baseline before E2: 118 files, 1,670 tests) |
+| Runtime harness command/scenario and exact result | `index.test.js` runs the real entry point against a fake `undici.fetch` (Appwrite, Telegram, Gemini). `npm run build` exit 0. `npm run package:nia` exit 0 (`functions/nia.tar.gz` written, ignored by git; the packaging scan found no Node 16 incompatibility) |
+| Rollback boundary | Revert 06ad32c (charge change), then 0e20578 (rate change callbacks and Confirm), then df9cb88 (extraction and preview); the README commit is independent. Reverting only 0e20578 leaves `rate_change` extracted and previewable by the pure layer but unrouted in the handler (its action would fall to the analysis branch), so revert E2c and E2b together, or all three. No stored data depends on them: Nia writes ordinary `rate_change` and `charge_change` events that the web reads and voids |
+
+### Decisions and deviations from design
+
+- Extraction: the new rate rides in the existing `rate` field (value, period, compounding, timing), so the convention rules and the `nia:conv:` buttons are the same as for a new loan. `planChange` holds `effectiveOn`, `mode`, and for charges `chargeRef`, `op` (`set`, `remove`, `add`) and `newValue`. The design listed more fields (`n`, `system`, `periodicity`, `firstDueOn`, `waiveLate`) for restructure; they belong to F1 and were not added.
+- A new callback `nia:chg:{index}` (not in the design) chooses between several matching charges. The button carries the position in `pending.candidates` because charge ids can be long and a callback holds 64 bytes; the candidate charge ids ride in the pending (under 1.5 KB for six). The callback regex in `index.js` gained `mode:` and `chg:`.
+- `installment_too_low`: instead of a second button, Nia explains and shows the `keep_term` preview directly (as the web pre-selects it); the pending then holds `keep_term`. At Confirm, if `keep_installment` is no longer viable on the live debt, nothing is written and Nia asks to repeat the request choosing `keep_term`.
+- Mode: asked only when the debt is a French loan and the user did not say it. A `keep_installment` said for a non-French loan is downgraded with a one-line note; a card always sends `keep_term`.
+- Charge change: removal with dependents (`pctOfCharge`) is confirmed through the preview, which lists what goes with the removed charge (IVA with a fee); it is not refused. Setting a value: a fixed charge needs whole pesos, a percentage must be at most 100, and the same value is answered with "ya tiene ese valor". The charges in force are folded for cards like the web's `chargesInForce` (re-implemented in `planChange.js`, since `functions/` cannot import from `src/`).
+- Charge Confirm checks the dedupe key first (`findEventByDedupe`): after a removal the charge is gone from the live debt, so rebuilding first would answer "ya no existe" to a retry instead of "ya estaba registrado".
+- The backdated note uses the design's wording ("Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web."), also appended to the Confirm reply.
+- The pending of a rate change keeps `{effectiveOn, rate, mode}` (about 150 bytes) and a charge change `{effectiveOn, chargeId, op, newValue}` (under 400 bytes with the envelope); everything else is rebuilt from the live debt at Confirm.
+- `functions/nia/README.md` documented only five actions; the table now has eight, including `legal_rate` from E1.
+
+### Owner gate
+
+Deploy the new Nia tarball (`npm run package:nia`) with or after the web build. No schema change in E2. D2 still has its own gate (D2.0: A1 deployed on web and Nia) and was not started; F* not started.
+
+### Remaining
+
+D2 (owner gate D2.0), then F1-F3.
