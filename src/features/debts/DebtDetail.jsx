@@ -9,8 +9,11 @@ import { PageHeader } from '../../shared/ui/PageHeader';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
 import CardPanel from './CardPanel';
 import EventHistory from './EventHistory';
+import LegalRatesNotice from './LegalRatesNotice';
 import PlanTable from './PlanTable';
 import { formatDueDate, formatEa, kindInfo } from './debtLabels';
+
+const UNKNOWN_EVENTS = 'Esta deuda tiene movimientos de una versión más nueva de la app que esta versión no entiende. Actualiza la app para verlos; mientras tanto no se actualizan sus costos financieros.';
 
 function Figure({ label, children, emphasis = false }) {
   return (
@@ -35,8 +38,9 @@ function Section({ title, children }) {
  * Detail of one debt: state, real cost, the full plan and the history. Presentational; it renders
  * the projection it is given and nothing else (no optimistic figures). `detail` is `buildDebtDetail(...)`
  * or null when the stored terms cannot be read. Actions only appear when their handler is passed.
+ * `legalStatus` ('ok' | 'missing' | 'unavailable') adds the legal rates notice; events of a newer app version add their own.
  */
-export default function DebtDetail({ debt, detail, currentOwnerScope, notice, onBack, onPay, onSimulate, onVoid, onStatement, onCharge }) {
+export default function DebtDetail({ debt, detail, currentOwnerScope, notice, legalStatus, onBack, onPay, onSimulate, onVoid, onStatement, onCharge }) {
   const { label } = kindInfo(debt.kind);
   const back = <Button variant="ghost" onClick={onBack} className="self-start"><ArrowLeft size={16} aria-hidden="true" />Volver a deudas</Button>;
 
@@ -47,6 +51,7 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, on
   const { projection, history, cost } = detail;
   const { nextDue, plan, card } = projection;
   const hasPlan = plan.length > 0;
+  const hasUnknownEvents = projection.notices.some((item) => item.code === 'unknown_event_kind');
   const open = projection.balanceMinor > 0;
   const rate = formatEa(toEffectiveAnnual(projection.terms.rate));
   const progress = debt.principalMinor > 0 ? Math.max(0, Math.min(100, ((debt.principalMinor - projection.balanceMinor) / debt.principalMinor) * 100)) : 0;
@@ -68,6 +73,8 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, on
           Tienes {formatMoney(projection.pastDueMinor)} vencidos. Registra el pago para ponerte al día.
         </p>
       )}
+      <LegalRatesNotice legalStatus={legalStatus} />
+      {hasUnknownEvents && <p role="status" className="rounded-sm bg-shared-soft px-3 py-2.5 text-[13px] text-shared">{UNKNOWN_EVENTS}</p>}
       {notice && <p role="status" className="rounded-sm bg-shared-soft px-3 py-2.5 text-[13px] text-shared">{notice}</p>}
 
       <Section title="Estado de la deuda">

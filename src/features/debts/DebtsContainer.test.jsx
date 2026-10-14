@@ -8,7 +8,7 @@ import DebtsContainer from './DebtsContainer';
 import { makeDebt, makeEvent, makePayment } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({
-  listDebts: vi.fn(), listDebtEvents: vi.fn(), createDebt: vi.fn(), debtPort: vi.fn(),
+  listDebts: vi.fn(), listDebtEvents: vi.fn(), listLegalRates: vi.fn(), createDebt: vi.fn(), debtPort: vi.fn(),
   getTransactionsInRange: vi.fn(), listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
 }));
 
@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.listDebts.mockResolvedValue(DEBTS);
   api.listDebtEvents.mockResolvedValue([]);
+  api.listLegalRates.mockResolvedValue([]);
   api.createDebt.mockResolvedValue({});
   api.debtPort.mockReturnValue(port);
   api.listCostRows.mockResolvedValue([]);
@@ -228,5 +229,73 @@ describe('DebtsContainer detail', () => {
     const verdict = await screen.findByRole('region', { name: 'Recomendación' });
     expect(within(verdict).getByText('Pagar primero la deuda más cara')).toBeInTheDocument();
     expect(within(verdict).getByText(/Tarjeta Visa/)).toBeInTheDocument();
+  });
+});
+
+describe('DebtsContainer household legal rates', () => {
+  const LEGAL_COPY = 'No pudimos leer las tasas legales del hogar; usamos los valores de la app.';
+  const EVENTS = [makeEvent('e0', 'disbursement', '2026-01-05', 1000000), makePayment('e1', '2026-02-05')];
+  const props = { inScope, currentOwnerScope: 'you', householdId: 'h1', user: { $id: 'u1' }, onRefresh: vi.fn(), onNotify: vi.fn() };
+  const open = async () => {
+    api.listDebts.mockResolvedValue([makeDebt()]);
+    api.listDebtEvents.mockResolvedValue(EVENTS);
+    render(<DebtsContainer {...props} />);
+    const user = userEvent.setup();
+    return user;
+  };
+
+  it('a missing table shows the notice on the list and on the detail while the debts load and project', async () => {
+    api.listLegalRates.mockRejectedValue(Object.assign(new Error('Table not found'), { code: 404 }));
+    const user = await open();
+
+    expect(await screen.findByText(LEGAL_COPY)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Totales de deudas' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Crédito de consumo' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Crédito de consumo' })).toBeInTheDocument();
+    expect(screen.getByText(LEGAL_COPY)).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(13);
+  });
+
+  it('shows no notice when the table is readable', async () => {
+    const user = await open();
+
+    await screen.findByRole('region', { name: 'Totales de deudas' });
+    expect(screen.queryByText(LEGAL_COPY)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Crédito de consumo' }));
+    await screen.findByRole('heading', { level: 1, name: 'Crédito de consumo' });
+    expect(screen.queryByText(LEGAL_COPY)).not.toBeInTheDocument();
+  });
+
+  it('gives the wizard the household cap, so it warns against 29 % and not the code default', async () => {
+    // The household row covers the current month, whatever month the suite runs in.
+    const [year, month] = dateInputValue().split('-');
+    const lastDay = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+    api.listLegalRates.mockResolvedValue([{ kind: 'usury', modality: 'consumer', validFrom: `${year}-${month}-01`, validTo: `${year}-${month}-${lastDay}`, value: 2900, source: '', verified: true }]);
+    const user = await open();
+    await user.click(await screen.findByRole('button', { name: 'Nueva deuda' }));
+    await user.click(screen.getByRole('button', { name: /^Consumo/ }));
+    await user.type(screen.getByLabelText('Nombre de la deuda'), 'Libre');
+    await user.type(screen.getByLabelText('Monto del préstamo'), '1000000');
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+    await user.type(screen.getByLabelText('Valor de la tasa'), '29.5');
+
+    expect(screen.getByText(/tope de usura de 29 % E.A./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeEnabled();
+  });
+
+  it('warns about an event of a newer app version and leaves the cost rows alone', async () => {
+    api.listCostRows.mockResolvedValue([{ $id: 'dcghost', debtId: 'd1', source: 'debt', amountMinor: 500 }]);
+    api.listDebts.mockResolvedValue([makeDebt()]);
+    api.listDebtEvents.mockResolvedValue([...EVENTS, makeEvent('f1', 'late_policy_v9', '2026-03-01', 0)]);
+    render(<DebtsContainer {...props} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Crédito de consumo' }));
+
+    expect(await screen.findByText(/movimientos de una versión más nueva de la app/)).toBeInTheDocument();
+    await waitFor(() => expect(api.listCostRows).toHaveBeenCalledWith('d1'));
+    expect(api.createCostRow).not.toHaveBeenCalled();
+    expect(api.updateCostRow).not.toHaveBeenCalled();
+    expect(api.deleteCostRow).not.toHaveBeenCalled();
   });
 });

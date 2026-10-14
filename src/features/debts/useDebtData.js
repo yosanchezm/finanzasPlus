@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createCostRow, deleteCostRow, ensureCostCategory, listCostRows, listDebtEvents, listDebts, updateCostRow } from '../../appwrite';
+import { resolveLegal } from '@finance-core';
+import { createCostRow, deleteCostRow, ensureCostCategory, listCostRows, listDebtEvents, listDebts, listLegalRates, updateCostRow } from '../../appwrite';
 import { planReconcile } from './reconcile';
 
-const LOADING = { status: 'loading', debts: [], events: [], error: null };
+const LOADING = { status: 'loading', debts: [], events: [], error: null, legal: null, legalStatus: null };
+
+const isMissingTable = (error) => error?.code === 404 || error?.status === 404;
+
+// The household legal tables (LR6): a table that cannot be read never fails the load. Debts then compute with the
+// code tables, and `legalStatus` says why: 'missing' (404: the migration has not run) or 'unavailable' (any other failure).
+async function readLegal() {
+  try {
+    return { legal: resolveLegal(await listLegalRates()), legalStatus: 'ok' };
+  } catch (error) {
+    return { legal: resolveLegal.unavailable(), legalStatus: isMissingTable(error) ? 'missing' : 'unavailable' };
+  }
+}
 
 /**
- * Loads debts and their events when the Deudas view mounts (AD9). No optimistic updates and
+ * Loads debts, their events and the household legal tables when the Deudas view mounts (AD9). Every debt is
+ * decorated with the same resolved `legal` tables (also returned as `legal`, with `legalStatus`: 'ok' | 'missing' | 'unavailable'). No optimistic updates and
  * no stale data: a failed load or reload leaves `status: 'error'` with empty rows, so the view
  * never shows balances it could not confirm. Only the newest request may update the state.
  * - `retry()`: back to `loading`, then fetch. `reload()`: fetch while the current rows stay visible.
@@ -23,10 +37,11 @@ export function useDebtData() {
     const request = ++latest.current;
     if (showLoading) setState(LOADING);
     try {
-      const [debts, events] = await Promise.all([listDebts(), listDebtEvents()]);
-      if (request === latest.current) setState({ status: 'ready', debts, events, error: null });
+      const [rows, events, { legal, legalStatus }] = await Promise.all([listDebts(), listDebtEvents(), readLegal()]);
+      const debts = rows.map((debt) => ({ ...debt, legal }));
+      if (request === latest.current) setState({ status: 'ready', debts, events, error: null, legal, legalStatus });
     } catch (error) {
-      if (request === latest.current) setState({ status: 'error', debts: [], events: [], error });
+      if (request === latest.current) setState({ ...LOADING, status: 'error', error });
     }
   }, []);
 

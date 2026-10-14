@@ -177,12 +177,15 @@ export function describeRate(rate) {
 
 const usuryModality = (kind) => (kind === 'mortgage' ? 'mortgage' : 'consumer');
 
-/** Live echo of a rate entry: its label with the EA equivalent and the (informational) usury notice. */
-export function rateEcho(rate, modality, asOf) {
+/**
+ * Live echo of a rate entry: its label with the EA equivalent and the (informational) usury notice.
+ * `legal` is the household's resolved tables (`{ usuryTable }`); without it the code tables apply.
+ */
+export function rateEcho(rate, modality, asOf, legal) {
   if (String(rate.value).trim() === '') return { ok: false };
   try {
     const normalized = normalizeRate(toRate(rate));
-    return { ok: true, label: describeRate(normalized), eaPercent: toEffectiveAnnual(normalized), notice: usuryNotice(normalized, modality, asOf) };
+    return { ok: true, label: describeRate(normalized), eaPercent: toEffectiveAnnual(normalized), notice: usuryNotice(normalized, modality, asOf, { usuryTable: legal?.usuryTable }) };
   } catch {
     return { ok: false };
   }
@@ -226,15 +229,19 @@ function missingFields(state) {
  * Checks the whole form against the core. `issues` lists `{ step, message }` in friendly Spanish;
  * when it is empty, `terms`, a `summary` of the schedule (first installment and totals) and the
  * legal `notices` (informational, never blocking) are ready for the review step.
+ * `legal` is the household's resolved tables (`{ usuryTable, smmlvTable }`); without it the code tables apply.
  */
-export function evaluate(state) {
+export function evaluate(state, legal) {
   const issues = missingFields(state);
   try {
     const terms = toTerms(state);
     if (issues.length) return { issues };
     const schedule = terms.system === 'none' ? [] : buildSchedule(terms);
     const summary = schedule.length ? { ...summarizeSchedule(schedule), firstDueOn: schedule[0].dueOn, firstDueMinor: schedule[0].totalDueMinor } : null;
-    const notices = [usuryNotice(terms.rate, usuryModality(terms.kind), terms.openedOn), ley1555Notice(terms, terms.openedOn)].filter(Boolean);
+    const notices = [
+      usuryNotice(terms.rate, usuryModality(terms.kind), terms.openedOn, { usuryTable: legal?.usuryTable }),
+      ley1555Notice(terms, terms.openedOn, { smmlvTable: legal?.smmlvTable }),
+    ].filter(Boolean);
     return { issues: [], terms, summary, notices };
   } catch (error) {
     const [step, message] = CORE_ISSUES[error?.code] ?? [];

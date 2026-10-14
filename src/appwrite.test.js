@@ -211,7 +211,7 @@ const resetTablesDB = () => {
 describe('debt tables', () => {
   beforeEach(resetTablesDB);
 
-  it('registers the debts and debt_events tables without touching the existing ones', () => {
+  it('registers the debts, debt_events and legal_rates tables without touching the existing ones', () => {
     expect(api.TABLES).toEqual({
       households: 'households',
       members: 'household_members',
@@ -222,6 +222,7 @@ describe('debt tables', () => {
       attachments: 'attachments',
       debts: 'debts',
       debtEvents: 'debt_events',
+      legalRates: 'legal_rates',
     });
   });
 
@@ -532,5 +533,150 @@ describe('debtPort (the commitPlan port contract)', () => {
 
     expect(api.tablesDB.deleteRow).toHaveBeenCalledWith({ databaseId: 'db-test', tableId: 'transactions', rowId: 'dcev1' });
     expect(api.tablesDB.createRow.mock.calls[0][0]).toMatchObject({ tableId: 'debt_events', rowId: 'ev2' });
+  });
+});
+
+describe('legal rates (household legal_rates table)', () => {
+  beforeEach(resetTablesDB);
+
+  const monthly = (extra = {}) => ({
+    kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820, source: 'Resolución 1472', verified: true, actorId: 'user-1', ...extra,
+  });
+  const yearly = (extra = {}) => ({
+    kind: 'smmlv', modality: 'all', validFrom: '2027-01-01', validTo: '2027-12-31', value: 1900000, source: 'Decreto', verified: false, actorId: 'user-1', ...extra,
+  });
+  const dataOf = (input) => ({
+    householdId: 'household-test', kind: input.kind, modality: input.modality, validFrom: input.validFrom, validTo: input.validTo,
+    value: input.value, source: input.source, verified: input.verified, actorId: input.actorId,
+  });
+
+  it('listLegalRates pages through the household rows of legal_rates', async () => {
+    api.tablesDB.listRows.mockResolvedValueOnce({ rows: [{ $id: 'lr1' }, { $id: 'lr2' }] });
+
+    const result = await api.listLegalRates();
+
+    expect(result.map((row) => row.$id)).toEqual(['lr1', 'lr2']);
+    const [{ tableId, queries }] = api.tablesDB.listRows.mock.calls[0];
+    expect(tableId).toBe('legal_rates');
+    expect(parse(queries)).toEqual([
+      { method: 'equal', attribute: 'householdId', values: ['household-test'] },
+      { method: 'limit', values: [100] },
+    ]);
+  });
+
+  it('listLegalRates keeps the SDK status on a missing table so callers can tell 404 from other failures', async () => {
+    api.tablesDB.listRows.mockRejectedValueOnce(missing());
+    await expect(api.listLegalRates()).rejects.toMatchObject({ code: 404 });
+  });
+
+  it('legalRateId is deterministic: lr + kind + modality + month + household, within 36 characters', () => {
+    expect(api.legalRateId(monthly(), 'household-test')).toBe('lruco202611household-test');
+    expect(api.legalRateId(monthly({ kind: 'ibc' }), 'household-test')).toBe('lrico202611household-test');
+    expect(api.legalRateId(monthly({ modality: 'mortgage', validFrom: '2026-12-01', validTo: '2026-12-31' }), 'household-test')).toBe('lrumg202612household-test');
+    expect(api.legalRateId(yearly(), 'household-test')).toBe('lrsal202701household-test');
+    const long = api.legalRateId(monthly(), 'h'.repeat(36));
+    expect(long).toHaveLength(36);
+    expect(long).toBe(`lruco202611${'h'.repeat(25)}`);
+  });
+
+  it('creates the row with the deterministic id, the stored columns and team read + update only', async () => {
+    api.tablesDB.createRow.mockResolvedValueOnce({ $id: 'lruco202611household-test' });
+
+    await api.upsertLegalRate(monthly());
+
+    expect(api.tablesDB.createRow).toHaveBeenCalledTimes(1);
+    expect(api.tablesDB.createRow).toHaveBeenCalledWith({
+      databaseId: 'db-test',
+      tableId: 'legal_rates',
+      rowId: 'lruco202611household-test',
+      data: dataOf(monthly()),
+      permissions: [`read("${TEAM}")`, `update("${TEAM}")`],
+    });
+    expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
+  });
+
+  it('turns a 409 into an update of the same row, with the last saver as actorId (no second row)', async () => {
+    api.tablesDB.createRow.mockRejectedValueOnce(conflict());
+    api.tablesDB.updateRow.mockResolvedValueOnce({ $id: 'lruco202611household-test', value: 2900 });
+
+    const row = await api.upsertLegalRate(monthly({ value: 2900, actorId: 'user-2' }));
+
+    expect(row).toEqual({ $id: 'lruco202611household-test', value: 2900 });
+    expect(api.tablesDB.createRow).toHaveBeenCalledTimes(1);
+    expect(api.tablesDB.updateRow).toHaveBeenCalledWith({
+      databaseId: 'db-test',
+      tableId: 'legal_rates',
+      rowId: 'lruco202611household-test',
+      data: dataOf(monthly({ value: 2900, actorId: 'user-2' })),
+    });
+  });
+
+  it('does not hide a failure that is not a 409, and does not update after it', async () => {
+    api.tablesDB.createRow.mockRejectedValueOnce(serverError());
+
+    await expect(api.upsertLegalRate(monthly())).rejects.toMatchObject({ code: 500 });
+    expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
+  });
+
+  it('accepts the edges of the IBC and usury range (500..10000 bp) for both kinds', async () => {
+    api.tablesDB.createRow.mockResolvedValue({ $id: 'x' });
+
+    for (const kind of ['ibc', 'usury']) {
+      for (const value of [500, 10000]) await expect(api.upsertLegalRate(monthly({ kind, value }))).resolves.toEqual({ $id: 'x' });
+    }
+    expect(api.tablesDB.createRow).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['2.8 typed as a percentage', 280],
+    ['below the minimum', 499],
+    ['above the maximum', 10001],
+    ['a fraction of a basis point', 2820.5],
+    ['not a number', Number.NaN],
+    ['a numeric string', '2820'],
+  ])('rejects an IBC or usury value %s and writes nothing', async (_label, value) => {
+    for (const kind of ['ibc', 'usury']) {
+      await expect(api.upsertLegalRate(monthly({ kind, value }))).rejects.toMatchObject({ reason: 'value_out_of_range' });
+    }
+    expect(api.tablesDB.createRow).not.toHaveBeenCalled();
+    expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
+  });
+
+  it('guards SMMLV in pesos (100,000..100,000,000) and writes nothing when out of range', async () => {
+    api.tablesDB.createRow.mockResolvedValue({ $id: 'x' });
+    await expect(api.upsertLegalRate(yearly({ value: 100000 }))).resolves.toEqual({ $id: 'x' });
+    await expect(api.upsertLegalRate(yearly({ value: 100000000 }))).resolves.toEqual({ $id: 'x' });
+    api.tablesDB.createRow.mockClear();
+
+    for (const value of [99999, 100000001, 1900000.5]) {
+      await expect(api.upsertLegalRate(yearly({ value }))).rejects.toMatchObject({ reason: 'value_out_of_range' });
+    }
+    expect(api.tablesDB.createRow).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown kind or modality, and a modality that does not fit the kind', async () => {
+    for (const bad of [monthly({ kind: 'ipc' }), monthly({ kind: 'toString' }), monthly({ modality: 'constructor' }), monthly({ modality: 'student' }), monthly({ modality: 'all' }), yearly({ modality: 'consumer' })]) {
+      await expect(api.upsertLegalRate(bad)).rejects.toMatchObject({ reason: 'invalid_row' });
+    }
+    expect(api.tablesDB.createRow).not.toHaveBeenCalled();
+  });
+
+  it('rejects a period that does not span exactly one calendar month (ibc, usury) or year (smmlv)', async () => {
+    const badPeriods = [
+      monthly({ validFrom: '2026-11-05' }),
+      monthly({ validTo: '2026-11-29' }),
+      monthly({ validTo: '2026-12-31' }),
+      yearly({ validFrom: '2027-02-01' }),
+      yearly({ validTo: '2027-06-30' }),
+    ];
+    for (const bad of badPeriods) await expect(api.upsertLegalRate(bad)).rejects.toMatchObject({ reason: 'invalid_period' });
+    expect(api.tablesDB.createRow).not.toHaveBeenCalled();
+  });
+
+  it('accepts a leap February and rejects a source longer than the 200-character column', async () => {
+    api.tablesDB.createRow.mockResolvedValue({ $id: 'x' });
+    await expect(api.upsertLegalRate(monthly({ validFrom: '2028-02-01', validTo: '2028-02-29' }))).resolves.toEqual({ $id: 'x' });
+    await expect(api.upsertLegalRate(monthly({ validFrom: '2027-02-01', validTo: '2027-02-29' }))).rejects.toMatchObject({ reason: 'invalid_period' });
+    await expect(api.upsertLegalRate(monthly({ source: 'x'.repeat(201) }))).rejects.toMatchObject({ reason: 'invalid_row' });
   });
 });

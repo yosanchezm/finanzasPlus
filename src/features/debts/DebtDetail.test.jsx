@@ -80,3 +80,33 @@ describe('DebtDetail', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 });
+
+describe('DebtDetail load-time notices', () => {
+  const LEGAL_COPY = 'No pudimos leer las tasas legales del hogar; usamos los valores de la app.';
+  const UNKNOWN_COPY = /movimientos de una versión más nueva de la app/;
+
+  it.each(['missing', 'unavailable'])('shows the legal rates notice without hiding the debt (legalStatus %s)', (legalStatus) => {
+    renderDetail({ legalStatus });
+
+    expect(screen.getByText(LEGAL_COPY)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Estado de la deuda' })).toBeInTheDocument();
+  });
+
+  it('shows no legal rates notice when the rates were read', () => {
+    renderDetail({ legalStatus: 'ok' });
+    expect(screen.queryByText(LEGAL_COPY)).not.toBeInTheDocument();
+  });
+
+  it('warns about events of a newer app version and still shows what it understands', () => {
+    const events = [...THREE_PAYMENTS, makeEvent('f1', 'late_policy_v9', '2026-04-10', 0, { late: { mode: 'usury' } })];
+    renderDetail({ detail: detailOf(events, '2026-04-20') });
+
+    expect(screen.getByText(UNKNOWN_COPY)).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Historial' })).getAllByRole('listitem')).toHaveLength(4);
+  });
+
+  it('shows no newer-version warning when every event is known', () => {
+    renderDetail();
+    expect(screen.queryByText(UNKNOWN_COPY)).not.toBeInTheDocument();
+  });
+});

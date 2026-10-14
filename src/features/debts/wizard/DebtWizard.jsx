@@ -17,10 +17,11 @@ import { STEP_TITLES, evaluate, initialWizard, rateEcho, stepsFor, wizardReducer
  * finished `{ name, lender, ownerScope, terms }` to `onSubmit`; the container does the writing.
  * `saveState` is `{ status: 'idle' | 'saving' | 'error', error? }`; after a failure the dialog and
  * every input stay as they were and the primary button becomes "Reintentar".
+ * `legal` is the household's resolved legal tables; the usury and Ley 1555 notices use them (code tables when absent).
  */
-export default function DebtWizard({ saveState, onSubmit, onClose, today = dateInputValue() }) {
+export default function DebtWizard({ saveState, onSubmit, onClose, legal, today = dateInputValue() }) {
   const [state, dispatch] = useReducer(wizardReducer, today, initialWizard);
-  const result = useMemo(() => evaluate(state), [state]);
+  const result = useMemo(() => evaluate(state, legal), [state, legal]);
   const set = (patch) => dispatch({ type: 'set', patch });
 
   const steps = stepsFor(state.kind);
@@ -41,7 +42,7 @@ export default function DebtWizard({ saveState, onSubmit, onClose, today = dateI
     switch (state.step) {
       case 'kind': return <KindStep kind={state.kind} onPick={(kind) => { dispatch({ type: 'kind', kind }); dispatch({ type: 'step', to: 'next' }); }} />;
       case 'basics': return <BasicsStep state={state} set={set} />;
-      case 'rate': return <RateStep rate={state.rate} echo={rateEcho(state.rate, state.kind === 'mortgage' ? 'mortgage' : 'consumer', state.openedOn)} onChange={(patch) => dispatch({ type: 'rate', patch })} />;
+      case 'rate': return <RateStep rate={state.rate} echo={rateEcho(state.rate, state.kind === 'mortgage' ? 'mortgage' : 'consumer', state.openedOn, legal)} onChange={(patch) => dispatch({ type: 'rate', patch })} />;
       case 'card': return <CardStep card={state.card} dispatch={dispatch} />;
       case 'plan': return <PlanStep state={state} set={set} />;
       case 'charges': return <ChargesStep charges={state.charges} dispatch={dispatch} />;

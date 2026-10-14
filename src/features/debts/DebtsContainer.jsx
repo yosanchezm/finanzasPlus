@@ -62,6 +62,7 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
         otherDebts={list.items.filter((item) => !item.unreadable && item.id !== openDebt.$id && item.balanceMinor > 0).map((item) => ({ id: item.id, name: item.name, eaPercent: item.eaPercent }))}
         inScope={inScope}
         reconcileCosts={data.reconcileCosts}
+        legalStatus={data.legalStatus}
         reload={data.reload}
         currentOwnerScope={currentOwnerScope}
         user={user}
@@ -81,11 +82,12 @@ export default function DebtsContainer({ inScope, currentOwnerScope, scopeContro
         totals={list.totals}
         currentOwnerScope={currentOwnerScope}
         scopeControl={scopeControl}
+        legalStatus={data.legalStatus}
         onAdd={openCreate}
         onOpen={setOpenId}
         onRetry={data.retry}
       />
-      {creating && <DebtWizard saveState={saveState} onSubmit={create} onClose={() => setCreating(null)} />}
+      {creating && <DebtWizard legal={data.legal ?? undefined} saveState={saveState} onSubmit={create} onClose={() => setCreating(null)} />}
     </>
   );
 }

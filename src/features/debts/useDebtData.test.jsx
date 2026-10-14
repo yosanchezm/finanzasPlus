@@ -5,7 +5,7 @@ import * as api from '../../appwrite';
 import { useDebtData } from './useDebtData';
 
 vi.mock('../../appwrite', () => ({
-  listDebts: vi.fn(), listDebtEvents: vi.fn(), listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
+  listDebts: vi.fn(), listDebtEvents: vi.fn(), listLegalRates: vi.fn(), listCostRows: vi.fn(), ensureCostCategory: vi.fn(), createCostRow: vi.fn(), updateCostRow: vi.fn(), deleteCostRow: vi.fn(),
 }));
 
 const DEBTS = [{ $id: 'db1', name: 'Libre inversión' }];
@@ -15,6 +15,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.listDebts.mockResolvedValue(DEBTS);
   api.listDebtEvents.mockResolvedValue(EVENTS);
+  api.listLegalRates.mockResolvedValue([]);
 });
 
 describe('useDebtData', () => {
@@ -24,7 +25,7 @@ describe('useDebtData', () => {
     expect(result.current).toMatchObject({ status: 'loading', debts: [], events: [] });
     await waitFor(() => expect(result.current.status).toBe('ready'));
 
-    expect(result.current).toMatchObject({ debts: DEBTS, events: EVENTS, error: null });
+    expect(result.current).toMatchObject({ debts: [{ $id: 'db1', name: 'Libre inversión' }], events: EVENTS, error: null });
     expect(api.listDebtEvents).toHaveBeenCalledWith();
   });
 
@@ -71,7 +72,78 @@ describe('useDebtData', () => {
     await act(() => result.current.reload());
     await act(async () => { releaseFirst(); });
 
-    expect(result.current.debts).toEqual(DEBTS);
+    expect(result.current.debts.map((debt) => debt.$id)).toEqual(['db1']);
+  });
+});
+
+describe('useDebtData legal rates', () => {
+  const USURY_ROW = { kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2900, source: 'Resolución', verified: true };
+  const capOf = (legal, validFrom) => legal.usuryTable.find((entry) => entry.modality === 'consumer' && entry.validFrom === validFrom)?.capEA;
+
+  it('decorates every debt with the resolved household tables and exposes them with legalStatus ok', async () => {
+    api.listLegalRates.mockResolvedValue([USURY_ROW]);
+    api.listDebts.mockResolvedValue([...DEBTS, { $id: 'db2', name: 'Moto' }]);
+    const { result } = renderHook(() => useDebtData());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current.legalStatus).toBe('ok');
+    expect(result.current.legal.status).toBe('table');
+    expect(result.current.debts).toHaveLength(2);
+    for (const debt of result.current.debts) {
+      expect(capOf(debt.legal, '2026-11-01')).toBe(29);
+      expect(capOf(debt.legal, '2026-10-01')).toBe(28.59); // the code default fills the rest
+    }
+    expect(result.current.debts[0]).toMatchObject({ $id: 'db1', name: 'Libre inversión' });
+  });
+
+  it('an empty but readable table is ok and resolves to the code defaults', async () => {
+    const { result } = renderHook(() => useDebtData());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current.legalStatus).toBe('ok');
+    expect(result.current.legal.status).toBe('defaults');
+    expect(capOf(result.current.debts[0].legal, '2026-10-01')).toBe(28.59);
+  });
+
+  it('a 404 (migration not run) still loads the debts, with code defaults and legalStatus missing', async () => {
+    api.listLegalRates.mockRejectedValue(Object.assign(new Error('Collection not found'), { code: 404 }));
+    const { result } = renderHook(() => useDebtData());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current).toMatchObject({ legalStatus: 'missing', error: null, events: EVENTS });
+    expect(result.current.debts).toHaveLength(1);
+    expect(result.current.debts[0].legal.status).toBe('unavailable');
+    expect(capOf(result.current.debts[0].legal, '2026-10-01')).toBe(28.59);
+    expect(result.current.legal.status).toBe('unavailable');
+  });
+
+  it('any other read failure is legalStatus unavailable and never turns the load into an error', async () => {
+    api.listLegalRates.mockRejectedValue(Object.assign(new Error('Server error'), { code: 500 }));
+    const { result } = renderHook(() => useDebtData());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current).toMatchObject({ legalStatus: 'unavailable', error: null });
+    expect(result.current.debts[0].legal.status).toBe('unavailable');
+  });
+
+  it('a reload reads the rates again, so a saved rate or a recovered table shows up', async () => {
+    api.listLegalRates.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 404 }));
+    const { result } = renderHook(() => useDebtData());
+    await waitFor(() => expect(result.current.legalStatus).toBe('missing'));
+    api.listLegalRates.mockResolvedValue([USURY_ROW]);
+
+    await act(() => result.current.reload());
+
+    expect(result.current.legalStatus).toBe('ok');
+    expect(capOf(result.current.debts[0].legal, '2026-11-01')).toBe(29);
+  });
+
+  it('a failed debts read is still an error even when the rates were readable', async () => {
+    api.listDebts.mockRejectedValueOnce(new Error('sin conexión'));
+    const { result } = renderHook(() => useDebtData());
+
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.debts).toEqual([]);
   });
 });
 

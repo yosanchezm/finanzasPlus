@@ -129,3 +129,25 @@ describe('DebtsView loading and failure', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('DebtsView legal rates notice', () => {
+  const COPY = 'No pudimos leer las tasas legales del hogar; usamos los valores de la app.';
+
+  it.each(['missing', 'unavailable'])('shows the informational notice above the list while the debts still render (legalStatus %s)', (legalStatus) => {
+    renderView({ legalStatus });
+
+    expect(screen.getByRole('status')).toHaveTextContent(COPY);
+    expect(screen.getByRole('article', { name: 'Libre inversión' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Totales de deudas' })).toBeInTheDocument();
+  });
+
+  it('shows no notice when the rates were read, when the status is not known, or while loading', () => {
+    renderView({ legalStatus: 'ok' });
+    expect(screen.queryByText(COPY)).not.toBeInTheDocument();
+  });
+
+  it('does not show the notice before the debts are ready', () => {
+    render(<DebtsView status="loading" items={[]} legalStatus="missing" currentOwnerScope="you" onAdd={vi.fn()} onRetry={vi.fn()} />);
+    expect(screen.queryByText(COPY)).not.toBeInTheDocument();
+  });
+});

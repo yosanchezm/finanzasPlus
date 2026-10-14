@@ -1,3 +1,4 @@
+import { resolveLegal } from '@finance-core';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -55,6 +56,23 @@ describe('DebtWizard rate step', () => {
     await next(user); await next(user); await next(user);
 
     expect(screen.getByText(/tope de usura/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns against the household cap it is given, in the echo and in the review, and still lets the user save', async () => {
+    const legal = resolveLegal([{ kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: '', verified: true }]);
+    const { user, onSubmit } = renderWizard({ legal });
+    await pick(user, 'Consumo');
+    await basics(user, 'Libre inversión', '10000000');
+
+    await fillIn(user, 'Valor de la tasa', '28.8');
+    expect(screen.queryByText(/tope de usura/)).not.toBeInTheDocument();
+
+    await fillIn(user, 'Valor de la tasa', '29.5');
+    expect(screen.getByText(/tope de usura de 29 % E.A./)).toBeInTheDocument();
+    await next(user); await next(user); await next(user);
+    expect(screen.getByText(/tope de usura de 29 % E.A./)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });

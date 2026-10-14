@@ -1,4 +1,5 @@
 import { Account, Client, ID, Permission, Query, Role, Storage, TablesDB } from 'appwrite';
+import { LEGAL_MODALITIES } from '@finance-core';
 
 const env = import.meta.env;
 
@@ -38,6 +39,7 @@ export const TABLES = {
   attachments: 'attachments',
   debts: 'debts',
   debtEvents: 'debt_events',
+  legalRates: 'legal_rates',
 };
 
 const teamRole = Role.team(appwriteConfig.teamId);
@@ -58,6 +60,8 @@ export const permissions = {
   debtRow: () => [Permission.read(teamRole), Permission.update(teamRole)],
   // Debt events are append-only: no update, no delete.
   debtEventRow: () => [Permission.read(teamRole)],
+  // Legal rates are superseded by editing, never deleted.
+  legalRateRow: () => [Permission.read(teamRole), Permission.update(teamRole)],
   // Cost rows are deleted when their payment is voided (AD7), by either member.
   costRow: () => [Permission.read(teamRole), Permission.update(teamRole), Permission.delete(teamRole)],
 };
@@ -427,4 +431,86 @@ export function debtPort() {
     createCostRow,
     deleteCostRow,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Household legal rates (IBC, usury cap, SMMLV). `value` is an integer: basis points for
+// ibc/usury and pesos for smmlv. Rows are superseded by editing, never deleted.
+// ---------------------------------------------------------------------------
+
+const LEGAL_BASIS_POINTS = { min: 500, max: 10000 };
+const LEGAL_SMMLV = { min: 100000, max: 100000000 };
+const LEGAL_SOURCE_MAX = 200;
+// Two-letter modality code inside the deterministic row id; `all` is the modality of smmlv rows.
+const MODALITY_CODES = {
+  all: 'al', consumer: 'co', low_amount: 'lo', productive: 'pd', productive_rural: 'pr', productive_urban: 'pu',
+  popular_rural: 'qr', popular_urban: 'qu', mortgage: 'mg',
+};
+const KIND_CODES = { ibc: 'i', usury: 'u', smmlv: 's' };
+
+const isOwn = (table, key) => Object.prototype.hasOwnProperty.call(table, key);
+const legalError = (reason, message) => Object.assign(new Error(message), { reason });
+const lastDayOf = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+const pad2 = (value) => String(value).padStart(2, '0');
+
+/**
+ * Deterministic id of a legal rate row: `lr{kind}{modality}{yyyymm of validFrom}{household}`, cut to the 36
+ * characters Appwrite allows. Same key, same id, so a second save collides (409) and becomes an update.
+ */
+export function legalRateId({ kind, modality, validFrom }, householdId = appwriteConfig.householdId) {
+  return `lr${KIND_CODES[kind]}${MODALITY_CODES[modality]}${validFrom.slice(0, 4)}${validFrom.slice(5, 7)}${householdId.slice(0, 25)}`;
+}
+
+function assertLegalRow(row) {
+  const { kind, modality, validFrom, validTo, value, source } = row;
+  if (!isOwn(KIND_CODES, kind) || !isOwn(MODALITY_CODES, modality)) throw legalError('invalid_row', 'Tipo o modalidad de tasa legal desconocidos.');
+  if ((kind === 'smmlv') !== (modality === 'all') || (kind !== 'smmlv' && !LEGAL_MODALITIES.includes(modality))) {
+    throw legalError('invalid_row', 'La modalidad no corresponde al tipo de tasa legal.');
+  }
+  if (source !== undefined && (typeof source !== 'string' || source.length > LEGAL_SOURCE_MAX)) {
+    throw legalError('invalid_row', `La fuente debe ser texto de máximo ${LEGAL_SOURCE_MAX} caracteres.`);
+  }
+  const range = kind === 'smmlv' ? LEGAL_SMMLV : LEGAL_BASIS_POINTS;
+  if (!Number.isSafeInteger(value) || value < range.min || value > range.max) {
+    throw legalError('value_out_of_range', 'El valor está fuera del rango permitido.');
+  }
+  const [, year, month] = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(validFrom)) || [];
+  const first = kind === 'smmlv' ? `${year}-01-01` : `${year}-${month}-01`;
+  const last = kind === 'smmlv' ? `${year}-12-31` : `${year}-${month}-${pad2(lastDayOf(Number(year), Number(month)))}`;
+  if (!year || validFrom !== first || validTo !== last) {
+    throw legalError('invalid_period', 'El periodo debe abarcar un mes completo (un año completo para el SMMLV).');
+  }
+}
+
+/** Every `legal_rates` row of the household. Rejects with the SDK error (`code: 404` when the table does not exist yet). */
+export async function listLegalRates() {
+  return listAllRows(TABLES.legalRates);
+}
+
+/**
+ * Creates the row, or updates it when the same key already exists (409), so saving twice never leaves two rows.
+ * Nothing is written when a guard fails (rejects with `reason`: `invalid_row`, `invalid_period`, `value_out_of_range`).
+ * @param {{ kind: string, modality: string, validFrom: string, validTo: string, value: number, source?: string, verified?: boolean, actorId: string }} row
+ */
+export async function upsertLegalRate(row) {
+  assertConfig();
+  assertLegalRow(row);
+  const rowId = legalRateId(row);
+  const data = {
+    householdId: appwriteConfig.householdId,
+    kind: row.kind,
+    modality: row.modality,
+    validFrom: row.validFrom,
+    validTo: row.validTo,
+    value: row.value,
+    source: row.source ?? '',
+    verified: row.verified === true,
+    actorId: row.actorId,
+  };
+  try {
+    return await tablesDB.createRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.legalRates, rowId, data, permissions: permissions.legalRateRow() });
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+    return tablesDB.updateRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.legalRates, rowId, data });
+  }
 }

@@ -8,6 +8,8 @@ const COST_ROW_PREFIX = 'dc';
  * amount the projection computes now. A backdated payment or a void can move that amount, or
  * remove the payment altogether, so existing rows are compared by value, not only by presence.
  * Only rows the debt module wrote (`source: 'debt'`, id `dc…`) can be changed or deleted.
+ * A debt with an event kind this version does not know (written by a newer app) is skipped: its costs cannot
+ * be recomputed faithfully here, so nothing is created, changed or deleted (AD2).
  * @param {object} debt A `debts` row.
  * @param {object[]} events The debt's `debt_events` rows.
  * @param {object[]} costRows The `transactions` rows whose `debtId` is the debt.
@@ -16,10 +18,12 @@ const COST_ROW_PREFIX = 'dc';
  */
 export function planReconcile(debt, events, costRows) {
   const active = activeEvents(events);
-  const horizon = active.reduce((latest, event) => (event.effectiveOn > latest ? event.effectiveOn : latest), '');
+  const horizon = events.reduce((latest, event) => (event.effectiveOn > latest ? event.effectiveOn : latest), '');
   const expected = new Map();
   if (horizon) {
-    for (const entry of project(debt, events, horizon).applied) {
+    const projection = project(debt, events, horizon);
+    if (projection.notices.some((notice) => notice.code === 'unknown_event_kind')) return { create: [], update: [], remove: [] };
+    for (const entry of projection.applied) {
       const event = active.find((candidate) => candidate.id === entry.eventId);
       if (entry.costMinor > 0 && event) expected.set(`${COST_ROW_PREFIX}${entry.eventId}`, { event, costMinor: entry.costMinor });
     }

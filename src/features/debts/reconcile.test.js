@@ -90,3 +90,23 @@ describe('planReconcile', () => {
     expect(planReconcile(free, events, [costRow('e1', 10)]).remove).toEqual(['dce1']);
   });
 });
+
+describe('planReconcile with events from a newer app version (AD2)', () => {
+  const future = (id, on) => event(id, 'late_policy_v9', on, 0, { late: { mode: 'usury' } });
+
+  it('changes nothing when the debt has an event kind this version does not know, even if a cost row looks stale or orphaned', () => {
+    const events = [payment('e1', '2026-02-05'), payment('e2', '2026-03-05'), future('f1', '2026-03-10')];
+    const rows = [costRow('e1', 999), costRow('ghost', 500)];
+
+    expect(planReconcile(debt, events, rows)).toEqual({ create: [], update: [], remove: [] });
+    // Without the unknown event the same rows are repaired, so the skip is what keeps them untouched.
+    const known = planReconcile(debt, events.slice(0, 2), rows);
+    expect(known.create.map((row) => row.id)).toEqual(['dce2']);
+    expect(known.update).toEqual([{ id: 'dce1', data: { amountMinor: 18088 } }]);
+    expect(known.remove).toEqual(['dcghost']);
+  });
+
+  it('also skips a debt whose only events are unknown, instead of removing all its cost rows', () => {
+    expect(planReconcile(debt, [future('f1', '2026-03-10')], [costRow('e1', 18088)])).toEqual({ create: [], update: [], remove: [] });
+  });
+});

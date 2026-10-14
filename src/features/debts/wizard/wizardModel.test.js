@@ -1,3 +1,4 @@
+import { resolveLegal } from '@finance-core';
 import { describe, expect, it } from 'vitest';
 import { CHARGE_PRESETS, evaluate, initialWizard, rateEcho, stepsFor, toTerms, wizardReducer } from './wizardModel';
 
@@ -163,5 +164,44 @@ describe('rateEcho', () => {
   it('is not ok for an empty or invalid rate', () => {
     expect(rateEcho({ value: '', basis: 'effective', periodicity: 'annual', timing: 'arrears' }, 'consumer', TODAY).ok).toBe(false);
     expect(rateEcho({ value: '100', basis: 'effective', periodicity: 'monthly', timing: 'advance' }, 'consumer', TODAY).ok).toBe(false);
+  });
+});
+
+describe('household legal tables in the wizard', () => {
+  // Household cap for consumer credit in the opening month: 29.00 % EA (2900 bp) and SMMLV 2026 of 2,000,000.
+  const legal = resolveLegal([
+    { kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: 'Resolución', verified: true },
+    { kind: 'smmlv', modality: 'all', validFrom: '2026-01-01', validTo: '2026-12-31', value: 2000000, source: '', verified: false },
+  ]);
+  const at = (value) => ({ value, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
+
+  it('warns against the household cap of 29.00 (not 28.59) and never blocks saving', () => {
+    const state = fill('consumer', {}, [rate({ value: '29.5' })]);
+
+    const result = evaluate(state, legal);
+
+    expect(result.issues).toEqual([]);
+    expect(result.notices).toEqual([expect.objectContaining({ code: 'usury_above_cap', capEA: 29, blocking: false })]);
+    expect(evaluate(state).notices).toEqual([expect.objectContaining({ code: 'usury_above_cap', capEA: 28.59 })]);
+  });
+
+  it('stays silent for a rate between the code cap and the household cap, and warns without the household table', () => {
+    const state = fill('consumer', {}, [rate({ value: '28.8' })]);
+
+    expect(evaluate(state, legal).notices).toEqual([]);
+    expect(evaluate(state).notices).toEqual([expect.objectContaining({ code: 'usury_above_cap', capEA: 28.59 })]);
+  });
+
+  it('echoes the household cap while the rate is typed', () => {
+    expect(rateEcho(at('29.5'), 'consumer', TODAY, legal)).toMatchObject({ ok: true, notice: { code: 'usury_above_cap', capEA: 29 } });
+    expect(rateEcho(at('28.8'), 'consumer', TODAY, legal)).toMatchObject({ ok: true, notice: null });
+    expect(rateEcho(at('28.8'), 'consumer', TODAY)).toMatchObject({ ok: true, notice: { capEA: 28.59 } });
+  });
+
+  it('uses the household SMMLV for the Ley 1555 threshold of a mortgage', () => {
+    const state = fill('mortgage', { principal: '1700000000', n: '180' }, [rate({ value: '12' })]);
+
+    expect(evaluate(state).notices).toEqual([expect.objectContaining({ code: 'ley1555_scope_unverified', thresholdMinor: 1540796400, aboveThreshold: true })]);
+    expect(evaluate(state, legal).notices).toEqual([expect.objectContaining({ code: 'ley1555_scope_unverified', thresholdMinor: 1760000000, aboveThreshold: false })]);
   });
 });

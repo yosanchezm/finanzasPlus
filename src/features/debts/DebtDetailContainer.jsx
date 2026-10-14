@@ -18,7 +18,7 @@ const REPAIR_FAILED = 'No se pudieron verificar los costos financieros de esta d
  * One open debt: projects it, repairs its cost rows once on open (AD8) and owns the write dialogs.
  * `events` are all loaded events (filtered here). Nothing is shown as recorded until `reload()` brought it back.
  */
-export default function DebtDetailContainer({ debt, events: allEvents, otherDebts = [], inScope, reconcileCosts, reload, currentOwnerScope, user, onBack, onRefresh, onNotify, createNonce = defaultNonce, today = dateInputValue() }) {
+export default function DebtDetailContainer({ debt, events: allEvents, otherDebts = [], inScope, reconcileCosts, legalStatus, reload, currentOwnerScope, user, onBack, onRefresh, onNotify, createNonce = defaultNonce, today = dateInputValue() }) {
   const [repairNotice, setRepairNotice] = useState(null);
   const [simulator, setSimulator] = useState(null); // { cashflow } while the simulator is open; null = still unknown
   const events = useMemo(() => allEvents.filter((event) => event.debtId === debt.$id), [allEvents, debt.$id]);
@@ -80,7 +80,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}

@@ -5,6 +5,7 @@ import { Card } from '../../shared/ui/Card';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { PageHeader } from '../../shared/ui/PageHeader';
 import DebtCard from './DebtCard';
+import LegalRatesNotice from './LegalRatesNotice';
 import { formatDueDate } from './debtLabels';
 
 function Totals({ totals }) {
@@ -32,8 +33,11 @@ function LoadingBlock() {
   );
 }
 
-/** Presentational list of debts with totals; loading, failure and empty states included. */
-export default function DebtsView({ status, items, totals, currentOwnerScope, scopeControl, onAdd, onOpen, onRetry }) {
+/**
+ * Presentational list of debts with totals; loading, failure and empty states included.
+ * `legalStatus` ('ok' | 'missing' | 'unavailable') adds the informational legal rates notice once the debts are ready.
+ */
+export default function DebtsView({ status, items, totals, currentOwnerScope, scopeControl, legalStatus, onAdd, onOpen, onRetry }) {
   const actions = (scopeControl || onAdd) && (
     <>
       {scopeControl}
@@ -62,6 +66,7 @@ export default function DebtsView({ status, items, totals, currentOwnerScope, sc
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Deudas" subtitle="Lo que deben, cuánto falta y cuándo vence cada cuota." actions={actions} />
+      {status === 'ready' && <LegalRatesNotice legalStatus={legalStatus} />}
       {body()}
     </div>
   );
