@@ -249,3 +249,55 @@ describe('legal_rate extraction', () => {
     expect(prompt).toMatch(/salario mínimo/i);
   });
 });
+
+describe('normaliseDebtExtraction: rate_change', () => {
+  const change = { action: 'rate_change', debtRef: 'banco', rate: { value: 22, period: 'annual', compounding: 'effective', timing: 'arrears' }, planChange: { effectiveOn: null, mode: null } };
+
+  it('reads the new rate, the effective date (default today) and the mode', () => {
+    const result = norm(change);
+
+    expect(result).toMatchObject({ action: 'rate_change', debtRef: 'banco', needsConvention: false, missingFields: [], problems: [] });
+    expect(result.planChange).toEqual({ effectiveOn: TODAY, mode: null, rate: { value: 22, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, rateValue: 22 });
+    expect(norm({ ...change, planChange: { effectiveOn: '2026-10-20', mode: 'keep_installment' } }).planChange).toMatchObject({ effectiveOn: '2026-10-20', mode: 'keep_installment' });
+  });
+
+  it('asks for the convention when a non-annual rate does not say it, and keeps the stated value', () => {
+    const result = norm({ ...change, rate: { value: 2, period: 'monthly', compounding: null, timing: null } });
+
+    expect(result.needsConvention).toBe(true);
+    expect(result.planChange).toMatchObject({ rate: null, rateValue: 2 });
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it('resolves a fully stated monthly rate with no question', () => {
+    const result = norm({ ...change, rate: { value: 1.8, period: 'monthly', compounding: 'effective', timing: 'arrears' } });
+
+    expect(result.needsConvention).toBe(false);
+    expect(result.planChange.rate).toEqual({ value: 1.8, basis: 'effective', periodicity: 'monthly', timing: 'arrears' });
+  });
+
+  it('reports a missing rate and rejects a negative one', () => {
+    expect(norm({ ...change, rate: null }).missingFields).toEqual(['rate']);
+    expect(norm({ ...change, rate: { value: null } }).missingFields).toEqual(['rate']);
+    expect(norm({ ...change, rate: { value: -3, period: 'annual' } }).problems).toEqual(['invalid_rate']);
+  });
+
+  it('accepts a zero rate', () => {
+    expect(norm({ ...change, rate: { value: 0, period: 'annual' } }).planChange).toMatchObject({ rateValue: 0, rate: { value: 0 } });
+  });
+
+  it('drops a mode that is not one of the two and a malformed date', () => {
+    expect(norm({ ...change, planChange: { mode: 'shorten', effectiveOn: 'hoy' } }).planChange).toMatchObject({ mode: null, effectiveOn: TODAY });
+    expect(norm({ ...change, planChange: null }).planChange).toMatchObject({ mode: null, effectiveOn: TODAY });
+  });
+
+  it('teaches the model the action, the plan change fields and that the new rate goes in rate', () => {
+    const prompt = debtPrompt('bajó la tasa a 22', [], [], { today: TODAY });
+
+    expect(prompt).toContain('rate_change');
+    expect(prompt).toContain('"planChange"');
+    expect(prompt).toContain('keep_term');
+    expect(prompt).toContain('keep_installment');
+    expect(prompt).toMatch(/nueva tasa va en rate/i);
+  });
+});

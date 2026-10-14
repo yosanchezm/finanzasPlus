@@ -107,6 +107,9 @@ export function buildTerms(create) {
   return validateTerms(terms);
 }
 
+/** Asks which convention a stated rate follows (shown with the `nia:conv:` buttons). */
+export const conventionQuestion = (rateValue) => `Dijiste una tasa de ${rateValue}%, pero no me queda claro de qué tipo es. Elige la convención de tasa de tu contrato:`;
+
 /** Applies a rate convention picked with the `nia:conv:` buttons to the value the user stated. */
 export const withConvention = (create, convention) => ({ ...create, rate: normalizeRate({ convention, value: create.rateValue }) });
 
@@ -114,13 +117,17 @@ const LEGAL_UNAVAILABLE_LINE = 'ℹ️ No pude leer las tasas legales del hogar;
 
 // `legal` is the household's resolved tables (the code tables when absent). A preview that cites a cap while the tables
 // could not be read says so in one extra line (legal_rates_unavailable); nothing else changes and nothing blocks.
+/** The usury notice of a rate on a date (empty when the rate is not above the cap), plus the unavailable-tables line when it cites a cap. */
+export function usuryLines(rate, kind, on, legal) {
+  const usury = usuryNotice(rate, kind === 'mortgage' ? 'mortgage' : 'consumer', on, { usuryTable: legal && legal.usuryTable });
+  if (!usury) return [];
+  const lines = [`⚠️ La tasa (${usury.eaPercent.toFixed(2)}% E.A.) supera el tope de usura de ${usury.capEA}% E.A. vigente al ${usury.asOf}${usury.verified ? '' : ' (tope no verificado oficialmente)'}. Es solo informativo: no bloquea el registro.`];
+  if (legal && legal.status === 'unavailable') lines.push(LEGAL_UNAVAILABLE_LINE);
+  return lines;
+}
+
 function noticeLines(terms, legal) {
-  const lines = [];
-  const usury = usuryNotice(terms.rate, terms.kind === 'mortgage' ? 'mortgage' : 'consumer', terms.openedOn, { usuryTable: legal && legal.usuryTable });
-  if (usury) {
-    lines.push(`⚠️ La tasa (${usury.eaPercent.toFixed(2)}% E.A.) supera el tope de usura de ${usury.capEA}% E.A. vigente al ${usury.asOf}${usury.verified ? '' : ' (tope no verificado oficialmente)'}. Es solo informativo: no bloquea el registro.`);
-    if (legal && legal.status === 'unavailable') lines.push(LEGAL_UNAVAILABLE_LINE);
-  }
+  const lines = usuryLines(terms.rate, terms.kind, terms.openedOn, legal);
   if (ley1555Notice(terms, terms.openedOn, { smmlvTable: legal && legal.smmlvTable })) {
     lines.push('ℹ️ Ley 1555: podrías prepagar una hipoteca sin penalización y elegir cómo aplicar el abono. Su alcance para esta deuda no está verificado; revisa tu contrato.');
   }
@@ -149,7 +156,7 @@ function createText(create, terms, legal) {
  */
 export function previewCreate(create, options = {}) {
   if (create.rate === null) {
-    return { ok: false, needsConvention: true, text: `Dijiste una tasa de ${create.rateValue}%, pero no me queda claro de qué tipo es. Elige la convención de tasa de tu contrato:` };
+    return { ok: false, needsConvention: true, text: conventionQuestion(create.rateValue) };
   }
   return guard(() => {
     const terms = buildTerms(create);
