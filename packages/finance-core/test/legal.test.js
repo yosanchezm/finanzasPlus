@@ -50,8 +50,10 @@ describe('usuryNotice', () => {
 
   it('returns no warning and does not throw when no cap entry exists', () => {
     expect(usuryNotice(ea(99), 'microcredit', '2026-10-12', { usuryTable: TABLE })).toBeNull();
-    expect(usuryNotice(ea(99), 'consumer', '2026-12-15', { usuryTable: TABLE })).toBeNull();
+    expect(usuryNotice(ea(99), 'consumer', '2026-09-30', { usuryTable: TABLE })).toBeNull(); // before the first cap
     expect(usuryNotice(ea(99), 'consumer', '2026-10-12', { usuryTable: [] })).toBeNull();
+    // After the last cap the latest one carries forward as stale (see legal.resolve.test.js).
+    expect(usuryNotice(ea(99), 'consumer', '2026-12-15', { usuryTable: TABLE })).toMatchObject({ capEA: 27.1, stale: true });
   });
 
   it('never throws on bad input: notices are best effort and never block', () => {

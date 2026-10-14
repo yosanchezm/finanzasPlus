@@ -1,6 +1,7 @@
 import { compareIso, isIsoDate } from '../calendar.js';
 import { projectCard } from '../card/card.js';
 import { ValidationError } from '../errors.js';
+import { legalOf } from '../legal.js';
 import { buildSchedule } from '../schedule/index.js';
 import { parseTerms, validateTerms } from '../terms.js';
 import { BUCKETS, emptyBuckets } from './allocate.js';
@@ -127,7 +128,7 @@ export function project(debt, events, asOf, opts = {}) {
   const { known, unknown } = readEvents(events);
   const dated = known.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
   const active = sortEvents(activeEvents(dated));
-  const projection = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts });
+  const projection = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts, legal: legalOf(debt, opts) });
   if (unknown.length === 0) return projection;
   // Events written by a newer build are skipped, not guessed at (AD1): one notice each, whatever their date.
   const skipped = unknown.map(({ id, kind }) => ({ code: 'unknown_event_kind', eventId: id, kind }));

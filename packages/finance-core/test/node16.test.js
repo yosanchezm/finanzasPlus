@@ -149,7 +149,9 @@ describe('public barrel (index.js)', () => {
         'ADVICE_DEFAULTS',
         'CONVENTIONS',
         'CommitError',
+        'DEFAULT_LEGAL',
         'EVENT_KINDS',
+        'LEGAL_MODALITIES',
         'PERIODICITIES',
         'SMMLV_TABLE',
         'TERMS_MAX_CHARS',
@@ -166,6 +168,7 @@ describe('public barrel (index.js)', () => {
         'buildCostRow',
         'buildFacts',
         'buildSchedule',
+        'capOn',
         'commitPlan',
         'compareIso',
         'compareStrategies',
@@ -174,6 +177,7 @@ describe('public barrel (index.js)', () => {
         'daysBetween',
         'evaluateCharges',
         'isIsoDate',
+        'legalOf',
         'ley1555Notice',
         'minimumPayment',
         'normalizeRate',
@@ -185,13 +189,16 @@ describe('public barrel (index.js)', () => {
         'rateLabel',
         'registerProjector',
         'renderSummary',
+        'resolveLegal',
         'roundUnit',
         'serializeTerms',
         'simulateExtra',
+        'smmlvFor',
         'sumMinor',
         'summarizeSchedule',
         'toEffectiveAnnual',
         'sortEvents',
+        'usuryFromIbcBp',
         'usuryNotice',
         'validateEvent',
         'validateTerms',
@@ -205,5 +212,9 @@ describe('public barrel (index.js)', () => {
     expect(api.rateLabel(api.normalizeRate({ convention: 'MV', value: 2.1 }))).toBe('2.1% MV ≈ 28.32% EA');
     expect(api.usuryNotice(api.normalizeRate({ convention: 'EA', value: 30 }), 'consumer', '2026-10-12').capEA).toBe(28.59);
     expect(() => api.assertMinor(1.5)).toThrow(api.ValidationError);
+    expect(api.usuryFromIbcBp(1949)).toBe(2924);
+    expect(api.capOn(api.DEFAULT_LEGAL.usuryTable, 'consumer', '2026-12-05')).toMatchObject({ capEA: 28.59, stale: true });
+    expect(api.smmlvFor(api.legalOf({}).smmlvTable, 2026)).toEqual({ valueMinor: 1750905, stale: false });
+    expect(api.LEGAL_MODALITIES).toContain('mortgage');
   });
 });

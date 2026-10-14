@@ -20,7 +20,19 @@ export {
   rateLabel,
   toEffectiveAnnual,
 } from './src/rates.js';
-export { SMMLV_TABLE, USURY_TABLE, ley1555Notice, usuryNotice } from './src/legal.js';
+export {
+  DEFAULT_LEGAL,
+  LEGAL_MODALITIES,
+  SMMLV_TABLE,
+  USURY_TABLE,
+  capOn,
+  legalOf,
+  ley1555Notice,
+  resolveLegal,
+  smmlvFor,
+  usuryFromIbcBp,
+  usuryNotice,
+} from './src/legal.js';
 export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
 export { evaluateCharges } from './src/charges.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
