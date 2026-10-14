@@ -27,6 +27,8 @@ export {
   USURY_TABLE,
   capOn,
   legalOf,
+  legalRateId,
+  legalValueInRange,
   ley1555Notice,
   resolveLegal,
   smmlvFor,

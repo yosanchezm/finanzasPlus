@@ -58,6 +58,12 @@ export const LEGAL_MODALITIES = Object.freeze([
 // Accepted values of a stored row: basis points for `ibc`/`usury`, whole pesos for `smmlv` (AD3).
 const BASIS_POINTS_RANGE = Object.freeze({ min: 500, max: 10000 });
 const SMMLV_RANGE = Object.freeze({ min: 100000, max: 100000000 });
+// Two-letter modality code inside the deterministic row id; `all` is the modality of smmlv rows.
+const MODALITY_CODES = Object.freeze({
+  all: 'al', consumer: 'co', low_amount: 'lo', productive: 'pd', productive_rural: 'pr', productive_urban: 'pu',
+  popular_rural: 'qr', popular_urban: 'qu', mortgage: 'mg',
+});
+const KIND_CODES = Object.freeze({ ibc: 'i', usury: 'u', smmlv: 's' });
 // Ley 1555 scope threshold assumed by the notice, in monthly minimum wages (owner Q1: still unverified).
 const LEY1555_SMMLV_THRESHOLD = 880;
 
@@ -73,6 +79,30 @@ const isObject = (value) => value !== null && typeof value === 'object';
  */
 export function usuryFromIbcBp(ibcBp) {
   return Math.floor((ibcBp * 3 + 1) / 2);
+}
+
+/**
+ * Deterministic id of a legal rate row: `lr{kind}{modality}{yyyymm of validFrom}{household}`, cut to the 36
+ * characters Appwrite allows. Same key, same id, so a second save collides (409) and becomes an update.
+ * The web and Nia both build it here, so a rate saved from one is found by the other.
+ * @param {{ kind: 'ibc' | 'usury' | 'smmlv', modality: string, validFrom: string }} key `modality` is `all` for `smmlv`.
+ * @param {string} householdId
+ * @returns {string}
+ */
+export function legalRateId({ kind, modality, validFrom }, householdId) {
+  return `lr${KIND_CODES[kind]}${MODALITY_CODES[modality]}${validFrom.slice(0, 4)}${validFrom.slice(5, 7)}${householdId.slice(0, 25)}`;
+}
+
+/**
+ * Whether a stored value is in range: basis points (500..10000) for `ibc`/`usury`, whole pesos
+ * (100,000..100,000,000) for `smmlv`. An unknown kind is never in range.
+ * @param {string} kind
+ * @param {number} value
+ * @returns {boolean}
+ */
+export function legalValueInRange(kind, value) {
+  if (kind === 'smmlv') return inRange(value, SMMLV_RANGE);
+  return (kind === 'ibc' || kind === 'usury') && inRange(value, BASIS_POINTS_RANGE);
 }
 
 const rowKey = (modality, validFrom) => `${modality}|${validFrom}`;

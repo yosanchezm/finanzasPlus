@@ -189,6 +189,8 @@ describe('public barrel (index.js)', () => {
         'lateEAOn',
         'lateRateOn',
         'legalOf',
+        'legalRateId',
+        'legalValueInRange',
         'ley1555Notice',
         'minimumPayment',
         'modalityOf',
