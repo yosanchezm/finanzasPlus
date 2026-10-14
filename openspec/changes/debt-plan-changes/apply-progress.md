@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -168,4 +168,61 @@ Owner action 4 is now possible once the migration (`npm run migrate:appwrite`) h
 
 ### Remaining
 
-B1 onward (not started).
+B1 below; B2 onward not started.
+
+## Batch B1 (previewChange, removeCharge, void rules, history summaries): COMPLETE
+
+Branch `feat/dpc-b1-preview-change` (from master 0145d00). No live Appwrite call was made; the web tests mock `src/appwrite`. No dev server was started.
+
+### Tasks
+
+- [x] B1a.1 RED `packages/finance-core/test/ledger/preview.test.js`, barrel exact-keys and source list in `test/node16.test.js`
+- [x] B1a.2 GREEN `src/ledger/{snapshot,preview}.js`, `src/prepay/simulate.js` (uses the shared snapshot), `src/charges.js` (`removeCharge`), `src/ledger/tail.js`, barrel (`previewChange`, `removeCharge`, `normalizeCharges`); `card/card.js` untouched (the characterization test passed as is)
+- [x] B1b.1 RED `debtDetailModel.test.js`, `eventSummary.test.js`, `EventHistory.test.jsx`, `VoidDialog.test.jsx`, plus three container tests in `DebtDetailContainer.test.jsx`
+- [x] B1b.2 GREEN `eventSummary.js`, `debtDetailModel.js`, `EventHistory.jsx`, `VoidDialog.jsx`, `DebtDetailContainer.jsx` (void success message by kind)
+- [x] B1.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 82c8f12 `feat(finance-core): preview rate, charge and restructure changes before saving them` | B1a core | 8 files, 415 insertions, 20 deletions |
+| 6ef16e7 `feat(debts): summarize plan changes in the history and void them, guarding the restructure` | B1b web | 10 files, 593 insertions, 17 deletions |
+
+Total vs master before this progress/tasks commit: 18 files, 1,008 insertions, 37 deletions = 1,045 changed lines (budget 2,000; each group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| B1a.1 / B1a.2 | Safety net `npx vitest run packages/finance-core src/features/debts`: 45 files, 576 tests passed. New: `preview.test.js` failed at import, and `node16.test.js` failed 3 tests (barrel exact keys, working functions, source list) | `preview.test.js` 22/22 and `node16.test.js` green; `packages/finance-core functions/nia src/features/debts`: 56 files, 787 tests passed. First GREEN run had 6 failures that were test-data bugs, not code bugs (a nominal-rate shape, backdated by one day, a payment that overpaid the rebuilt row, a manual plan below its interest, card statements closed by the reference date, the shape of a normalized ZERO rate) | Mutations: reference date instead of `max(on, effectiveOn)` and a non-transitive `removeCharge` each failed the intended tests; sources restored |
+| B1b.1 / B1b.2 model + summaries | `eventSummary.test.js` failed at import; `debtDetailModel.test.js` 24 failed (`voidRuleOf` and `voidSuccessMessage` did not exist, history had no summary or guard fields) | 39 tests in the two files | None needed |
+| B1b.1 / B1b.2 dialogs and history | `EventHistory.test.jsx` 2, `VoidDialog.test.jsx` 4 and `DebtDetailContainer.test.jsx` 3 failed (the payment cases of the same files already passed as a safety net) | `npx vitest run src/features/debts`: 25 files, 238 tests passed | Mutations: guarded confirm not disabled, `late_policy` dropped from the blockers, `mantiene cuota` text each failed 1 test; sources restored |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/ledger/preview.test.js src/features/debts/debtDetailModel.test.js` green (22 + 39 tests with `eventSummary.test.js`). `npx vitest run packages/finance-core functions/nia src/features/debts`: 56 files, 787 tests passed after B1a; `src/features/debts`: 25 files, 238 passed after B1b. Full `npm test -- --maxWorkers=4`: 97 files, 1,240 tests passed on the first run (baseline before B1: 94 files, 1,172 tests) |
+| Runtime harness command/scenario and exact result | `npm run build` exit 0; `npm run package:nia` exit 0 (`functions/nia.tar.gz` written; core scan green) |
+| Rollback boundary | Revert the two commits: `src/ledger/{snapshot,preview}.js`, `prepay/simulate.js` (back to its private snapshot), `removeCharge`, the two `tail.js` return values, the barrel and node16 edits, and the web model, summary, history and void dialog files with their tests. No stored data depends on them |
+
+### Decisions and deviations from design
+
+- `previewChange` measures `before` and `after` at `max(on, effectiveOn)` (the same date `planCommit` projects at) so the preview equals the saved projection. `backdated` is `effectiveOn < on`. `impacted` compares the `costMinor` of every applied event present in both replays, in chronological order. A draft of any other kind (including `late_policy`, which arrives in C3a) throws `ValidationError('invalid_draft')`.
+- `installment_too_low` needed no preview code: `project()` already throws it from `buildSchedule`, and the preview lets it through (design wording; the spec says "return a typed error": align the spec at verify, as the tasks already note).
+- The shared `snapshot` is a superset of the old simulation snapshot (adds `pastDueMinor`, `lateInterestMinor`, `remainingCostMinor`), so `simulateExtra` results gain those three fields; nothing asserted exact equality on them. `lateInterestMinor` reads `projection.lateInterestMinor ?? 0` and becomes real in C2.
+- Extra core change not in the file map: `applyRestructure` returns `carriedMinor` in its applied entry. The history summary "Reestructuración: $ X a N cuotas" needs the carried balance, and `principalMinor` in the payload is informational (AD13).
+- The card `rate_change` handler is unchanged, so a card entry in `applied` has no `fromEA`; the summary then shows only the new EA from the payload and leaves the keep-term and keep-installment wording out for cards.
+- A charge change is summarized against the charges in force just before it (terms charges, then each active `charge_change` or `restructure`), so the summary lists added, modified and removed ("sin X") charges, two labels at most plus `(+n)`.
+- `voidRuleOf(event, activeSorted)` returns `{ voidable, guarded, voidBlocked }`; history entries gain `summary`, `guardedVoid` and `voidBlocked`. A `late_policy` event is skipped by the core until C3, so its void rule and summary are covered with plain event objects only.
+- A blocked restructure void shows a dialog that only names the blockers and offers "Entendido" (no checkbox, no reason field, no write); an allowed one requires the confirmation checkbox. Reconcile after a plan-change void is B2 (`afterSave`).
+- The void success toast depends on the event kind (`voidSuccessMessage`); the container passes the kind with the reason.
+
+### Owner gate
+
+None for B1 (no schema, no deploy order).
+
+### Remaining
+
+B2 onward (not started).
