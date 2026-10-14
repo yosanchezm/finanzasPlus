@@ -138,6 +138,7 @@ async function summaries(deps, debts, asOf) {
         ownerScope: debt.ownerScope,
         balanceMinor: projection.balanceMinor,
         pastDueMinor: projection.pastDueMinor,
+        lateInterestMinor: projection.lateInterestMinor ?? 0,
         nextDue: nextDue ? { dueOn: nextDue.dueOn, amountMinor: nextDue.outstandingMinor } : null,
         eaPercent: toEffectiveAnnual(projection.terms.rate),
       };
@@ -320,10 +321,11 @@ function withTimeout(promise, ms) {
 }
 
 // Gemini only rewords the facts (AD11). A failure, a timeout or a number that is not in the facts all mean null.
-async function paraphrase(deps, facts, name) {
+async function paraphrase(deps, facts, name, extras) {
   try {
-    const raw = await withTimeout(deps.gemini(paraphrasePrompt(facts, name)), deps.config.paraphraseTimeoutMs || PARAPHRASE_TIMEOUT_MS);
-    return guardParaphrase(raw && raw.reply, facts, [name]);
+    const raw = await withTimeout(deps.gemini(paraphrasePrompt(facts, name, extras)), deps.config.paraphraseTimeoutMs || PARAPHRASE_TIMEOUT_MS);
+    // The mora figure comes from the core's snapshot, so its digits are allowed next to the facts' own.
+    return guardParaphrase(raw && raw.reply, facts, [name, extras.lateInterestMinor > 0 ? pesos(extras.lateInterestMinor) : '']);
   } catch {
     return null;
   }
@@ -347,7 +349,8 @@ async function adviseOn(deps, ctx, debt, draft, events, debts) {
     .map(({ id, name, eaPercent }) => ({ id, name, eaPercent }));
   const signals = cashflowSignals({ rows: await cashflowRows(deps, asOf), today: asOf, timezone: deps.config.timezone, inScope, otherDebts });
   const { facts } = advise(comparison, signals, deps.config.adviceThresholds || {});
-  return inform(deps, ctx, (await paraphrase(deps, facts, debt.name)) || adviseReply(facts, debt.name));
+  const extras = { lateInterestMinor: comparison.reduceTerm.before.lateInterestMinor || 0 };
+  return inform(deps, ctx, (await paraphrase(deps, facts, debt.name, extras)) || adviseReply(facts, debt.name, extras));
 }
 
 async function runAnalysis(deps, ctx, action, id, debt, draft, debts) {

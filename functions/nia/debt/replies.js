@@ -26,12 +26,13 @@ function itemLine(item) {
     parts.push('sin cuotas pendientes');
   }
   if (item.pastDueMinor > 0) parts.push(`vencido ${pesos(item.pastDueMinor)}`);
+  if (item.lateInterestMinor > 0) parts.push(`mora ${pesos(item.lateInterestMinor)}`);
   return parts.join(' · ');
 }
 
 /**
  * The list action.
- * @param {{ name: string, balanceMinor?: number, pastDueMinor?: number, eaPercent?: number,
+ * @param {{ name: string, balanceMinor?: number, pastDueMinor?: number, lateInterestMinor?: number, eaPercent?: number,
  *   nextDue?: ({ dueOn: string, amountMinor: number } | null), unreadable?: boolean }[]} items Code-computed summaries.
  */
 export function listReply(items) {
@@ -56,6 +57,8 @@ const KEYS = { reduce_term: 'reduceTerm', reduce_installment: 'reduceInstallment
 const IDENTICAL_NOTE = 'En esta deuda reducir plazo y reducir cuota dan el mismo resultado: su plan no acorta el plazo con un abono.';
 const LEY_1555 = 'Ley 1555: podrías prepagar una hipoteca sin penalización y elegir cómo aplicar el abono. Su alcance para esta deuda no está verificado; revisa tu contrato.';
 
+// The mora accrued today comes from the core's snapshot (`lateInterestMinor`), never from the model.
+const lateLine = (minor) => `Mora acumulada hoy: ${pesos(minor)}.`;
 const share = (value) => `${Number(value.toFixed(2))}%`;
 
 function leftOf(snapshot) {
@@ -78,7 +81,9 @@ function savedText(run, claimsSavings) {
 export function simulateReply({ name, comparison, strategy, plan, webUrl }) {
   const claims = comparison.eaPercent > 0;
   const chosen = comparison[KEYS[strategy]];
-  const lines = [`🧮 Simulación de abono extra a ${name}`, `Abono: ${pesos(comparison.amountMinor)} el ${comparison.on}`, `Ahora: saldo ${pesos(chosen.before.balanceMinor)} · ${leftOf(chosen.before)}`, ''];
+  const lines = [`🧮 Simulación de abono extra a ${name}`, `Abono: ${pesos(comparison.amountMinor)} el ${comparison.on}`, `Ahora: saldo ${pesos(chosen.before.balanceMinor)} · ${leftOf(chosen.before)}`];
+  if (chosen.before.lateInterestMinor > 0) lines.push(lateLine(chosen.before.lateInterestMinor));
+  lines.push('');
   if (chosen.paidOff) {
     lines.push(`Con este abono liquidarías la deuda: se aplicarían ${pesos(chosen.appliedMinor)} y sobrarían ${pesos(chosen.surplusMinor)}.`);
   } else {
@@ -128,11 +133,13 @@ function factsStrategyLines(facts) {
  * Deterministic advice message built only from `facts` values (the numeric guard accepts it by construction).
  * @param {object} facts `advise(...).facts`.
  * @param {string} name The debt's name.
+ * @param {{ lateInterestMinor?: number }} [extras] Code figures that are not in the facts: the mora accrued today.
  */
-export function adviseReply(facts, name) {
+export function adviseReply(facts, name, { lateInterestMinor = 0 } = {}) {
   const lines = [`💡 Recomendación para un abono de $ ${facts.text.amount} a ${name} (${facts.asOf})`, VERDICTS[facts.verdict](facts), '', ...factsStrategyLines(facts)];
   const reasons = [...new Set(facts.reasonCodes)].map((code) => (REASONS[code] ? REASONS[code](facts) : null)).filter(Boolean);
   if (reasons.length > 0) lines.push('', ...reasons);
+  if (lateInterestMinor > 0) lines.push('', lateLine(lateInterestMinor));
   if (facts.numbers.penaltyPct > 0) lines.push(`Penalización por prepago: ${facts.text.penaltyPct} ($ ${facts.text.penalty}), solo informativa.`);
   if (facts.notices.some((notice) => notice.code === 'ley1555_scope_unverified')) lines.push('', `ℹ️ ${LEY_1555}`);
   lines.push('', 'Es una recomendación calculada con tus datos; la decisión es tuya.');
@@ -142,12 +149,13 @@ export function adviseReply(facts, name) {
 /**
  * Prompt of the paraphrase call: Gemini only rewords the facts. `facts.numbers` is left out on purpose so the
  * model copies the pre-formatted `text` figures.
+ * @param {{ lateInterestMinor?: number }} [extras] The mora accrued today, handed over as text when there is some (the handler allows that figure in the guard).
  */
-export function paraphrasePrompt(facts, name) {
-  const given = { debt: name, asOf: facts.asOf, verdict: facts.verdict, claimsSavings: facts.claimsSavings, identical: facts.identical, paidOff: facts.paidOff, reasonCodes: facts.reasonCodes, targetDebt: facts.targetDebt, higherRateDebt: facts.higherRateDebt, text: facts.text, notices: facts.notices };
+export function paraphrasePrompt(facts, name, { lateInterestMinor = 0 } = {}) {
+  const given = { ...(lateInterestMinor > 0 ? { lateInterest: pesos(lateInterestMinor) } : {}), debt: name, asOf: facts.asOf, verdict: facts.verdict, claimsSavings: facts.claimsSavings, identical: facts.identical, paidOff: facts.paidOff, reasonCodes: facts.reasonCodes, targetDebt: facts.targetDebt, higherRateDebt: facts.higherRateDebt, text: facts.text, notices: facts.notices };
   return [
     'Eres Nia, asistente de finanzas personales. Reescribe esta recomendación sobre un abono extra a una deuda con un tono cercano y claro, en español, en máximo 900 caracteres y sin listas numeradas.',
-    'Usa únicamente los hechos del JSON. No calcules, no redondees, no conviertas ni inventes cifras: copia las cifras exactamente como aparecen en "text". Respeta el veredicto (verdict); si claimsSavings es false no prometas ahorros. Si hay avisos (notices), menciónalos con tus palabras.',
+    'Usa únicamente los hechos del JSON. No calcules, no redondees, no conviertas ni inventes cifras: copia las cifras exactamente como aparecen en "text". Respeta el veredicto (verdict); si claimsSavings es false no prometas ahorros. Si hay avisos (notices), menciónalos con tus palabras. Si hay lateInterest (la mora acumulada hoy), menciónala con esa cifra exacta.',
     'Devuelve únicamente JSON válido con esta forma: {"reply":"texto"}.',
     `Hechos:\n${JSON.stringify(given)}`,
   ].join('\n\n');

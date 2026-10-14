@@ -491,3 +491,44 @@ describe('restructure in the Nia entry point', () => {
     expect(sent().slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
   });
 });
+
+describe('late_policy in the Nia entry point', () => {
+  const lateAnswers = (late = {}) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'late_policy', debtRef: 'vehiculo', late: { mode: 'usury', ...late } },
+  ];
+  const lateEvents = () => fake.tables.debt_events.filter((event) => event.kind === 'late_policy');
+
+  it('tells the classifier and the extractor about the mora', async () => {
+    fake = makeNet(lateAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('activa mora a la usura en el carro'));
+
+    expect(fake.prompts[0]).toContain('configurar la mora');
+    expect(fake.prompts[1]).toContain('late_policy');
+    expect(fake.prompts[1]).toContain('contract_multiple');
+  });
+
+  it('previews the mode, the date and the cap, and a repeated Confirm writes one late_policy event', async () => {
+    fake = makeNet(lateAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('activa mora a la usura en el carro'));
+    expect(sent()[0].text).toContain('Mora de Crédito Vehículo');
+    expect(sent()[0].text).toContain('Desde: 2026-10-13');
+    expect(sent()[0].text).toContain('Tope de usura vigente: 28.59% E.A.');
+    expect(buttons(sent()[0])).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ action: 'late_policy', awaiting: 'confirm', debtId: 'd1', draft: { effectiveOn: '2026-10-13', late: { mode: 'usury', graceDays: 0 } } });
+    expect(lateEvents()).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:confirm')); // and the user taps once more
+
+    expect(lateEvents()).toEqual([expect.objectContaining({ effectiveOn: '2026-10-13', amountMinor: 0, dedupeKey: expect.stringMatching(/^debt:/), actorId: 'u7', source: 'telegram' })]);
+    expect(JSON.parse(lateEvents()[0].payloadJson)).toEqual({ late: { mode: 'usury', graceDays: 0 } });
+    expect(sent().slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+  });
+});

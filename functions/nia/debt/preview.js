@@ -58,9 +58,11 @@ function payText(debt, plan, before, request, requiresStrategy) {
   const lines = ['💳 Abono a ' + debt.name, `Monto: ${pesos(request.amountMinor)} el ${request.paidOn}`];
   if (requiresStrategy) lines.push(`Estrategia: ${STRATEGY_LABELS[request.strategy]}`);
   lines.push(`Intereses: ${pesos(allocation.interest)}`);
-  const fees = allocation.charges + allocation.taxes + allocation.lateInterest;
+  const fees = allocation.charges + allocation.taxes;
   if (fees > 0) lines.push(`Cargos e impuestos: ${pesos(fees)}`);
+  if (allocation.lateInterest > 0) lines.push(`Mora: ${pesos(allocation.lateInterest)}`);
   lines.push(`Capital: ${pesos(allocation.principal)}`);
+  if (after.lateInterestMinor > 0) lines.push(`Mora pendiente: ${pesos(after.lateInterestMinor)}`);
   if (allocation.surplus > 0) lines.push(`Sobrante sin aplicar: ${pesos(allocation.surplus)}`);
   lines.push(`Saldo: ${pesos(before.balanceMinor)} → ${pesos(after.balanceMinor)}`);
   if (before.remainingPeriods !== undefined && after.remainingPeriods !== undefined) lines.push(`Cuotas restantes: ${before.remainingPeriods} → ${after.remainingPeriods}`);

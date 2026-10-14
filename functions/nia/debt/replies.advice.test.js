@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { advise, compareStrategies, planCommit, serializeTerms } from '../../../packages/finance-core/index.js';
 import { guardParaphrase, numbersIn } from './guard.js';
+import { pesos } from './format.js';
 import { MAX_PLAN_ROWS, TELEGRAM_LIMIT, adviseReply, paraphrasePrompt, simulateReply } from './replies.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
@@ -198,5 +199,39 @@ describe('paraphrasePrompt', () => {
     expect(prompt).toMatch(/No calcules/);
     expect(prompt).toContain('{"reply"');
     expect(prompt).not.toContain('"numbers"');
+  });
+});
+
+describe('mora in simulate and advise (F2)', () => {
+  const late = { late: { mode: 'usury', graceDays: 0 } };
+  const comfortable = { avgIncomeMinor: 8000000, avgExpenseMinor: 3000000, otherDebts: [] };
+  const factsFor = (extra = {}) => advise(compareStrategies(debtOf(extra), eventsOf(extra), { amountMinor: 2000000, on: TODAY }), comfortable).facts;
+
+  it('simulateReply states the mora accrued today when there is some, and nothing when there is none', () => {
+    const withMora = simulation(late);
+    const lateMinor = withMora.comparison.reduceTerm.before.lateInterestMinor;
+
+    expect(lateMinor).toBeGreaterThan(0);
+    expect(plain(simulateReply(withMora))).toContain(`Mora acumulada hoy: ${plain(pesos(lateMinor))}`);
+    expect(simulateReply(simulation())).not.toContain('Mora');
+  });
+
+  it('adviseReply adds the mora line from the code figure, and passes the numeric guard with that figure allowed', () => {
+    const facts = factsFor(late);
+    const text = adviseReply(facts, 'Crédito Vehículo', { lateInterestMinor: 1375 });
+
+    expect(plain(text)).toContain('Mora acumulada hoy: $ 1.375.');
+    expect(guardParaphrase(text, facts, [pesos(1375)])).toBe(text);
+    expect(guardParaphrase(text, facts)).toBeNull();
+    expect(adviseReply(facts, 'Crédito Vehículo')).not.toContain('Mora');
+    expect(adviseReply(facts, 'Crédito Vehículo', { lateInterestMinor: 0 })).not.toContain('Mora');
+  });
+
+  it('paraphrasePrompt hands Gemini the mora figure as text only when there is mora', () => {
+    const facts = factsFor(late);
+    const given = (prompt) => JSON.parse(prompt.split('Hechos:\n')[1]);
+
+    expect(given(paraphrasePrompt(facts, 'Crédito Vehículo', { lateInterestMinor: 1375 })).lateInterest).toBe(pesos(1375));
+    expect(given(paraphrasePrompt(facts, 'Crédito Vehículo'))).not.toHaveProperty('lateInterest');
   });
 });

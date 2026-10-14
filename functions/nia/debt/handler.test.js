@@ -1844,3 +1844,46 @@ describe('create: mora default by kind (F2)', () => {
     expect(family.sent[0].text).not.toContain('Mora');
   });
 });
+
+describe('mora in the list and the advice (F2)', () => {
+  const lateRow = (id, name) => debtRow(id, name, { termsJson: serializeTerms({ ...loanTerms, late: { mode: 'usury', graceDays: 0 } }) });
+  const tenDaysLate = (w) => { w.deps.now = () => new Date('2026-10-20T15:00:00Z'); return w; };
+  const money = (value) => plain(pesos(value));
+
+  it('the list shows the accrued mora of a debt with a policy, and none for a debt without one', async () => {
+    const w = tenDaysLate(world({ debts: [lateRow('d1', 'Crédito A'), debtRow('d2', 'Crédito B')], answers: [{ action: 'list' }] }));
+    await handleDebt(w.deps, ctx());
+    const lines = w.sent[0].text.split('\n');
+
+    expect(lines.find((line) => line.includes('Crédito A'))).toContain(`mora ${money(1375)}`);
+    expect(lines.find((line) => line.includes('Crédito B'))).not.toContain(' · mora ');
+  });
+
+  it('debtSummaries carries the mora of every readable debt', async () => {
+    const w = tenDaysLate(world({ debts: [lateRow('d1', 'Crédito A'), debtRow('d2', 'Crédito B')] }));
+    const items = await debtSummaries(w.deps);
+
+    expect(items.map((item) => item.lateInterestMinor)).toEqual([1375, 0]);
+  });
+
+  describe('advise', () => {
+    const adviseOnLate = (answer) => tenDaysLate(world({ debts: [lateRow('d1', 'Crédito Vehículo')], answers: [asked(), answer], cashflow: quarter(8000000, 3000000) }));
+
+    it('accepts a paraphrase that quotes the mora figure the code computed', async () => {
+      const w = adviseOnLate((prompt) => ({ reply: `Hoy llevas ${factsIn(prompt).lateInterest} de mora y un abono de $ ${factsIn(prompt).text.amount}.` }));
+      await handleDebt(w.deps, ctx());
+
+      expect(factsIn(w.prompts[1]).lateInterest).toBe(pesos(1375));
+      expect(w.sent[0].text).toBe(`Hoy llevas ${plain(pesos(1375))} de mora y un abono de $ 2.000.000.`);
+    });
+
+    it('rejects a paraphrase with a mora figure of its own and sends the template with the real one', async () => {
+      const w = adviseOnLate({ reply: 'Llevas $ 9.999 de mora acumulada.' });
+      await handleDebt(w.deps, ctx());
+
+      expect(w.sent[0].text).toContain('Recomendación para un abono');
+      expect(w.sent[0].text).toContain(`Mora acumulada hoy: ${money(1375)}.`);
+      expect(w.sent[0].text).not.toContain('9.999');
+    });
+  });
+});

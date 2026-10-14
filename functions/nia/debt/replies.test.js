@@ -58,3 +58,18 @@ describe('listReply', () => {
     expect(text).toContain('y 3 más en la web');
   });
 });
+
+describe('listReply: mora (F2)', () => {
+  it('adds the accrued mora after the overdue amount when a debt has some', () => {
+    const text = plain(listReply([item('Carro', { pastDueMinor: 391756, lateInterestMinor: 1375 })]));
+
+    expect(text).toContain('vencido $ 391.756 · mora $ 1.375');
+  });
+
+  it('shows no mora for a debt without it', () => {
+    const text = plain(listReply([item('Moto', { pastDueMinor: 380381, lateInterestMinor: 0 }), item('Casa')]));
+
+    expect(text).toContain('vencido $ 380.381');
+    expect(text).not.toContain('mora');
+  });
+});

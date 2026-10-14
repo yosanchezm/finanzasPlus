@@ -212,3 +212,32 @@ describe('mora default by kind on a new debt (F2)', () => {
     expect(plain(previewCreate({ ...create, kind: 'family' }).text)).not.toContain('Mora:');
   });
 });
+
+describe('previewPay: mora line (F2)', () => {
+  const lateDebt = debtRow({ ...loanTerms, late: { mode: 'usury', graceDays: 0 } });
+  const TEN_DAYS_LATE = '2026-10-20'; // the installment of 2026-10-10 has 1,375 of mora at the 28.59% cap
+
+  it('shows the mora the payment settles on its own line, apart from the charges', () => {
+    const text = plain(pay({ amountMinor: 381756 }, lateDebt, [disbursement], TEN_DAYS_LATE).text);
+
+    expect(text).toContain('Mora: $ 1.375');
+    expect(text).toContain('Intereses: $ 180.876');
+    expect(text).toContain('Capital: $ 199.505');
+    expect(text).not.toContain('Mora pendiente');
+    expect(text).not.toContain('Cargos e impuestos');
+  });
+
+  it('says how much mora is still owed when the payment does not cover it', () => {
+    const text = plain(pay({ amountMinor: 1000 }, lateDebt, [disbursement], TEN_DAYS_LATE).text);
+
+    expect(text).toContain('Mora: $ 1.000');
+    expect(text).toContain('Mora pendiente: $ 375');
+  });
+
+  it('says nothing about mora when the debt has no mora policy', () => {
+    const text = plain(pay({ amountMinor: 380381 }, debtRow(loanTerms), [disbursement], TEN_DAYS_LATE).text);
+
+    expect(text).not.toContain('Mora');
+    expect(text).toContain('Capital: $ 199.505');
+  });
+});
