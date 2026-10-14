@@ -70,13 +70,13 @@ Groups: A1a (about 250), A1b (about 390).
 ### A2 schema and decoration (design 800) · deps: A1
 Groups: A2a schema + web (about 500), A2b Nia + docs (about 300).
 
-- [ ] A2a.1 RED `scripts/lib/legal-schema.test.mjs`: columns/sizes per design, unique index `by_household_kind_modality_from`, key `by_household`, no delete permission, merge refuses collisions, `withLegalSchema` chained after `withDebtSchema`. Reqs LR1.
-- [ ] A2a.2 GREEN `scripts/lib/legal-schema.mjs`, `scripts/migrate-appwrite.mjs` (idempotent rerun test).
-- [ ] A2a.3 RED `src/appwrite.test.js`: `listLegalRates`; `upsertLegalRate` turns `409` into update with deterministic id `lr{k}{mm}{yyyymm}{hh[0..25)}`; range guards (ibc/usury 500..10000 bp, smmlv 100,000..100,000,000). RED `useDebtData` test: debts get `legal`/`legalStatus`; `404` or read failure gives defaults + `legal_rates_unavailable` banner on list and detail while debts load; `reconcile.js` skips a debt with `unknown_event_kind` (AD2); unknown-kind banner; wizard passes `{usuryTable}` and warns, never blocks (household cap 29.00 vs 29.50). Reqs LR1, LR4, LR6, DL1, DL5, WM7.
-- [ ] A2a.4 GREEN `src/appwrite.js`, `useDebtData.js`, `reconcile.js`, `DebtsView`/`DebtsContainer`/`DebtDetail`, `wizardModel.js`.
-- [ ] A2b.1 RED `functions/nia/debt/handler.test.js`, `preview.test.js`: `loadDebts` decorates `legal`; `loadLegal` survives a `404` with `unavailable` fallback; cap-citing previews append one notice line. Reqs LR4, LR6.
-- [ ] A2b.2 GREEN `functions/nia/debt/handler.js`, `preview.js`; docs `docs/setup.md` (migration step) and `docs/deploy.md` (deploy order).
-- [ ] A2.CP checkpoint.
+- [x] A2a.1 RED `scripts/lib/legal-schema.test.mjs`: columns/sizes per design, unique index `by_household_kind_modality_from`, key `by_household`, no delete permission, merge refuses collisions, `withLegalSchema` chained after `withDebtSchema`. Reqs LR1.
+- [x] A2a.2 GREEN `scripts/lib/legal-schema.mjs`, `scripts/migrate-appwrite.mjs` (idempotent rerun test).
+- [x] A2a.3 RED `src/appwrite.test.js`: `listLegalRates`; `upsertLegalRate` turns `409` into update with deterministic id `lr{k}{mm}{yyyymm}{hh[0..25)}`; range guards (ibc/usury 500..10000 bp, smmlv 100,000..100,000,000). RED `useDebtData` test: debts get `legal`/`legalStatus`; `404` or read failure gives defaults + `legal_rates_unavailable` banner on list and detail while debts load; `reconcile.js` skips a debt with `unknown_event_kind` (AD2); unknown-kind banner; wizard passes `{usuryTable}` and warns, never blocks (household cap 29.00 vs 29.50). Reqs LR1, LR4, LR6, DL1, DL5, WM7.
+- [x] A2a.4 GREEN `src/appwrite.js`, `useDebtData.js`, `reconcile.js`, `DebtsView`/`DebtsContainer`/`DebtDetail`, `wizardModel.js`.
+- [x] A2b.1 RED `functions/nia/debt/handler.test.js`, `preview.test.js`: `loadDebts` decorates `legal`; `loadLegal` survives a `404` with `unavailable` fallback; cap-citing previews append one notice line. Reqs LR4, LR6.
+- [x] A2b.2 GREEN `functions/nia/debt/handler.js`, `preview.js`; docs `docs/setup.md` (migration step) and `docs/deploy.md` (deploy order).
+- [x] A2.CP checkpoint.
 
 ### A3 Ajustes panel (design 900) · deps: A2
 Groups: A3a nav + model + hook (about 450), A3b panel (about 450).
