@@ -1,4 +1,5 @@
 import { compareIso } from '../calendar.js';
+import { roundUnit } from '../money.js';
 import { BUCKETS, allocate, allocateSplit, emptyBuckets } from './allocate.js';
 
 // Working rows of a projection: a schedule row plus what has been paid per
@@ -6,13 +7,25 @@ import { BUCKETS, allocate, allocateSplit, emptyBuckets } from './allocate.js';
 // Every row can be paid in full: `totalDueMinor` is always
 // charges + taxes + interest due + principal due (installment = interest due +
 // principal due), so a capitalizing row (negative principal) only owes charges.
+// Mora is not scheduled: `accrueLate` adds to the exact accumulator `row.late.exact`
+// and the row exposes it rounded once (`lateMinor`), on top of `totalDueMinor`.
 
 /** Wraps a schedule row for payment tracking. */
-export const newRow = (scheduleRow) => ({ ...scheduleRow, paid: emptyBuckets(), paidByEventIds: [], settled: false, refinancedMinor: 0 });
+export const newRow = (scheduleRow) => ({
+  ...scheduleRow,
+  paid: emptyBuckets(),
+  paidByEventIds: [],
+  settled: false,
+  refinancedMinor: 0,
+  late: { exact: 0, days: 0, unit: 1 },
+});
 
 export const paidTotal = (row) => BUCKETS.reduce((sum, key) => sum + row.paid[key], 0);
 
-/** Outstanding amount per bucket; late interest is only ever paid, never scheduled. */
+/** Mora accrued so far, rounded once to the rounding unit (the accumulator itself stays exact). */
+export const lateMinor = (row) => roundUnit(row.late.exact, row.late.unit);
+
+/** Outstanding amount per bucket; late interest is the accrued mora not yet paid. */
 export function rowDue(row) {
   const zero = emptyBuckets();
   if (row.settled) return zero;
@@ -22,12 +35,13 @@ export function rowDue(row) {
     ...zero,
     charges: row.chargesMinor - row.paid.charges,
     taxes: row.taxesMinor - row.paid.taxes,
+    lateInterest: lateMinor(row) - row.paid.lateInterest,
     interest: interestDue - row.paid.interest,
     principal: principalDue - row.paid.principal,
   };
 }
 
-export const rowOutstanding = (row) => (row.settled ? 0 : row.totalDueMinor - paidTotal(row));
+export const rowOutstanding = (row) => (row.settled ? 0 : row.totalDueMinor + lateMinor(row) - paidTotal(row));
 
 const touch = (row, eventId) => {
   if (!row.paidByEventIds.includes(eventId)) row.paidByEventIds.push(eventId);
@@ -109,7 +123,7 @@ export function balanceAt(rows, noneBalance, date) {
 export function decorate(rows, asOf) {
   let dueTaken = false;
   return rows.map((row) => {
-    const { paid, settled, refinancedMinor, ...schedule } = row;
+    const { paid, settled, refinancedMinor, late, ...schedule } = row;
     const paidMinor = paidTotal(row);
     const outstandingMinor = rowOutstanding(row);
     const overdue = compareIso(row.dueOn, asOf) < 0;
