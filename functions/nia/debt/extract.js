@@ -1,10 +1,11 @@
 import { PERIODICITIES, isIsoDate, normalizeRate } from '../../../packages/finance-core/index.js';
+import { readLegalRate } from './legal.js';
 
 // The second, specialised Gemini call (AD10): the model only EXTRACTS what the
 // user said. Validation, arithmetic and every decision happen in code (NDA-1).
 // Pure and Node 16 safe.
 
-export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list'];
+export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list', 'legal_rate'];
 export const STRATEGIES = ['reduce_term', 'reduce_installment', 'advance_installments'];
 export const MAX_CHARGES = 6;
 
@@ -15,7 +16,7 @@ const CHARGE_BASES = ['fixed', 'pctOutstanding', 'pctOriginal', 'pctOfSubtotal']
 const INTEREST_FREE_KINDS = ['family', 'informal'];
 const ZERO_RATE = { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' };
 
-const SCHEMA = '{"action":"create|pay|simulate|advise|list","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"missingFields":["string"]}';
+const SCHEMA = '{"action":"create|pay|simulate|advise|list|legal_rate","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"legal":{"kind":"usury|ibc|smmlv|null","modality":"string|null","month":"string|number|null","year":number|null,"value":number|null}|null,"missingFields":["string"]}';
 
 const conversationLines = (history) => (history || [])
   .map((item) => `${item.role === 'assistant' ? 'Nia' : 'Usuario'}: ${item.content}`)
@@ -34,9 +35,10 @@ export function debtPrompt(text, debts, history, { today, timezone = 'America/Bo
   return [
     'Eres Nia. Extrae los datos de una solicitud sobre deudas (préstamos y tarjetas) de un hogar. Solo extraes: no calcules cuotas, saldos, intereses ni equivalencias de tasa; el sistema lo hace.',
     `La fecha de hoy en ${timezone} es ${today}. La moneda es ${currency}; los montos son enteros en pesos, no centavos.`,
-    'action: create para registrar una deuda nueva, pay para un pago o abono, simulate para simular un abono extra, advise para pedir una recomendación y list para ver las deudas.',
+    'action: create para registrar una deuda nueva, pay para un pago o abono, simulate para simular un abono extra, advise para pedir una recomendación y list para ver las deudas. legal_rate registra una tasa legal: la usura, el IBC o el salario mínimo (SMMLV) de un mes o año, por ejemplo “la usura de noviembre es 28.2”.',
     'debtRef es el nombre, entidad o tipo de la deuda tal como lo dijo el usuario; usa null si no menciona ninguna.',
     'En rate copia lo que dijo el usuario: value, period (de cuánto es la tasa), compounding (effective si es efectiva o periódica como “2,1% mensual”, nominal si dice nominal) y timing (arrears si es vencida, advance si es anticipada). Si no lo dijo, usa null; nunca lo supongas.',
+    'En legal copia lo que dijo el usuario: kind (usury, ibc o smmlv), modality como la nombró (consumo, hipotecario, productivo rural…) o null, month tal como lo escribió (por ejemplo “noviembre”; no conviertas el mes a número ni le pongas año), year solo si lo dijo, y value (el porcentaje tal cual, 28.2; para el salario mínimo, pesos enteros). Si no es una tasa legal, legal es null.',
     'Nunca inventes una fecha: usa null si no la dijo. Si falta un dato necesario, añade su nombre en missingFields.',
     'Devuelve únicamente JSON válido, sin markdown, con exactamente estas claves:',
     SCHEMA,
@@ -166,6 +168,7 @@ export function normaliseDebtExtraction(raw, { today }) {
     extraMinor: null,
     needsConvention: false,
     create: null,
+    legalRate: null,
     missingFields,
     problems,
   };
@@ -180,6 +183,11 @@ export function normaliseDebtExtraction(raw, { today }) {
     result.extraMinor = given === undefined ? null : given;
   } else if (action === 'create') {
     Object.assign(result, readCreate(input, today, missingFields, problems));
+  } else if (action === 'legal_rate') {
+    const legal = readLegalRate(input.legal, { today });
+    result.legalRate = legal.legalRate;
+    missingFields.push(...legal.missingFields);
+    problems.push(...legal.problems);
   }
   return result;
 }

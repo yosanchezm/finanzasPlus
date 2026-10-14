@@ -202,3 +202,50 @@ describe('normaliseDebtExtraction: create', () => {
     expect(result.create.charges[0]).toEqual({ id: 'c1', kind: 'insurance', label: 'Seguro 1', basis: 'fixed', value: 10000, cadence: 'per_installment' });
   });
 });
+
+describe('legal_rate extraction', () => {
+  const legal = (extra = {}) => ({ kind: 'usury', modality: 'consumer', month: 'noviembre', year: null, value: 28.2, ...extra });
+
+  it('reads "la usura de noviembre es 28.2" into a draft with the month resolved against today', () => {
+    const result = norm({ action: 'legal_rate', legal: legal() });
+
+    expect(result).toMatchObject({
+      action: 'legal_rate',
+      legalRate: { kind: 'usury', modality: 'consumer', validFrom: '2026-11-01', validTo: '2026-11-30', value: 2820 },
+      missingFields: [],
+      problems: [],
+    });
+  });
+
+  it('resolves a month without a year on both sides of today, and keeps an explicit year', () => {
+    expect(norm({ action: 'legal_rate', legal: legal({ month: 'enero' }) }).legalRate.validFrom).toBe('2027-01-01');
+    expect(norm({ action: 'legal_rate', legal: legal({ month: 'mayo' }) }).legalRate.validFrom).toBe('2026-05-01');
+    expect(norm({ action: 'legal_rate', legal: legal({ year: 2025 }) }).legalRate.validFrom).toBe('2025-11-01');
+  });
+
+  it('refuses 2.82 as something to correct and builds no draft', () => {
+    const result = norm({ action: 'legal_rate', legal: legal({ value: 2.82 }) });
+
+    expect(result.problems).toEqual(['legal_value_out_of_range']);
+    expect(result.legalRate).toBeNull();
+  });
+
+  it('reports what the user did not say', () => {
+    expect(norm({ action: 'legal_rate', legal: legal({ month: null }) }).missingFields).toEqual(['legal_month']);
+    expect(norm({ action: 'legal_rate', legal: null }).missingFields).toEqual(['legal_kind', 'legal_value']);
+  });
+
+  it('leaves the draft empty for every other action', () => {
+    expect(norm({ action: 'pay', amountMinor: 1000, legal: legal() }).legalRate).toBeNull();
+    expect(norm({ action: 'list' }).legalRate).toBeNull();
+  });
+
+  it('shows the model only the phrase to copy and says the code resolves the month', () => {
+    const prompt = debtPrompt('la usura de noviembre es 28.2', [], [], { today: TODAY });
+
+    expect(prompt).toContain('legal_rate');
+    expect(prompt).toContain('"legal"');
+    expect(prompt).toMatch(/no conviertas el mes/i);
+    expect(prompt).toMatch(/salario mínimo/i);
+  });
+});
