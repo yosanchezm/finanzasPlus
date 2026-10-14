@@ -1,6 +1,8 @@
 import { compareIso, isIsoDate } from '../calendar.js';
 import { projectCard } from '../card/card.js';
 import { ValidationError } from '../errors.js';
+import { accrueLate, addLateNotices } from '../late/accrue.js';
+import { lateEAOn, modalityOf, normalizeLate } from '../late/policy.js';
 import { legalOf } from '../legal.js';
 import { buildSchedule } from '../schedule/index.js';
 import { parseTerms, validateTerms } from '../terms.js';
@@ -68,45 +70,60 @@ function totalsOf(applied, rows) {
     remainingInterest: 0,
     remainingCharges: 0,
     remainingTaxes: 0,
+    remainingLateInterest: 0,
   };
   for (const row of rows) {
     const due = rowDue(row);
     totals.remainingInterest += due.interest;
     totals.remainingCharges += due.charges;
     totals.remainingTaxes += due.taxes;
+    totals.remainingLateInterest += due.lateInterest;
   }
   return totals;
 }
 
-function projectLoan({ debt, terms, events, asOf }) {
+// A mortgage with mora always carries the informational Ley 546 notice, overdue or not.
+function mortgageNotices(work, asOf, legal) {
+  if (modalityOf(work) !== 'mortgage' || normalizeLate(work.late).mode === 'none') return [];
+  return lateEAOn(work, asOf, legal).notices.filter((notice) => notice.code === 'late_mortgage_unverified');
+}
+
+function projectLoan({ debt, terms, events, asOf, legal }) {
   const state = {
     work: terms,
     offset: 0,
     rows: terms.system === 'none' ? [] : buildSchedule(terms).map(newRow),
     noneBalance: terms.system === 'none' ? terms.principalMinor : 0,
     termsVersion: debt.termsVersion ?? 1,
+    lateClock: terms.openedOn,
+    lateNotices: [],
   };
   const applied = [];
   const notices = [];
   for (const event of events) {
+    accrueLate(state, event.effectiveOn, legal); // payments and changes take effect at the end of their date
     const { allocation = null, absorbed, ...extra } = HANDLERS[event.kind]?.(state, event) ?? {};
     applied.push({ eventId: event.id, kind: event.kind, effectiveOn: event.effectiveOn, allocation, costMinor: costOf(allocation), ...extra });
     if (allocation && allocation.surplus > 0) notices.push({ code: 'surplus', eventId: event.id, amountMinor: allocation.surplus });
     if (extra.driftMinor) notices.push({ code: 'drift', eventId: event.id, amountMinor: extra.driftMinor, absorbed });
   }
+  accrueLate(state, asOf, legal);
+  addLateNotices(state, mortgageNotices(state.work, asOf, legal));
   const plan = decorate(state.rows, asOf);
+  const totals = totalsOf(applied, state.rows);
   return {
     asOf,
     termsVersion: state.termsVersion,
     terms: state.work,
     balanceMinor: balanceAt(state.rows, state.noneBalance, asOf),
     pastDueMinor: plan.reduce((sum, row) => sum + (row.status === 'pastDue' ? row.outstandingMinor : 0), 0),
+    lateInterestMinor: totals.remainingLateInterest,
     remainingPeriods: state.rows.filter((row) => rowOutstanding(row) > 0).length,
     nextDue: plan.find((row) => row.status === 'pastDue' || row.status === 'partial' || row.status === 'due') ?? null,
     plan,
     applied,
-    totals: totalsOf(applied, state.rows),
-    notices,
+    totals,
+    notices: notices.concat(state.lateNotices),
   };
 }
 

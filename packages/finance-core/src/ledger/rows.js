@@ -137,6 +137,8 @@ export function decorate(rows, asOf) {
       dueTaken = true;
     }
     const extra = refinancedMinor > 0 ? { refinancedMinor } : {};
-    return { ...schedule, paidByEventIds: row.paidByEventIds.slice(), status, paidMinor, outstandingMinor, ...extra };
+    // Mora so far; the base is the principal still unpaid, shown only once the row has accrued something.
+    const lateFields = { lateMinor: lateMinor(row), lateDays: late.days, lateBaseMinor: late.days > 0 ? rowDue(row).principal : 0 };
+    return { ...schedule, paidByEventIds: row.paidByEventIds.slice(), status, paidMinor, outstandingMinor, ...extra, ...lateFields };
   });
 }

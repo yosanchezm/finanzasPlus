@@ -31,7 +31,8 @@ function cutPoints(usuryTable, modality, from, to) {
   return Array.from(cuts).sort(compareIso);
 }
 
-function pushNotices(state, notices) {
+/** Adds notices to `state.lateNotices`, keeping the first of each (code, modality, lastValidTo). */
+export function addLateNotices(state, notices) {
   for (const notice of notices) {
     if (!state.lateNotices.some((known) => noticeKey(known) === noticeKey(notice))) state.lateNotices.push(notice);
   }
@@ -75,7 +76,7 @@ export function accrueLate(state, to, legal = DEFAULT_LEGAL) {
   let start = from;
   for (const end of cuts.concat(to)) {
     const { daily, notices } = lateRateOn(state.work, addDays(start, 1), legal);
-    if (accrueSegment(state, start, end, daily)) pushNotices(state, notices);
+    if (accrueSegment(state, start, end, daily)) addLateNotices(state, notices);
     start = end;
   }
 }

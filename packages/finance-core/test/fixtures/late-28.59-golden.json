@@ -1,0 +1,74 @@
+{
+  "label": "Mora on French 10,000,000 COP at 24% EA over 36 months with a 10,000 fee, usury cap 28.59% EA",
+  "provenance": "Hand-derived from the debt-plan-changes spec (late-interest, debt-ledger deltas) and the design verification table; the daily rate is (1.2859)^(1/365) - 1. Not a bank statement: figures are informational and the bank's statement wins.",
+  "dailyRate": 0.0006891657555,
+  "terms": {
+    "kind": "consumer",
+    "principalMinor": 10000000,
+    "openedOn": "2026-01-15",
+    "rate": { "value": 24, "basis": "effective", "periodicity": "annual", "timing": "arrears" },
+    "system": "french",
+    "periodicity": "monthly",
+    "n": 36,
+    "firstDueOn": "2026-02-15",
+    "charges": [{ "id": "fee", "kind": "fee", "label": "Admin fee", "basis": "fixed", "value": 10000 }],
+    "late": { "mode": "usury" }
+  },
+  "usuryTable": [
+    { "modality": "consumer", "validFrom": "2026-01-01", "validTo": "2026-12-31", "capEA": 28.59, "source": "fixture", "verified": true }
+  ],
+  "installment": { "dueOn": "2026-02-15", "charges": 10000, "interest": 180876, "principal": 199505, "total": 390381 },
+  "cases": [
+    {
+      "name": "ten days overdue",
+      "events": [],
+      "asOf": "2026-02-25",
+      "expect": {
+        "pastDueMinor": 391756,
+        "lateInterestMinor": 1375,
+        "row1": { "lateMinor": 1375, "lateDays": 10, "lateBaseMinor": 199505, "outstandingMinor": 391756, "status": "pastDue" }
+      }
+    },
+    {
+      "name": "thirty days overdue",
+      "events": [],
+      "asOf": "2026-03-17",
+      "expect": { "row1": { "lateMinor": 4125, "lateDays": 30, "lateBaseMinor": 199505, "outstandingMinor": 394506, "status": "pastDue" } }
+    },
+    {
+      "name": "the whole installment paid on day 10",
+      "events": [{ "on": "2026-02-25", "amountMinor": 390381 }],
+      "asOf": "2026-02-25",
+      "expect": {
+        "allocation": { "charges": 10000, "taxes": 0, "lateInterest": 1375, "interest": 180876, "principal": 198130, "surplus": 0 },
+        "costMinor": 192251,
+        "pastDueMinor": 1375,
+        "lateInterestMinor": 0,
+        "row1": { "lateMinor": 1375, "lateDays": 10, "lateBaseMinor": 1375, "outstandingMinor": 1375, "status": "pastDue" }
+      }
+    },
+    {
+      "name": "a short payment of 100,000 on day 10",
+      "events": [{ "on": "2026-02-25", "amountMinor": 100000 }],
+      "asOf": "2026-02-25",
+      "expect": {
+        "allocation": { "charges": 10000, "taxes": 0, "lateInterest": 1375, "interest": 88625, "principal": 0, "surplus": 0 },
+        "costMinor": 100000,
+        "lateInterestMinor": 0,
+        "row1": { "lateMinor": 1375, "lateDays": 10, "lateBaseMinor": 199505, "outstandingMinor": 291756, "status": "pastDue" }
+      }
+    },
+    {
+      "name": "300,000 on day 10 and 10 more days on the 91,756 left",
+      "events": [{ "on": "2026-02-25", "amountMinor": 300000 }],
+      "asOf": "2026-03-07",
+      "expect": {
+        "allocation": { "charges": 10000, "taxes": 0, "lateInterest": 1375, "interest": 180876, "principal": 107749, "surplus": 0 },
+        "costMinor": 192251,
+        "pastDueMinor": 92388,
+        "lateInterestMinor": 632,
+        "row1": { "lateMinor": 2007, "lateDays": 20, "lateBaseMinor": 91756, "outstandingMinor": 92388, "status": "pastDue" }
+      }
+    }
+  ]
+}
