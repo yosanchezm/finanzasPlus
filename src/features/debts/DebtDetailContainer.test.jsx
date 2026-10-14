@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
-import { makeBigLoan, makeEvent, makePayment } from './debtFixtures';
+import { makeBigLoan, makeDebt, makeEvent, makePayment } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn(), findDebtEventByDedupe: vi.fn() }));
 
@@ -397,6 +397,113 @@ describe('DebtDetailContainer rate change flow', () => {
     fireEvent.change(screen.getByLabelText('Vigente desde'), { target: { value: '2026-01-20' } });
 
     expect(within(screen.getByRole('region', { name: 'Cambio con fecha pasada' })).getByText(/Pago del 5 feb/)).toBeInTheDocument();
+  });
+});
+
+describe('DebtDetailContainer charge change flow', () => {
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const openChargeChange = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Cambiar seguros y cargos' }));
+    return screen.getByRole('dialog');
+  };
+  const typeFee = async (user, text) => {
+    const field = within(screen.getByRole('group', { name: 'Comisión' })).getByLabelText('Valor');
+    await user.clear(field);
+    await user.type(field, text);
+  };
+  const saveCharges = (user, name = 'Guardar cambio') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+
+  it('lists both plan changes in Más acciones for a loan', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos']);
+  });
+
+  it('previews a fee raised to 12,000 and writes one charge_change event with the real charges, no cost row', async () => {
+    const { user } = setup();
+    await openChargeChange(user);
+    await typeFee(user, '12000');
+    const preview = within(screen.getByRole('group', { name: 'Vista previa' }));
+    expect(preview.getByRole('row', { name: /Próxima cuota con cargos/ })).toHaveTextContent('$ 390.381$ 392.381');
+    expect(preview.getByRole('row', { name: /Cargos por pagar/ })).toHaveTextContent('$ 360.000$ 430.000'); // the installment due today keeps the old fee
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before saving
+    await saveCharges(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('den1');
+    expect(data).toMatchObject({ debtId: 'd1', kind: 'charge_change', effectiveOn: TODAY, amountMinor: 0, dedupeKey: 'web:n1', source: 'web', actorId: 'u1' });
+    expect(JSON.parse(data.payloadJson).charges).toEqual([{ id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 12000, cadence: 'per_installment', fromPeriod: 1, toPeriod: null, display: 'itemized' }]);
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('reloads, then reconciles the cost rows on fresh events, then refreshes, and reports the rows it changed', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+    const { user, onNotify } = setup({ reconcileCosts });
+    await openChargeChange(user);
+    await typeFee(user, '12000');
+    await saveCharges(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Cambio de cargos registrado. Se actualizaron 2 filas de Costos financieros.');
+  });
+
+  it('creates one charge_change when the save button is tapped twice', async () => {
+    const { user } = setup();
+    await openChargeChange(user);
+    await typeFee(user, '12000');
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambio' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the dialog when the write fails and the retry repeats the same event id and key', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, createNonce, reload } = setup();
+    await openChargeChange(user);
+    await typeFee(user, '12000');
+    await saveCharges(user);
+
+    expect(await screen.findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+
+    await saveCharges(user, 'Reintentar');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(createNonce).toHaveBeenCalledTimes(1);
+    expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.dedupeKey])).toEqual([['den1', 'web:n1'], ['den1', 'web:n1']]);
+  });
+
+  it('keeps the saved change and says the costs were not refreshed when the reconcile fails', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('sin red'));
+    const { user, onNotify } = setup({ reconcileCosts });
+    await openChargeChange(user);
+    await typeFee(user, '12000');
+    await saveCharges(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onNotify).toHaveBeenCalledWith('Cambio de cargos registrado. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+
+  it('writes nothing while a dependent charge points at a charge that cannot be its base', async () => {
+    const withIva = makeDebt({ principalMinor: 10000000 }, { principalMinor: 10000000, n: 36, charges: [
+      { id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 10000 },
+      { id: 'iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'fee', value: 19 },
+    ] });
+    const { user } = setup({ debt: withIva });
+    await openChargeChange(user);
+    await user.selectOptions(within(screen.getByRole('group', { name: 'Comisión' })).getByLabelText('Se calcula como'), 'pctOfSubtotal');
+    await saveCharges(user);
+
+    expect(within(screen.getByRole('group', { name: 'IVA' })).getByText(/necesita un cargo anterior como base/)).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambio' })).toBeDisabled();
+    expect(port.createEvent).not.toHaveBeenCalled();
   });
 });
 

@@ -86,6 +86,17 @@ describe('DebtDetail', () => {
     expect(onRateChange).toHaveBeenCalledTimes(1);
   });
 
+  it('lists the charge change next to the rate change and runs the one chosen', async () => {
+    const onRateChange = vi.fn();
+    const onChargeChange = vi.fn();
+    renderDetail({ onRateChange, onChargeChange });
+    await userEvent.click(screen.getByRole('button', { name: 'Más acciones' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos']);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Cambiar seguros y cargos' }));
+    expect(onChargeChange).toHaveBeenCalledTimes(1);
+    expect(onRateChange).not.toHaveBeenCalled();
+  });
+
   it('reports a debt it cannot read', () => {
     renderDetail({ detail: null });
 

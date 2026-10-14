@@ -6,6 +6,8 @@ import { Button } from '../../shared/ui/Button';
 import { cn, focusRing } from '../../shared/ui/cn';
 import { DialogContent, DialogHeader, DialogRoot } from '../../shared/ui/Dialog';
 import { TextField, labelClass } from '../../shared/ui/TextField';
+import BackdatedNotice from './BackdatedNotice';
+import BeforeAfterPreview from './BeforeAfterPreview';
 import RateField from './RateField';
 import { formatEa } from './debtLabels';
 import { INSTALLMENT_TOO_LOW, KEEP_TERM_ONLY, initialRateForm, previewRateChange } from './rateChangeModel';
@@ -16,57 +18,17 @@ const MODE_OPTIONS = [
   { value: 'keep_installment', label: 'Mantener la cuota', hint: 'Pagas lo mismo y el plan termina antes o después.' },
 ];
 
-function Row({ label, before, after }) {
-  return (
-    <tr className="border-t border-[#eef1ed] first:border-t-0">
-      <th scope="row" className="py-2 pr-3 text-left font-normal text-ink-muted">{label}</th>
-      <td className="py-2 text-right text-ink tabular-nums">{before}</td>
-      <td className="py-2 pl-3 text-right font-semibold text-ink tabular-nums">{after}</td>
-    </tr>
-  );
-}
-
 function Preview({ result }) {
   const { before, after, isCard } = result;
+  const rows = [
+    { label: isCard ? 'Pago mínimo' : 'Próxima cuota', before: formatMoney(before.installmentMinor), after: formatMoney(after.installmentMinor) },
+    ...(isCard ? [] : [{ label: 'Cuotas restantes', before: before.remainingPeriods, after: after.remainingPeriods }]),
+    { label: 'Intereses por pagar', before: formatMoney(before.remainingInterestMinor), after: formatMoney(after.remainingInterestMinor) },
+  ];
   return (
-    <div role="group" aria-label="Vista previa" className="flex flex-col gap-3 rounded-sm bg-surface-2 p-4">
-      <span className="text-[13px] font-semibold text-ink-2">Vista previa: así quedaría, aún no se guardó.</span>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[13px] text-ink-muted">
-            <td />
-            <th scope="col" className="pb-1 text-right font-medium">Antes</th>
-            <th scope="col" className="pb-1 pl-3 text-right font-medium">Después</th>
-          </tr>
-        </thead>
-        <tbody>
-          <Row label={isCard ? 'Pago mínimo' : 'Próxima cuota'} before={formatMoney(before.installmentMinor)} after={formatMoney(after.installmentMinor)} />
-          {!isCard && <Row label="Cuotas restantes" before={before.remainingPeriods} after={after.remainingPeriods} />}
-          <Row label="Intereses por pagar" before={formatMoney(before.remainingInterestMinor)} after={formatMoney(after.remainingInterestMinor)} />
-        </tbody>
-      </table>
+    <BeforeAfterPreview rows={rows}>
       {result.unchanged && <p className="text-[13px] text-ink-muted">Este cambio no modifica ninguna cuota.</p>}
-    </div>
-  );
-}
-
-function Backdated({ impacted }) {
-  const titleId = useId();
-  return (
-    <section aria-labelledby={titleId} className="flex flex-col gap-2 rounded-sm bg-danger-soft px-3 py-2.5 text-[13px] leading-5 text-[#9a3412]">
-      <h3 id={titleId} className="font-semibold">Cambio con fecha pasada</h3>
-      <p>Esta fecha ya pasó: el costo de pagos ya registrados puede cambiar.</p>
-      {impacted.length === 0 ? <p>Ningún pago registrado cambia de costo.</p> : (
-        <ul className="flex flex-col gap-1">
-          {impacted.map((entry) => (
-            <li key={entry.eventId} className="flex flex-col">
-              <b className="font-semibold">{entry.label}</b>
-              <span className="tabular-nums">Costo financiero {formatMoney(entry.costBeforeMinor)} → {formatMoney(entry.costAfterMinor)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    </BeforeAfterPreview>
   );
 }
 
@@ -95,7 +57,7 @@ export default function RateChangeDialog({ debt, events, projection, today, save
           <DialogHeader title="Cambiar tasa" description={`${debt.name}. Tasa actual: ${formatEa(toEffectiveAnnual(projection.terms.rate))}.`} />
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
             <TextField label="Vigente desde" type="date" value={form.effectiveOn} onChange={(event) => setForm({ ...form, effectiveOn: event.target.value })} disabled={saving} />
-            {result.backdated && <Backdated impacted={result.impacted} />}
+            {result.backdated && <BackdatedNotice impacted={result.impacted} />}
 
             <fieldset disabled={saving} className="contents">
               <RateField rate={form.rate} echo={result.echo} onChange={patchRate} />

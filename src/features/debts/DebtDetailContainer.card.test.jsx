@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
@@ -122,5 +122,30 @@ describe('DebtDetailContainer card purchases', () => {
 
     await waitFor(() => expect(port.createEvent).toHaveBeenCalled());
     expect(port.createEvent.mock.calls[0][0].data).toMatchObject({ kind: 'void', dedupeKey: 'void:s1' });
+  });
+});
+
+describe('DebtDetailContainer card charge change', () => {
+  it('offers the charge change in the card menu, compares the minimum payment and writes a charge_change without a mode', async () => {
+    const { user } = setup([forCard(makeEvent('p1', 'payment', '2026-04-20', 100000))]);
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos']);
+    await user.click(screen.getByRole('menuitem', { name: 'Cambiar seguros y cargos' }));
+    const fee = within(inDialog().getByRole('group', { name: 'Cuota de manejo' })).getByLabelText('Valor');
+    await user.clear(fee);
+    await user.type(fee, '12000');
+    fireEvent.change(inDialog().getByLabelText('Vigente desde'), { target: { value: '2026-04-01' } });
+
+    expect(inDialog().getByRole('row', { name: /Pago mínimo/ })).toHaveTextContent('$ 146.102$ 149.672');
+    expect(inDialog().queryByRole('radio')).not.toBeInTheDocument();
+    await user.click(inDialog().getByRole('button', { name: 'Guardar cambio' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ debtId: 'c1', kind: 'charge_change', effectiveOn: '2026-04-01', amountMinor: 0 });
+    const payload = JSON.parse(data.payloadJson);
+    expect(payload).not.toHaveProperty('mode');
+    expect(payload.charges.map((charge) => [charge.id, charge.value])).toEqual([['mgmt_fee', 12000], ['mgmt_iva', 19]]);
   });
 });

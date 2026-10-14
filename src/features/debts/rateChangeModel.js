@@ -31,7 +31,8 @@ const sameFigures = (before, after) => before.installmentMinor === after.install
   && before.remainingPeriods === after.remainingPeriods
   && before.remainingInterestMinor === after.remainingInterestMinor;
 
-const impactedFor = (impacted) => impacted.map(({ eventId, kind, effectiveOn, costBeforeMinor, costAfterMinor }) => ({
+/** The payments a backdated change alters, as the dialogs list them: a label and the financial cost before and after. */
+export const impactedFor = (impacted) => impacted.map(({ eventId, kind, effectiveOn, costBeforeMinor, costAfterMinor }) => ({
   eventId, label: `${IMPACT_LABELS[kind] ?? 'Movimiento'} del ${formatDueDate(effectiveOn)}`, costBeforeMinor, costAfterMinor,
 }));
 
