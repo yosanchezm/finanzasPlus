@@ -135,11 +135,11 @@ Groups: C2a engine + rows (about 450), C2b project, goldens, properties (about 4
 ### C3 policy and restructure (design 640) · deps: C2
 Groups: C3a event + waive (about 400), C3b restructure helpers (about 240).
 
-- [ ] C3a.1 RED `late_policy`: 20 days overdue with policy effective today accrues 0, 5 days later 5; latest non-voided policy applies; void restores the prior projection; second policy appends; `normalizeLate` validates payload; `previewChange` accepts a `late_policy` draft; void of `rate_change`/`charge_change` restores projection; `waiveLate` forgives mora and records `applied[].waivedLateMinor`; restructure carry with mora 391,756 and with waive 390,381; no mora on replaced rows; new terms inherit `late`. Reqs LI7, DL3, DL4, DL6.
-- [ ] C3a.2 GREEN `ledger/events.js`, `project.js`, `tail.js`, `ledger/preview.js` (late_policy draft).
-- [ ] C3b.1 RED `restructureCarry` breakdown and `waivableLateMinor`; `buildRestructureTerms` keeps `current.late`, rejects `firstDueOn` <= `effectiveOn`; `previewChange` restructure draft with `payloadChars` > 8000 detectable; backdated `impacted`. Barrel RED. Reqs DL2, DL3.
-- [ ] C3b.2 GREEN `src/ledger/restructure.js`, `preview.js`, barrel.
-- [ ] C3.CP checkpoint.
+- [x] C3a.1 RED `late_policy`: 20 days overdue with policy effective today accrues 0, 5 days later 5; latest non-voided policy applies; void restores the prior projection; second policy appends; `normalizeLate` validates payload; `previewChange` accepts a `late_policy` draft; void of `rate_change`/`charge_change` restores projection; `waiveLate` forgives mora and records `applied[].waivedLateMinor`; restructure carry with mora 391,756 and with waive 390,381; no mora on replaced rows; new terms inherit `late`. Reqs LI7, DL3, DL4, DL6.
+- [x] C3a.2 GREEN `ledger/events.js`, `project.js`, `tail.js`, `ledger/preview.js` (late_policy draft).
+- [x] C3b.1 RED `restructureCarry` breakdown and `waivableLateMinor`; `buildRestructureTerms` keeps `current.late`, rejects `firstDueOn` <= `effectiveOn`; `previewChange` restructure draft with `payloadChars` > 8000 detectable; backdated `impacted`. Barrel RED. Reqs DL2, DL3.
+- [x] C3b.2 GREEN `src/ledger/restructure.js`, `preview.js`, barrel.
+- [x] C3.CP checkpoint.
 
 ## Phase D: Web restructure and mora UI (deps: B, C)
 

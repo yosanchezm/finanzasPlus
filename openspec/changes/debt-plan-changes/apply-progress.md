@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -458,3 +458,62 @@ From C2 on, deploy the web build and the Nia tarball together every time (owner 
 ### Remaining
 
 C3 onward (not started).
+
+
+## Batch C3 (late_policy event, waiveLate and restructure helpers): COMPLETE
+
+Branch `feat/dpc-c3-late-policy` (from master e591457). Core only: no web, Nia, schema or deploy change in code. `late_policy` is now a known event kind, so a core at or after C3 reads, projects, previews and (through `planCommit`) writes it; no UI creates one before D2/F2 (owner gates D2.0 and F2.0 still apply: A1 must be deployed on both runtimes first).
+
+### Tasks
+
+- [x] C3a.1 RED `test/ledger/project.policy.test.js` (26 tests), `events.test.js` (kinds list), `events.forward.test.js` (the unknown-kind example no longer uses `late_policy`)
+- [x] C3a.2 GREEN `src/ledger/events.js` (`late_policy`, restructure `waiveLate`), `src/ledger/project.js` (handler wiring), `src/ledger/tail.js` (`applyLatePolicy`, `carryOf`, waive and inheritance in `applyRestructure`), `src/ledger/preview.js` (`late_policy` draft)
+- [x] C3b.1 RED `test/ledger/restructure.test.js` (19 tests), `node16.test.js` (source list, exact keys, working functions)
+- [x] C3b.2 GREEN `src/ledger/restructure.js`, `src/ledger/project.js` (`prepare`, `replayLoan`, `replayLoanAt`), `index.js`
+- [x] C3.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 6fd2a37 `feat(finance-core): record mora policy changes as a late_policy event and let a restructure inherit or forgive mora` | C3a | 7 files, 362 insertions, 27 deletions |
+| 613a31c `feat(finance-core): compute the arrears a restructure refinances and build its terms from the current plan` | C3b | 5 files, 312 insertions, 6 deletions |
+
+Total vs master before this progress/tasks commit: 11 files, 674 insertions, 33 deletions = 707 changed lines (budget 2,000; each group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| C3a.1 / C3a.2 `late_policy` | Safety net `packages/finance-core`: 29 files, 507 tests passed. First RED run: 24 failed (`EVENT_KINDS` list 1, `project.policy.test.js` 23: project, void, planCommit, validation, preview). A test bug surfaced in the same run (a void dated after `asOf` is filtered out by `project`), fixed in the test, not in the code | `project.policy.test.js` 26 tests. Triangulated: policy on the due date (1,375, 10 days, base 199,505), effective today (0, earlier payment cost unchanged, then 5 days = 687), usury then none then fixed 20% with and without voiding the middle one, storage order, grace 3 days, policy over `terms.late`, a future policy, validation of every mode, preview equals saved projection, impacted payment 190,876 to 192,251 | None needed. Mutations: inheritance of `late` removed failed 2, `late_policy` handler a no-op failed 12; both restored |
+| C3a.1 / C3a.2 `waiveLate` | Same RED run: waive, inheritance and payload cases failed | Row 1 refinances 391,756, or 390,381 with `waiveLate`; `waivedLateMinor` 1,375 (0 when the mora was paid, the sum of both rows at day 30); no cost or allocation on the event; `lateMinor` of replaced rows frozen at 1,375 and `lateInterestMinor` 0; inherited policy from `terms.late` or from a `late_policy` event; explicit `none` wins; payload stores `waiveLate` only when true and rejects non-booleans | `carryOf` extracted from `applyRestructure` (the old loop and the new breakdown give the same numbers; the restructure suites are the safety net, all green). Mutations: waived amount forced to 0 failed 3, refinanced amount ignoring the waive failed 1; restored |
+| C3b.1 / C3b.2 `restructure.js` | `restructure.test.js` failed at import (module did not exist); `node16.test.js` failed 3 (source list, exact keys, working functions) | `packages/finance-core`: 31 files, 552 tests passed. `restructureCarry`: golden breakdown {interest 180,876, charges 10,000, taxes 0, lateInterest 1,375}, balance 10,000,000, carried 10,192,251; equals the saved restructure's `carriedMinor` (and minus `waivableLateMinor` with waive); after a 100,000 payment; two overdue rows; due exactly on the date; before any due date; no policy; voided and later events; balance-only debt; card; frozen inputs. `buildRestructureTerms`: principal and opening date, inherited and overridden `late`, no `late` stays absent, `invalid_first_due` (equal, earlier, left over from the old plan), old grace and due day dropped, balance-only, card, `invalid_principal`/`invalid_terms`/`invalid_late`/`invalid_date`, no mutation. Preview: after balance equals the breakdown (less the mora when waived), payload over 8000 detected and refused by `planCommit`, backdated `impacted` with cost before and after cross-checked against two projections | `project()` split into `prepare`, `replayLoan` and `replayLoanAt` with no behavior change (the C2 parity suite and all project suites stayed green). Mutations: keeping the old grace failed 1, `<=` to `<` in the date check failed 1, not ignoring `undefined` overrides failed 1, doubling the waivable mora failed 3, not limiting the arrears to rows due by the date failed 6; all restored |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/ledger` exit 0 (part of `npx vitest run packages/finance-core`: 31 files, 552 tests passed; baseline 29 files, 507). `npx vitest run packages functions/nia src/features/debts`: 74 files, 1,111 tests passed. Full `npm test -- --maxWorkers=4`: 113 files, 1,518 tests passed on the first run (baseline before C3: 111 files, 1,473) |
+| Runtime harness command/scenario and exact result | `npm run package:nia` exit 0 (core is bundled into the Nia package), `npm run build` exit 0 |
+| Rollback boundary | Revert the two commits (C3b then C3a): `src/ledger/restructure.js`, `replayLoanAt`/`replayLoan`/`prepare` in `project.js`, the two barrel exports, `late_policy`/`waiveLate` in `events.js`, `applyLatePolicy`/`carryOf`/the waive and inheritance in `tail.js`, the `late_policy` kind in `preview.js`, the new tests and the unknown-kind example in `events.forward.test.js`. No stored data depends on them yet: nothing writes a `late_policy` or a `waiveLate` before D2/F1/F2. If one was written later, a bundle before A1 cannot read it (see the compatibility matrix) |
+
+### Decisions and deviations from design
+
+- Golden numbers: the spec says a restructure on day 10 "carries 391,756" or 390,381 with `waiveLate`. In code those are the refinanced arrears of the overdue installment (`plan[0].refinancedMinor`, principal 199,505 + charges 10,000 + interest 180,876 + mora 1,375). The carried balance (`applied[].carriedMinor`) also includes the principal still to come: 10,192,251, or 10,190,876 with the waive. Tests assert both.
+- `restructureCarry(debt, events, on, opts)` takes the same `opts` as `project` (`legal`). It throws `ValidationError('restructure_unsupported')` for a card. The design assigns that code to `planCommit`/`previewChange` in F3a; the helper cannot read a card's rows, so it carries the guard already. F3a still has to add the guard to the write and preview paths.
+- `restructureCarry` reads the replayed state through the internal `replayLoanAt` (not in the barrel). It returns `null` for a kind with its own projector, and the helper turns that into the typed error. `project()` was split into `prepare` + `replayLoan` to share the replay; behavior is unchanged.
+- `carryOf(state, date)` (tail.js) is the single source of the carried figures: `applyRestructure` and `restructureCarry` use it. `arrears.lateInterest` is the raw sum of the unpaid mora per row, and `waivableLateMinor` clamps each row at 0 (a bank-stated mora above the accrued one never reduces what is waived).
+- `waiveLate` is stored only when true and `applied[].waivedLateMinor` appears only for a waiving restructure (it can be 0). With the waive, `refinancedMinor` of a replaced row excludes the forgiven mora; the row keeps showing the mora it accrued (`lateMinor`, `lateDays`) as history, while `lateInterestMinor` and `totals.remainingLateInterest` are 0.
+- The new terms inherit the mora policy in force (`state.work.late`, which includes one set by a `late_policy` event) when the restructure terms have no `late`; an explicit `late` (including `none`) wins. `modality` is not inherited at replay: `buildRestructureTerms` keeps it from the terms in force.
+- `buildRestructureTerms(current, { effectiveOn, carriedMinor, overrides })`: the carried balance and the effective date always win over the overrides; `undefined` overrides are ignored; the old `grace`, `balloonMinor`, `manualPlan` and `dueDay` do not carry over (they belong to the old calendar); a scheduled plan whose first due date is not after the effective date fails with `invalid_first_due` (a balance-only system needs no date); `n` defaults to the current `n` when not overridden, so the D1 dialog must always pass it.
+- `late_policy` on a card: the kind is known now, and the card projector has no handler, so the event is listed in `applied` with cost 0 and changes nothing until F3a. `planCommit` does not block it yet.
+- `events.forward.test.js` used `late_policy` as its "unknown kind" example; it now uses `mora_schedule`, because `late_policy` is known from this slice on. The A1 guarantees (skip, notice, strict writer) are unchanged and still tested.
+- `previewChange` previews `late_policy` with the debt's own `legal` (`debt.legal` or the code tables), like every other preview; there is no `legal` option.
+
+### Owner gate
+
+None new. The existing gates apply to what C3 enables: deploy A1 on web and Nia before any build that can write `late_policy` (D2.0, F2.0), and deploy web and Nia together from C2 on.
+
+### Remaining
+
+D1 onward (not started).
