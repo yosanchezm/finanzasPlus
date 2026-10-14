@@ -82,7 +82,7 @@ Nia también tiene tres modos de respuesta:
 
 ## Deudas
 
-El intent `debt` tiene cinco acciones. Gemini solo extrae lo que dijo la persona; los montos, las cuotas, las tasas y las recomendaciones los calcula el núcleo compartido (`packages/finance-core`) y todo cambio de datos pide confirmación.
+El intent `debt` tiene ocho acciones. Gemini solo extrae lo que dijo la persona; los montos, las cuotas, las tasas y las recomendaciones los calcula el núcleo compartido (`packages/finance-core`) y todo cambio de datos pide confirmación.
 
 | Acción | Ejemplo | Qué hace |
 |---|---|---|
@@ -91,8 +91,11 @@ El intent `debt` tiene cinco acciones. Gemini solo extrae lo que dijo la persona
 | `list` | “¿Cuánto debo?” | Lista las deudas con saldo, próxima cuota, tasa E.A. y vencido |
 | `simulate` | “Simula un abono de 2 millones al carro” | Compara reducir plazo, reducir cuota y adelantar cuotas, y muestra las próximas cuotas (hasta 6; si hay más, el resto está en la web). No guarda nada. El botón **Registrar este abono** lo convierte en un pago con la estrategia simulada, que se confirma como cualquier otro |
 | `advise` | “¿Cómo me conviene abonar 2 millones al carro?” | Calcula una recomendación determinística y la explica |
+| `legal_rate` | “La usura de noviembre es 28.2” | Registra la tasa de usura, el IBC o el salario mínimo de un mes o año (el mes se resuelve en código; fuera de 5 a 100 % se rechaza). Si ya había un valor para ese mes, lo actualiza |
+| `rate_change` | “Bajó la tasa del carro a 22 % E.A. desde hoy” | Pregunta la convención de la tasa si falta y, en un crédito de cuota fija, si se mantiene el plazo o la cuota (botones). Muestra la cuota, las cuotas restantes y el costo antes y después, con el aviso de usura del hogar. Si mantener la cuota ya no alcanza para los intereses, lo explica y muestra mantener el plazo. Aplica también a tarjetas |
+| `charge_change` | “Quita el seguro de vida del carro” | Cambia el valor de un seguro o cargo que la deuda ya tiene (se busca por nombre o tipo, sin importar mayúsculas ni tildes) o lo quita, junto con lo que depende de él. Muestra la próxima cuota antes y después. Agregar un cargo nuevo se hace en la web |
 
-Simular y recomendar aplican a préstamos con plan de cuotas; todavía no a tarjetas (tampoco en la web). En sistemas que no acortan el plazo con un abono (por ejemplo, el alemán), reducir plazo y reducir cuota dan el mismo resultado y Nia lo dice.
+Simular y recomendar aplican a préstamos con plan de cuotas; todavía no a tarjetas (tampoco en la web). Los cambios de tasa y de cargos se confirman con el mismo botón **Confirmar** y se registran una sola vez; si el cambio es con fecha pasada y toca un pago ya registrado, Nia avisa que los costos de pagos anteriores se actualizan al abrir la deuda en la web. En sistemas que no acortan el plazo con un abono (por ejemplo, el alemán), reducir plazo y reducir cuota dan el mismo resultado y Nia lo dice.
 
 ### Cómo se arma la recomendación
 
