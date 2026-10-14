@@ -451,3 +451,43 @@ describe('charge_change in the Nia entry point', () => {
     expect(chargeEvents()).toHaveLength(0);
   });
 });
+
+describe('restructure in the Nia entry point', () => {
+  const restructureAnswers = (planChange = {}) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'restructure', debtRef: 'vehiculo', rate: { value: null }, charges: [], planChange: { effectiveOn: null, n: 48, system: null, periodicity: null, firstDueOn: '2026-12-05', waiveLate: false, ...planChange } },
+  ];
+  const restructures = () => fake.tables.debt_events.filter((event) => event.kind === 'restructure');
+
+  it('tells the classifier and the extractor about the restructure', async () => {
+    fake = makeNet(restructureAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('reestructura el carro a 48 cuotas'));
+
+    expect(fake.prompts[0]).toContain('reestructurar');
+    expect(fake.prompts[1]).toContain('restructure');
+    expect(fake.prompts[1]).toContain('waiveLate');
+  });
+
+  it('previews the arrears and the new plan, and a repeated Confirm writes one event', async () => {
+    fake = makeNet(restructureAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('reestructura el carro a 48 cuotas, primera cuota 2026-12-05'));
+    expect(sent()[0].text).toContain('Reestructuración de Crédito Vehículo');
+    expect(sent()[0].text).toContain('Primera cuota: 2026-12-05');
+    expect(buttons(sent()[0])).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toMatchObject({ action: 'restructure', awaiting: 'confirm', debtId: 'd1', draft: { n: 48, firstDueOn: '2026-12-05' } });
+    expect(restructures()).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:confirm')); // and the user taps once more
+
+    expect(restructures()).toEqual([expect.objectContaining({ effectiveOn: '2026-10-13', dedupeKey: expect.stringMatching(/^debt:/), actorId: 'u7', source: 'telegram' })]);
+    expect(JSON.parse(restructures()[0].payloadJson).terms).toMatchObject({ n: 48, firstDueOn: '2026-12-05', principalMinor: 10180876 });
+    expect(sent().slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+  });
+});

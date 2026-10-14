@@ -21,7 +21,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge',
+ * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {

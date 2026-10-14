@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { serializeTerms } from '../../../packages/finance-core/index.js';
+import { resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
+import { pesos } from './format.js';
 import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, loadDebts, loadLegal } from './handler.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
@@ -1312,6 +1313,297 @@ describe('charge_change (E2)', () => {
       expect(w.sent[2].text).toContain('No encontré esa deuda');
       expect(chargeEvents(w)).toHaveLength(0);
       expect(w.sessions).toHaveLength(1);
+    });
+  });
+});
+
+describe('restructure (F1)', () => {
+  const answer = (planChange = {}, extra = {}) => ({ action: 'restructure', debtRef: 'vehiculo', rate: { value: null }, charges: [], planChange: { effectiveOn: null, n: 48, system: null, periodicity: null, firstDueOn: '2026-12-05', waiveLate: false, ...planChange }, ...extra });
+  const restructures = (w) => w.tables.debt_events.filter((event) => event.kind === 'restructure');
+  const payload = (w) => JSON.parse(restructures(w)[0].payloadJson);
+  const money = (value) => plain(pesos(value));
+  const TODAY = '2026-10-13';
+  const MORA = { $id: 'lr1', householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2859, source: 'Resolución', verified: true };
+  const moraRow = () => debtRow('d1', 'Crédito Vehículo', { termsJson: serializeTerms({ ...loanTerms, late: { mode: 'usury' } }) });
+  const moraWorld = (answers) => world({ debts: [moraRow()], legalRows: [MORA], answers });
+  const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+  const cardRow = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(cardTerms) });
+  const payAt = (w, id, on, amountMinor) => w.tables.debt_events.push({ ...disbursement('d1'), $id: id, kind: 'payment', effectiveOn: on, amountMinor, dedupeKey: `seed:${id}` });
+  // What the core says the restructure refinances for the live events, to compare with what Nia shows and writes.
+  const carryOf = (w, waive = false) => {
+    const debt = { ...w.tables.debts[0], legal: resolveLegal(w.tables.legal_rates) };
+    const carry = restructureCarry(debt, w.tables.debt_events, TODAY);
+    return { carry, carried: carry.carriedMinor - (waive ? carry.waivableLateMinor : 0) };
+  };
+
+  it('previews the arrears, the carried balance, the new installment and the term, and writes nothing', async () => {
+    const w = world({ answers: [answer()] });
+    await handleDebt(w.deps, ctx({ text: 'reestructura a 48 cuotas, primera cuota 2026-12-05' }));
+    const { carried } = carryOf(w);
+
+    expect(carried).toBe(10180876);
+    expect(w.sent).toHaveLength(1);
+    const text = w.sent[0].text;
+    expect(text).toContain('Reestructuración de Crédito Vehículo');
+    expect(text).toContain(`Saldo de capital: ${money(10000000)}`);
+    expect(text).toContain(`Intereses vencidos: ${money(180876)}`);
+    expect(text).toContain(`Cuotas vencidas que se refinancian: ${money(380381)}`);
+    expect(text).toContain(`Saldo que pasa al nuevo plan: ${money(10180876)}`);
+    expect(text).toContain('48 cuotas mensuales');
+    expect(text).toContain('Primera cuota: 2026-12-05');
+    expect(text).toMatch(/Cuota: .* → .*/);
+    expect(text).toContain('Costo restante');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[0].status).toBe('awaiting_confirmation');
+    expect(w.lastPending()).toEqual({ kind: 'debt', v: 1, id: 'p1', action: 'restructure', awaiting: 'confirm', debtId: 'd1', draft: { effectiveOn: TODAY, n: 48, firstDueOn: '2026-12-05' } });
+    expect(Buffer.byteLength(JSON.stringify(w.lastPending()), 'utf8')).toBeLessThan(300);
+    expect(restructures(w)).toHaveLength(0);
+  });
+
+  it('shows the mora as part of what is refinanced, and forgives it with waiveLate (391,756 against 390,381 in the golden case)', async () => {
+    const keep = moraWorld([answer()]);
+    await handleDebt(keep.deps, ctx());
+    const waive = moraWorld([answer({ waiveLate: true })]);
+    await handleDebt(waive.deps, ctx());
+    const { carry } = carryOf(keep);
+
+    expect(carry.arrears.lateInterest).toBeGreaterThan(0);
+    expect(keep.sent[0].text).toContain(`Mora: ${money(carry.arrears.lateInterest)}`);
+    expect(keep.sent[0].text).toContain(`Saldo que pasa al nuevo plan: ${money(carryOf(keep).carried)}`);
+    expect(waive.sent[0].text).toContain(`Mora condonada: ${money(carry.waivableLateMinor)}`);
+    expect(waive.sent[0].text).toContain(`Saldo que pasa al nuevo plan: ${money(carryOf(waive, true).carried)}`);
+    expect(carryOf(waive, true).carried).toBe(carryOf(keep).carried - carry.waivableLateMinor);
+    expect(waive.lastPending().draft).toMatchObject({ waiveLate: true });
+    expect(keep.lastPending().draft).not.toHaveProperty('waiveLate');
+  });
+
+  it('echoes the rate with its EA and cites the usury cap without blocking', async () => {
+    const w = world({ answers: [answer({}, { rate: { value: 30, period: 'annual' } })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Tasa: 30% EA');
+    expect(w.sent[0].text).toContain('supera el tope de usura de 28.59% E.A.');
+    expect(buttons(w.sent[0].keyboard)).toContain('nia:confirm');
+    expect(w.lastPending().draft.rate).toEqual({ value: 30, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
+  });
+
+  it('asks for the convention of an ambiguous rate with the convention buttons, then previews', async () => {
+    const w = world({ answers: [answer({}, { rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx({ text: 'reestructura a 48 cuotas con tasa de 2% mensual' }));
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+    expect(w.lastPending()).toMatchObject({ action: 'restructure', awaiting: 'convention', debtId: 'd1', draft: { effectiveOn: TODAY, n: 48, rateValue: 2 } });
+    expect(w.lastPending().draft.rate).toBeUndefined();
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+    expect(w.sent[1].text).toContain('Reestructuración de Crédito Vehículo');
+    expect(w.sent[1].text).toContain('Tasa: 2% MV ≈ 26.82% EA');
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { n: 48, rate: { value: 2, basis: 'effective', periodicity: 'monthly', timing: 'arrears' } } });
+    expect(w.lastPending().draft.rateValue).toBeUndefined();
+    expect(restructures(w)).toHaveLength(0);
+  });
+
+  it('asks for the number of installments when it is missing', async () => {
+    const w = world({ answers: [answer({ n: null })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('el número de cuotas');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+  });
+
+  it('explains a first installment on or before the effective date, without a pending', async () => {
+    const w = world({ answers: [answer({ firstDueOn: TODAY })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('primera cuota');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(restructures(w)).toHaveLength(0);
+  });
+
+  it('refuses a card and writes nothing', async () => {
+    const w = world({ debts: [cardRow()], answers: [answer({}, { debtRef: 'visa' })] });
+    w.tables.debt_events = [];
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('tarjeta');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(restructures(w)).toHaveLength(0);
+  });
+
+  it('asks which debt first when several match, then previews the chosen one', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [answer({}, { debtRef: 'banco' })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:pick:d1', 'nia:pick:d2']);
+    expect(w.lastPending()).toMatchObject({ action: 'restructure', awaiting: 'pick', draft: { n: 48, firstDueOn: '2026-12-05' } });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:d2');
+    expect(w.sent[1].text).toContain('Reestructuración de Moto');
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', debtId: 'd2' });
+  });
+
+  it('keeps the charges the user stated in the pending and shows them in the new plan', async () => {
+    const charges = [{ kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05 }];
+    const w = world({ answers: [answer({}, { charges })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.lastPending().draft.charges).toEqual([{ id: 'c1', kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', value: 0.05, cadence: 'per_installment' }]);
+
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+    expect(payload(w).terms.charges.map((charge) => charge.label)).toEqual(['Seguro de vida']);
+  });
+
+  async function previewed(w, text = 'reestructura a 48 cuotas') {
+    await handleDebt(w.deps, ctx({ text }));
+    return w.lastPending();
+  }
+
+  describe('Confirm', () => {
+    it('writes one restructure event with the carried balance, the new terms and the ids of the pending, and reports the written figures', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(restructures(w)).toHaveLength(1);
+      expect(restructures(w)[0]).toMatchObject({ $id: 'dep1', dedupeKey: 'debt:p1', debtId: 'd1', effectiveOn: TODAY, source: 'telegram', actorId: ACTOR });
+      expect(payload(w).terms).toMatchObject({ principalMinor: 10180876, n: 48, firstDueOn: '2026-12-05', openedOn: TODAY, system: 'french', periodicity: 'monthly', rate: { value: 24 } });
+      expect(payload(w)).not.toHaveProperty('waiveLate');
+      expect(costRows(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('registré la reestructuración de Crédito Vehículo');
+      expect(w.sent[1].text).toContain(`Saldo refinanciado: ${money(10180876)}`);
+      expect(w.sent[1].text).toContain('Cuotas restantes: 48');
+      expect(w.sent[1].text).toContain('Primera cuota: 2026-12-05');
+      expect(w.sessions[1]).toMatchObject({ status: 'completed', pending: { kind: 'debt', v: 1, id: 'p1', action: 'restructure', done: true } });
+    });
+
+    it('writes waiveLate with the mora left out of the carried balance', async () => {
+      const w = moraWorld([answer({ waiveLate: true })]);
+      const pending = await previewed(w);
+      const expected = carryOf(w, true);
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(payload(w)).toMatchObject({ waiveLate: true });
+      expect(payload(w).terms.principalMinor).toBe(expected.carried);
+      expect(expected.carry.waivableLateMinor).toBeGreaterThan(0);
+      expect(w.sent[1].text).toContain(`Saldo refinanciado: ${money(expected.carried)}`);
+      expect(w.sent[1].text).toContain(`Mora condonada: ${money(expected.carry.waivableLateMinor)}`);
+    });
+
+    it('rebuilds from the live debt: a payment recorded after the preview changes the written carried balance', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      payAt(w, 'pay1', '2026-10-12', 380381);
+      await confirmDebt(w.deps, ctx(), pending);
+      const written = payload(w).terms.principalMinor;
+
+      expect(w.sent[0].text).toContain(`Saldo que pasa al nuevo plan: ${money(10180876)}`);
+      expect(written).toBe(9800495);
+      expect(w.sent[1].text).toContain(`Saldo refinanciado: ${money(9800495)}`);
+      expect(restructures(w)).toHaveLength(1);
+    });
+
+    it('answers "ya estaba registrado" to a second Confirm, writes one event for a double tap and for a race', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      await confirmDebt(w.deps, ctx(), pending); // Telegram retry that read the session before the done marker
+      await confirmDebt(w.deps, ctx(), w.lastPending()); // a tap after the first one finished
+
+      expect(restructures(w)).toHaveLength(1);
+      expect(w.sent.slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+
+      const race = world({ answers: [answer()] });
+      const racing = await previewed(race);
+      await Promise.all([confirmDebt(race.deps, ctx(), racing), confirmDebt(race.deps, ctx(), racing)]);
+      expect(restructures(race)).toHaveLength(1);
+    });
+
+    it('checks the dedupe key before rebuilding: a repeated Confirm says it was recorded even when the debt can no longer be rebuilt', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      w.tables.debts = [];
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(restructures(w)).toHaveLength(1);
+      expect(w.sent[2].text).toContain('ya estaba registrad');
+      expect(w.sent[2].text).not.toContain('No encontré');
+    });
+
+    it('writes nothing and explains when the rebuilt terms are invalid', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      const forged = { ...pending, draft: { ...pending.draft, firstDueOn: '2026-10-01' } };
+      await confirmDebt(w.deps, ctx(), forged);
+
+      expect(restructures(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('primera cuota');
+      expect(w.sessions).toHaveLength(1);
+    });
+
+    it('writes nothing and explains when the event would pass 8000 characters', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      const charges = Array.from({ length: 90 }, (_, index) => ({ id: `c${index + 1}`, kind: 'fee', label: `Cargo número ${index + 1}`, basis: 'fixed', value: 1000, cadence: 'per_installment' }));
+      await confirmDebt(w.deps, ctx(), { ...pending, draft: { ...pending.draft, charges } });
+
+      expect(restructures(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('demasiado grande');
+      expect(w.sessions).toHaveLength(1);
+    });
+
+    it('writes nothing when the debt became a card or is gone', async () => {
+      const card = world({ debts: [cardRow()], answers: [answer()] });
+      card.tables.debt_events = [];
+      const pending = { kind: 'debt', v: 1, id: 'p1', action: 'restructure', awaiting: 'confirm', debtId: 'c1', draft: { effectiveOn: TODAY, n: 48, firstDueOn: '2026-12-05' } };
+      await confirmDebt(card.deps, ctx(), pending);
+      expect(restructures(card)).toHaveLength(0);
+      expect(card.sent[0].text).toContain('tarjeta');
+
+      const gone = world({ answers: [answer()] });
+      const live = await previewed(gone);
+      gone.tables.debts = [];
+      await confirmDebt(gone.deps, ctx(), live);
+      expect(restructures(gone)).toHaveLength(0);
+      expect(gone.sent[1].text).toContain('No encontré esa deuda');
+    });
+
+    it('does not confirm while the convention is still pending', async () => {
+      const w = world({ answers: [answer({}, { rate: { value: 2, period: 'monthly' } })] });
+      await handleDebt(w.deps, ctx());
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      expect(restructures(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('Antes de confirmar');
+    });
+
+    it('adds the backdated note to the preview and the reply when a recorded payment changes cost', async () => {
+      const w = world({ answers: [answer({ effectiveOn: '2026-10-11' })] });
+      payAt(w, 'pay1', '2026-10-12', 380381);
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(w.sent[0].text).toContain('Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.');
+      expect(w.sent[1].text).toContain('Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.');
+      expect(restructures(w)).toHaveLength(1);
+    });
+  });
+
+  describe('stale buttons', () => {
+    it('ignores a convention button and a mode button while the preview waits for confirmation', async () => {
+      const w = world({ answers: [answer()] });
+      const pending = await previewed(w);
+      const before = w.sessions.length;
+      await handleDebtCallback(w.deps, ctx({ pending }), 'nia:conv:EA');
+      await handleDebtCallback(w.deps, ctx({ pending }), 'nia:mode:keep_term');
+
+      expect(w.sent[1].text).toContain('ya no aplica');
+      expect(w.sent[2].text).toContain('ya no aplica');
+      expect(w.sessions).toHaveLength(before);
+      expect(restructures(w)).toHaveLength(0);
     });
   });
 });

@@ -6,7 +6,7 @@ import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
 import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
-import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, previewChargeChange, previewRateChange, rebuildCharges } from './planChange.js';
+import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
@@ -241,6 +241,25 @@ async function startChargeChange(deps, ctx, request, debts) {
   return withDebt(deps, ctx, request, debts, { action: 'charge_change', draft, question: '¿A cuál deuda le cambio el seguro o cargo?' }, (id, debt) => continueCharge(deps, ctx, id, debt, draft));
 }
 
+// A restructure (NI3): the pending keeps only the overrides the user stated (date, number of installments, rate, system, periodicity, first due
+// date, charges, waiveLate). The arrears, the carried balance and the new terms are rebuilt from the live debt, for the preview and again at Confirm.
+async function continueRestructure(deps, ctx, id, debt, draft) {
+  if (!draft.rate && draft.rateValue !== undefined) {
+    const pending = buildPending({ id, action: 'restructure', awaiting: 'convention', debtId: debt.$id, draft });
+    return say(deps, ctx, { text: conventionQuestion(draft.rateValue), keyboard: conventionKeyboard(), status: STATUS.convention, pending });
+  }
+  const preview = previewRestructure({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
+  if (!preview.ok) return inform(deps, ctx, preview.issue);
+  const pending = buildPending({ id, action: 'restructure', awaiting: 'confirm', debtId: debt.$id, draft: preview.draft });
+  return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+async function startRestructure(deps, ctx, request, debts) {
+  if (request.missingFields.length) return inform(deps, ctx, `Para reestructurar necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const draft = restructureDraft(request.planChange);
+  return withDebt(deps, ctx, request, debts, { action: 'restructure', draft, question: '¿Cuál deuda quieres reestructurar?' }, (id, debt) => continueRestructure(deps, ctx, id, debt, draft));
+}
+
 async function startPay(deps, ctx, request, debts) {
   if (request.amountMinor === null) return inform(deps, ctx, '¿Cuánto pagaste? Escríbeme el monto en pesos.');
   const draft = { amountMinor: request.amountMinor, effectiveOn: request.paidOn, ...(request.strategy ? { strategy: request.strategy } : {}) };
@@ -337,21 +356,26 @@ export async function handleDebt(deps, ctx) {
   if (request.action === 'legal_rate') return startLegalRate(deps, ctx, request);
   if (request.action === 'rate_change') return startRateChange(deps, ctx, request, debts);
   if (request.action === 'charge_change') return startChargeChange(deps, ctx, request, debts);
+  if (request.action === 'restructure') return startRestructure(deps, ctx, request, debts);
   return startAnalysis(deps, ctx, request, debts);
 }
 
 const STALE_BUTTON = 'Esa opción ya no aplica a la solicitud actual.';
 
-// Where a `nia:conv:` button leads, by the action of the pending request: create finishes the new debt, rate_change goes on to
-// the mode or the preview with the rate the user stated (the value is kept in the draft until the convention arrives).
+// A plan change that stated a rate with no convention keeps the value in its draft until the button arrives; then it goes on with the rate.
+const withStatedRate = (next) => async (deps, ctx, pending, convention) => {
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
+  const { rateValue, ...draft } = pending.draft;
+  return next(deps, ctx, pending.id, debt, { ...draft, rate: normalizeRate({ convention, value: rateValue }) });
+};
+
+// Where a `nia:conv:` button leads, by the action of the pending request: create finishes the new debt, rate_change and restructure go on
+// to the mode or the preview with the rate the user stated.
 const CONVENTION_NEXT = {
   create: (deps, ctx, pending, convention) => finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, convention)),
-  rate_change: async (deps, ctx, pending, convention) => {
-    const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
-    if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
-    const { rateValue, ...draft } = pending.draft;
-    return continueRate(deps, ctx, pending.id, debt, { ...draft, rate: normalizeRate({ convention, value: rateValue }) });
-  },
+  rate_change: withStatedRate(continueRate),
+  restructure: withStatedRate(continueRestructure),
 };
 
 /**
@@ -377,6 +401,7 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
   if (pending.action === 'rate_change') return continueRate(deps, ctx, pending.id, debt, action.type === 'mode' ? { ...pending.draft, mode: action.value } : pending.draft);
   if (pending.action === 'charge_change') return continueCharge(deps, ctx, pending.id, debt, action.type === 'charge' ? { ...pending.draft, chargeId: pending.candidates[action.value] } : pending.draft);
+  if (pending.action === 'restructure') return continueRestructure(deps, ctx, pending.id, debt, pending.draft);
   if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
   // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
   const draft = action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : action.type === 'simpay' ? { ...pending.draft, effectiveOn: today(deps) } : pending.draft;
@@ -479,8 +504,24 @@ async function commitChargeChange(deps, ctx, pending) {
   return { duplicate: false, text: describeChargeChange(debt, rebuilt.target, pending.draft, previewChange(debt, events, draft, { on: asOf }), rebuilt.dependents) };
 }
 
-const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.' };
+// A restructure is rebuilt from the live debt and events: the carried balance written is the one of now, so a payment recorded after the preview is
+// part of it. The dedupe key is checked first because, once written, the restructure changes the debt that a repeated Confirm would rebuild from.
+async function commitRestructure(deps, ctx, pending) {
+  const asOf = today(deps);
+  if (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))) return { duplicate: true };
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
+  const events = await loadEvents(deps, debt.$id);
+  const built = rebuildRestructure({ debt, events, today: asOf, draft: pending.draft });
+  if (!built.ok) return { text: built.issue, failed: true };
+  const plan = planCommit(debt, events, built.eventDraft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
+  const { duplicate } = await commitPlan(debtPort(deps), plan);
+  if (duplicate) return { duplicate };
+  return { duplicate: false, text: describeRestructure(debt, built) };
+}
+
+const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its
