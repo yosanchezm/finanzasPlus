@@ -286,3 +286,64 @@ None for B2 (no schema, no deploy order).
 ### Remaining
 
 B3 onward (not started).
+
+
+## Batch B3 (ChargesEditor, ChargeChangeDialog, Más acciones wiring): COMPLETE
+
+Branch `feat/dpc-b3-charge-change` (from master 2ea40f6). No live Appwrite call was made (web tests mock `src/appwrite`). No dev server was started, so the layout was not checked in a browser.
+
+### Tasks
+
+- [x] B3a.1 RED `chargesEditorModel.test.js`, `ChargesEditor.test.jsx`
+- [x] B3a.2 GREEN `chargesEditorModel.js`, `ChargesEditor.jsx`
+- [x] B3b.1 RED `chargeChangeModel.test.js`, `ChargeChangeDialog.test.jsx`, charge change flow in `DebtDetailContainer.test.jsx`, card flow in `DebtDetailContainer.card.test.jsx`, menu test in `DebtDetail.test.jsx`, `snapshot` cases in `preview.test.js`
+- [x] B3b.2 GREEN `chargeChangeModel.js`, `ChargeChangeDialog.jsx`, `DebtDetailContainer.jsx` (the menu item comes with the existing `MoreActionsMenu`), `snapshot.js`
+- [x] B3.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 0f2fc7e `feat(debts): edit real charges with a charges editor that validates references and lists dependents` | B3a | 4 files, 775 insertions |
+| 4b914d2 `feat(finance-core): report the next installment total with its charges in plan snapshots` | B3a/B3b bridge (core) | 2 files, 16 insertions, 3 deletions |
+| 881f029 `feat(debts): change insurance and charges from Más acciones with a before/after preview` | B3b | 12 files, 710 insertions, 52 deletions |
+
+Total vs master before this progress/tasks commit: 18 files, 1,501 insertions, 55 deletions = 1,556 changed lines (budget 2,000; each group <= 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| B3a.1 / B3a.2 model | `chargesEditorModel.test.js` failed at import (module did not exist) | 22 tests: round trip of real charges (cadence, periods, `pctOfBase`, `display`), 10,000 to 12,000, comma and dot percentages with no float drift, thousand dots in pesos, dangling, later and subtotal references, transitive dependents, presets, custom ids | Removed unused `unit` fields from the basis table. Mutation: allowing 5 decimals failed the over-precise case; restored |
+| B3a.1 / B3a.2 editor | `ChargesEditor.test.jsx` failed at import | 14 tests. Mutations: removal without the dependents confirmation failed 2 tests, a fieldset that ignored `disabled` failed the freeze test; restored. `npx vitest run src/features/debts`: 31 files, 334 tests passed | None needed |
+| B3b core `snapshot` | Safety net `packages/finance-core`: 23 files, 407 tests passed. `preview.test.js` failed 4: the exact-keys snapshot, the fee case, the charge change preview and the new card minimum case | 23 files, 407 tests passed; `functions/nia packages src/features/debts`: 64 files, 930 tests | None needed |
+| B3b.1 / B3b.2 model | `chargeChangeModel.test.js` failed at import | 15 tests, all numbers derived by hand first (392,281 to 394,661; 35 x 11,900 to 35 x 14,280; 3 x 11,900 + 32 x 14,280 for a June date; the backdated cost 192,776 to 195,156; the card minimum 146,102 to 149,672). Mutations: dropping the `same` guard failed 4 tests, dropping the payload guard 1, folding future card changes 1; restored | `BackdatedNotice` and `BeforeAfterPreview` extracted from `RateChangeDialog` with its 12 tests as safety net (still green); `impactedFor` exported |
+| B3b.1 / B3b.2 dialog | `ChargeChangeDialog.test.jsx` failed at import | 12 tests. Mutations: hiding the backdated block failed 1, enabling the save without a draft failed 3; restored | None needed |
+| B3b.1 / B3b.2 wiring | 8 new container tests failed (no menu item); the 9th failure of the run was the known simulator timeout | `DebtDetailContainer*.test.jsx`: 38 passed; one more menu test in `DebtDetail.test.jsx` (passthrough, covered by B2 so green on first run) | Mutation: dropping `afterSave` from the charge change failed 2 reconcile tests; restored |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run src/features/debts` exit 0: 33 files, 370 tests passed (baseline before B3: 29 files, 298). Full `npm test -- --maxWorkers=4`: 105 files, 1,373 tests passed on the first run (baseline before B3: 101 files, 1,300) |
+| Runtime harness command/scenario and exact result | `npm run build` exit 0. `npm run package:nia` exit 0 (not required for B3 by the plan, run because `snapshot.js` is core code that Nia packages) |
+| Rollback boundary | Revert the three commits in reverse order: `ChargeChangeDialog.jsx`, `chargeChangeModel.js`, `ChargesEditor.jsx`, `chargesEditorModel.js`, `BackdatedNotice.jsx`, `BeforeAfterPreview.jsx` with their tests, the `chargeChange` dialog in `DebtDetailContainer.jsx`, `impactedFor` export and the two extracted components in `RateChangeDialog.jsx`, and `nextTotalMinor` in `snapshot.js`. No stored data depends on them |
+
+### Decisions and deviations from design
+
+- Core change outside the file map: `snapshot()` gains `nextTotalMinor` (the first open row's `totalDueMinor`: installment plus its charges and taxes, and a card's minimum payment). The existing `installmentMinor` leaves charges out, so a charge change could not be previewed from it. It is a pure addition in its own commit; the exact-keys snapshot test changed RED-first. No other caller reads the new field yet.
+- The dialog compares "Próxima cuota con cargos" and "Cargos por pagar" (`remainingChargesMinor`) for a loan and only "Pago mínimo" for a card (a card's accrued charges are billed at the next statement, so a remaining-charges row would show zeros). A card has no mode choice, and a loan has none either: a charge change has no `mode`.
+- The charges in force for a card are folded from the active `charge_change` events up to today (`chargesInForce`): the card projection keeps the original `terms`, unlike a loan, whose `terms` already hold the applied changes. The same limit exists in the B2 rate dialog (a card's "Tasa actual" comes from `projection.terms.rate`); it is not fixed here.
+- The editor works on drafts (strings) and `validateCharges` is the only bridge to real `Charge` objects; the core `normalizeCharges` still has the last word. Percentages accept a comma or a dot and up to four decimals (0..100); fixed values are whole pesos and accept thousand dots. "% de una base fija" (`pctOfBase`, with its `baseMinor`) is kept for a stored charge that already uses it but is not offered for new ones.
+- Removing a charge that others are calculated on asks first, naming them ("Al quitar «Comisión» también se quita «IVA sobre la comisión»..."), and uses the core `removeCharge`. The dangling-reference error is therefore reached by changing a base (for example a fee moved to "% de lo que pagas en la cuota"), by a new "% de otro cargo" row without a base, or by a charge listed before its base.
+- A set equal to the one in force shows "Todavía no cambiaste ningún cargo." and disables the save (no empty event). A change that moves no figure (a rename) is still saveable and says so. A payload over 8,000 characters is blocked with a message.
+- Extra files beyond the design list: `chargeChangeModel.js` (+test), `BackdatedNotice.jsx` and `BeforeAfterPreview.jsx` (extracted from `RateChangeDialog` so D1 can reuse them). `MoreActionsMenu.jsx` and `DebtDetail.jsx` needed no change: the "Cambiar seguros y cargos" item already existed and shows once `onChargeChange` is wired.
+- History summaries show the labels of changed charges since B1 (`chargesSummary`); no change was needed.
+
+### Owner gate
+
+None for B3 (no schema, no deploy order).
+
+### Remaining
+
+C1 onward (not started).

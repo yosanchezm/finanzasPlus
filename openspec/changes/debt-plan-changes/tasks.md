@@ -110,11 +110,11 @@ Groups: B2a menu + model + afterSave (about 380), B2b dialog + wiring (about 370
 ### B3 charge change dialog (design 700) · deps: B2
 Groups: B3a editor + model (about 380), B3b dialog + wiring (about 320).
 
-- [ ] B3a.1 RED `chargesEditorModel.test.js`: real `Charge[]` (kind, label, basis fixed/% saldo/% original/% otro cargo/% subtotal, cadence, `fromPeriod`/`toPeriod` kept); dangling `pctOfCharge` rejected; removal lists dependents. RED `ChargesEditor.test.jsx`. Reqs WM4.
-- [ ] B3a.2 GREEN `chargesEditorModel.js`, `ChargesEditor.jsx`.
-- [ ] B3b.1 RED `ChargeChangeDialog.test.jsx`: 10,000 to 12,000 effective next month previews from that date only; dangling reference disables save inline; impacted payments; double submit one `charge_change`; card variant has no mode choice. Reqs WM4, DL2, WM1.
-- [ ] B3b.2 GREEN `ChargeChangeDialog.jsx`, container + menu item.
-- [ ] B3.CP checkpoint.
+- [x] B3a.1 RED `chargesEditorModel.test.js`: real `Charge[]` (kind, label, basis fixed/% saldo/% original/% otro cargo/% subtotal, cadence, `fromPeriod`/`toPeriod` kept); dangling `pctOfCharge` rejected; removal lists dependents. RED `ChargesEditor.test.jsx`. Reqs WM4.
+- [x] B3a.2 GREEN `chargesEditorModel.js`, `ChargesEditor.jsx`.
+- [x] B3b.1 RED `ChargeChangeDialog.test.jsx`: 10,000 to 12,000 effective next month previews from that date only; dangling reference disables save inline; impacted payments; double submit one `charge_change`; card variant has no mode choice. Reqs WM4, DL2, WM1.
+- [x] B3b.2 GREEN `ChargeChangeDialog.jsx`, container + menu item.
+- [x] B3.CP checkpoint.
 
 ## Phase C: Core mora (parallel with B after A)
 
