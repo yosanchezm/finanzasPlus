@@ -1,6 +1,7 @@
 import {
   ValidationError,
   buildSchedule,
+  defaultLateFor,
   ley1555Notice,
   normalizeRate,
   periodDates,
@@ -103,6 +104,9 @@ export function buildTerms(create) {
     terms.n = create.n;
     terms.firstDueOn = create.firstDueOn || periodDates(create.openedOn, create.periodicity, 2)[1];
     terms.charges = create.charges;
+    // Same rule as the web wizard: a kind with a default mora writes it, a kind without one writes nothing.
+    const late = defaultLateFor(create.kind);
+    if (late.mode !== 'none') terms.late = late;
   }
   return validateTerms(terms);
 }
@@ -145,6 +149,7 @@ function createText(create, terms, legal) {
     lines.push(`Primera cuota: ${pesos(rows[0].totalDueMinor)} el ${rows[0].dueOn}`);
     lines.push(`Intereses y cargos totales: ${pesos(totals.costMinor)}`);
   }
+  if (terms.late && terms.late.mode === 'usury') lines.push('Mora: si una cuota se vence, cobra la tasa de usura vigente. Puedes cambiarla después escribiéndome, por ejemplo: “quita la mora”.');
   return [...lines, ...noticeLines(terms, legal), '', '¿Quieres registrarla así? Aún no se guarda.'].join('\n');
 }
 

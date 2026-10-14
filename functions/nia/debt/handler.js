@@ -4,6 +4,7 @@ import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
+import { CARD_LATE, describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
 import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
@@ -37,6 +38,9 @@ const PROBLEMS = {
   legal_smmlv_out_of_range: 'El salario mínimo debe estar entre $ 100.000 y $ 100.000.000, en pesos enteros. Escríbelo de nuevo; no guardé nada.',
   legal_mortgage_needs_usury: 'Para la hipoteca registra directamente la tasa de usura: el IBC no la deriva. Dime la usura y el mes; no guardé nada.',
   legal_unknown_modality: 'No reconozco esa modalidad. Puede ser consumo y ordinario, bajo monto, productivo (rural o urbano), popular (rural o urbano) o hipotecario.',
+  late_invalid_multiple: 'El múltiplo de la tasa del contrato debe ser mayor que 0 y de hasta 3 veces. Escríbelo de nuevo; no guardé nada.',
+  late_invalid_grace: 'Los días de gracia deben ser un número entero de 0 a 90. Escríbelos de nuevo; no guardé nada.',
+  late_invalid: 'Esa política de mora no es válida: revisa la tasa que me diste. Escríbela de nuevo; no guardé nada.',
   legal_invalid_month: 'No entendí el mes o el año. Escríbelo, por ejemplo, “noviembre” o “noviembre de 2026”.',
 };
 const MISSING = {
@@ -51,6 +55,9 @@ const MISSING = {
   charge: 'el seguro o cargo',
   charge_action: 'si quieres cambiar su valor o quitarlo',
   charge_value: 'el nuevo valor',
+  late_mode: 'si quieres mora a la tasa de usura, a una tasa fija, como múltiplo de la tasa del contrato, o sin mora',
+  late_rate: 'la tasa de la mora',
+  late_multiple: 'cuántas veces la tasa del contrato',
 };
 
 const hasStatus = (error, status) => Boolean(error) && (error.status === status || error.code === status);
@@ -260,6 +267,26 @@ async function startRestructure(deps, ctx, request, debts) {
   return withDebt(deps, ctx, request, debts, { action: 'restructure', draft, question: '¿Cuál deuda quieres reestructurar?' }, (id, debt) => continueRestructure(deps, ctx, id, debt, draft));
 }
 
+// A mora policy (NI4): the debt first, then the convention of a fixed rate when it is missing, then the core preview. The pending keeps the
+// policy the user chose (mode, rate or multiple, grace days, date); Confirm rebuilds the figures from the live debt. Cards are refused (F3).
+async function continueLate(deps, ctx, id, debt, draft) {
+  if (debt.kind === 'card') return inform(deps, ctx, CARD_LATE);
+  if (draft.rateValue !== undefined) {
+    const pending = buildPending({ id, action: 'late_policy', awaiting: 'convention', debtId: debt.$id, draft });
+    return say(deps, ctx, { text: conventionQuestion(draft.rateValue), keyboard: conventionKeyboard(), status: STATUS.convention, pending });
+  }
+  const preview = previewLatePolicy({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
+  if (!preview.ok) return inform(deps, ctx, preview.issue);
+  const pending = buildPending({ id, action: 'late_policy', awaiting: 'confirm', debtId: debt.$id, draft: preview.draft });
+  return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+async function startLatePolicy(deps, ctx, request, debts) {
+  if (request.missingFields.length) return inform(deps, ctx, `Para configurar la mora necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const draft = request.latePolicy;
+  return withDebt(deps, ctx, request, debts, { action: 'late_policy', draft, question: '¿A cuál deuda le configuro la mora?' }, (id, debt) => continueLate(deps, ctx, id, debt, draft));
+}
+
 async function startPay(deps, ctx, request, debts) {
   if (request.amountMinor === null) return inform(deps, ctx, '¿Cuánto pagaste? Escríbeme el monto en pesos.');
   const draft = { amountMinor: request.amountMinor, effectiveOn: request.paidOn, ...(request.strategy ? { strategy: request.strategy } : {}) };
@@ -357,6 +384,7 @@ export async function handleDebt(deps, ctx) {
   if (request.action === 'rate_change') return startRateChange(deps, ctx, request, debts);
   if (request.action === 'charge_change') return startChargeChange(deps, ctx, request, debts);
   if (request.action === 'restructure') return startRestructure(deps, ctx, request, debts);
+  if (request.action === 'late_policy') return startLatePolicy(deps, ctx, request, debts);
   return startAnalysis(deps, ctx, request, debts);
 }
 
@@ -371,11 +399,17 @@ const withStatedRate = (next) => async (deps, ctx, pending, convention) => {
 };
 
 // Where a `nia:conv:` button leads, by the action of the pending request: create finishes the new debt, rate_change and restructure go on
-// to the mode or the preview with the rate the user stated.
+// to the mode or the preview with the rate the user stated, late_policy to the preview with the fixed mora rate.
 const CONVENTION_NEXT = {
   create: (deps, ctx, pending, convention) => finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, convention)),
   rate_change: withStatedRate(continueRate),
   restructure: withStatedRate(continueRestructure),
+  late_policy: async (deps, ctx, pending, convention) => {
+    const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+    if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
+    const { rateValue, late, ...draft } = pending.draft;
+    return continueLate(deps, ctx, pending.id, debt, { ...draft, late: { ...late, rate: normalizeRate({ convention, value: rateValue }) } });
+  },
 };
 
 /**
@@ -402,6 +436,7 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (pending.action === 'rate_change') return continueRate(deps, ctx, pending.id, debt, action.type === 'mode' ? { ...pending.draft, mode: action.value } : pending.draft);
   if (pending.action === 'charge_change') return continueCharge(deps, ctx, pending.id, debt, action.type === 'charge' ? { ...pending.draft, chargeId: pending.candidates[action.value] } : pending.draft);
   if (pending.action === 'restructure') return continueRestructure(deps, ctx, pending.id, debt, pending.draft);
+  if (pending.action === 'late_policy') return continueLate(deps, ctx, pending.id, debt, pending.draft);
   if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
   // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
   const draft = action.type === 'strategy' ? { ...pending.draft, strategy: action.value } : action.type === 'simpay' ? { ...pending.draft, effectiveOn: today(deps) } : pending.draft;
@@ -520,8 +555,24 @@ async function commitRestructure(deps, ctx, pending) {
   return { duplicate: false, text: describeRestructure(debt, built) };
 }
 
-const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.' };
+// A mora policy is rebuilt from the live debt: the figures in the reply are those of the debt as it is now. The dedupe key is checked first,
+// like the other plan changes, so a repeated Confirm answers that it was already recorded without reading the debt again.
+async function commitLatePolicy(deps, ctx, pending) {
+  const asOf = today(deps);
+  if (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))) return { duplicate: true };
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
+  if (debt.kind === 'card') return { text: CARD_LATE, failed: true };
+  const events = await loadEvents(deps, debt.$id);
+  const draft = { kind: 'late_policy', ...pending.draft };
+  const plan = planCommit(debt, events, draft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
+  const { duplicate } = await commitPlan(debtPort(deps), plan);
+  if (duplicate) return { duplicate };
+  return { duplicate: false, text: describeLatePolicy({ debt, draft: pending.draft, figures: previewChange(debt, events, draft, { on: asOf }), today: asOf }) };
+}
+
+const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure, late_policy: commitLatePolicy };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.', late_policy: 'Esta mora ya estaba registrada. No la repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its

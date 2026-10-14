@@ -124,7 +124,7 @@ describe('buildTerms and previewCreate', () => {
     expect(high.ok).toBe(true);
     expect(plain(high.text)).toContain('tope de usura');
     expect(plain(high.text)).toContain('informativo');
-    expect(plain(low.text)).not.toContain('usura');
+    expect(plain(low.text)).not.toContain('tope de usura');
   });
 
   it('adds the Ley 1555 notice for a mortgage', () => {
@@ -172,7 +172,7 @@ describe('previewCreate with the household legal tables', () => {
     expect(above).toContain('supera el tope de usura de 29% E.A.');
     expect(plain(previewCreate(at(29.5)).text)).toContain('supera el tope de usura de 28.59% E.A.');
     expect(between.ok).toBe(true);
-    expect(plain(between.text)).not.toContain('usura');
+    expect(plain(between.text)).not.toContain('tope de usura');
     expect(plain(previewCreate(at(28.8)).text)).toContain('tope de usura de 28.59% E.A.');
   });
 
@@ -189,5 +189,26 @@ describe('previewCreate with the household legal tables', () => {
     expect(plain(previewCreate(at(30), { legal: household }).text)).not.toContain(UNAVAILABLE);
     expect(plain(previewCreate(at(30), { legal: resolveLegal([]) }).text)).not.toContain(UNAVAILABLE);
     expect(plain(previewCreate(at(30)).text)).not.toContain(UNAVAILABLE);
+  });
+});
+
+describe('mora default by kind on a new debt (F2)', () => {
+  const create = { kind: 'vehicle', name: 'Moto', lender: '', principalMinor: 10000000, rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, rateValue: 24, n: 36, periodicity: 'monthly', system: 'french', firstDueOn: null, charges: [], openedOn: TODAY };
+
+  it('writes the usury mora for the bank kinds, with no grace days', () => {
+    for (const kind of ['consumer', 'vehicle', 'libranza', 'leasing', 'mortgage']) {
+      expect(buildTerms({ ...create, kind }).late).toEqual({ mode: 'usury', graceDays: 0 });
+    }
+  });
+
+  it('writes no mora for family, informal and other debts, nor for a balance-only debt', () => {
+    for (const kind of ['family', 'other']) expect(buildTerms({ ...create, kind })).not.toHaveProperty('late');
+    const informal = buildTerms({ ...create, kind: 'informal', system: 'none', n: null, rate: { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' } });
+    expect(informal).not.toHaveProperty('late');
+  });
+
+  it('says in the preview that an overdue installment will charge the usury rate, only when the mora is on', () => {
+    expect(plain(previewCreate(create).text)).toContain('Mora: si una cuota se vence, cobra la tasa de usura vigente.');
+    expect(plain(previewCreate({ ...create, kind: 'family' }).text)).not.toContain('Mora:');
   });
 });

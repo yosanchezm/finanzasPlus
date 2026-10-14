@@ -1607,3 +1607,240 @@ describe('restructure (F1)', () => {
     });
   });
 });
+
+describe('late_policy (F2)', () => {
+  const lateAnswer = (late = {}, extra = {}) => ({ action: 'late_policy', debtRef: 'vehiculo', late: { mode: 'usury', ...late }, ...extra });
+  const lateEvents = (w) => w.tables.debt_events.filter((event) => event.kind === 'late_policy');
+  const money = (value) => plain(pesos(value));
+  const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+  const cardRow = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(cardTerms) });
+  // Ten days after the first installment (due 2026-10-10): 199,505 of principal overdue at the 28.59% cap is 1,375 of mora.
+  const tenDaysLate = (w) => { w.deps.now = () => new Date('2026-10-20T15:00:00Z'); return w; };
+
+  async function previewed(w) {
+    await handleDebt(w.deps, ctx({ text: 'activa mora a la usura en el crédito del banco' }));
+    return w.lastPending();
+  }
+
+  it('previews the usury mode effective today with the cap in force, and writes nothing until confirmed', async () => {
+    const w = world({ answers: [lateAnswer()] });
+    const pending = await previewed(w);
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Mora de Crédito Vehículo');
+    expect(w.sent[0].text).toContain('Modo: tasa de usura');
+    expect(w.sent[0].text).toContain('Desde: 2026-10-13');
+    expect(w.sent[0].text).toContain('Tope de usura vigente: 28.59% E.A.');
+    expect(w.sent[0].text).toContain(`Mora acumulada al 2026-10-13: ${money(0)} → ${money(0)}`);
+    expect(w.sent[0].text).toContain('La mora no es retroactiva');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[0].status).toBe('awaiting_confirmation');
+    expect(pending).toMatchObject({ kind: 'debt', id: 'p1', action: 'late_policy', awaiting: 'confirm', debtId: 'd1', draft: { effectiveOn: '2026-10-13', late: { mode: 'usury', graceDays: 0 } } });
+    expect(Buffer.byteLength(JSON.stringify(pending), 'utf8')).toBeLessThanOrEqual(1500);
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+
+  it('previews the mora of a policy that reaches back to the due date: 1,375 after ten days', async () => {
+    const w = tenDaysLate(world({ answers: [lateAnswer({ effectiveOn: '2026-10-10' })] }));
+    await previewed(w);
+
+    expect(w.sent[0].text).toContain('Desde: 2026-10-10');
+    expect(w.sent[0].text).toContain(`Mora acumulada al 2026-10-20: ${money(0)} → ${money(1375)}`);
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+
+  describe('Confirm', () => {
+    it('writes one late_policy event with the pending-derived ids and reports the written figures', async () => {
+      const w = tenDaysLate(world({ answers: [lateAnswer({ effectiveOn: '2026-10-10', graceDays: 0 })] }));
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(lateEvents(w)).toHaveLength(1);
+      expect(lateEvents(w)[0]).toMatchObject({ $id: 'dep1', dedupeKey: 'debt:p1', debtId: 'd1', effectiveOn: '2026-10-10', amountMinor: 0, source: 'telegram', actorId: ACTOR });
+      expect(JSON.parse(lateEvents(w)[0].payloadJson)).toEqual({ late: { mode: 'usury', graceDays: 0 } });
+      expect(costRows(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('registré la mora de Crédito Vehículo');
+      expect(w.sent[1].text).toContain(`Mora acumulada al 2026-10-20: ${money(1375)}`);
+      expect(w.sessions[1]).toMatchObject({ status: 'completed', pending: { kind: 'debt', v: 1, id: 'p1', action: 'late_policy', done: true } });
+    });
+
+    it('answers "ya estaba registrado" to a second Confirm and writes one event for a double tap', async () => {
+      const w = world({ answers: [lateAnswer()] });
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      await confirmDebt(w.deps, ctx(), pending); // Telegram retry that read the session before the done marker
+      await confirmDebt(w.deps, ctx(), w.lastPending()); // a tap after the first one finished
+
+      expect(lateEvents(w)).toHaveLength(1);
+      expect(w.sent.slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+      expect(w.sent[2].text).toContain('Esta mora ya estaba registrada');
+    });
+
+    it('writes one event when two Confirms race, and finds it by the dedupe key even when the debt is gone', async () => {
+      const w = world({ answers: [lateAnswer()] });
+      const pending = await previewed(w);
+      await Promise.all([confirmDebt(w.deps, ctx(), pending), confirmDebt(w.deps, ctx(), pending)]);
+      w.tables.debts = [];
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(lateEvents(w)).toHaveLength(1);
+      expect(w.sent[w.sent.length - 1].text).toContain('ya estaba registrada');
+    });
+
+    it('rebuilds from the live debt: a payment recorded after the preview is part of the written figures', async () => {
+      const w = tenDaysLate(world({ answers: [lateAnswer({ effectiveOn: '2026-10-10' })] }));
+      const pending = await previewed(w);
+      w.tables.debt_events.push({ ...disbursement('d1'), $id: 'pay1', kind: 'payment', effectiveOn: '2026-10-15', amountMinor: 380381, dedupeKey: 'seed:pay1' });
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(lateEvents(w)).toHaveLength(1);
+      // The payment (made on 10-15) settled the 687 accrued so far, but 687 of principal stayed unpaid and went on accruing: 3 left, against 1,375 without it.
+      expect(w.sent[1].text).toContain(`Mora acumulada al 2026-10-20: ${money(3)}`);
+      expect(w.sent[1].text).toContain('Los costos de pagos anteriores se actualizarán');
+    });
+
+    it('writes nothing and says so when the debt is gone', async () => {
+      const w = world({ answers: [lateAnswer()] });
+      const pending = await previewed(w);
+      w.tables.debts = [];
+      await confirmDebt(w.deps, ctx(), pending);
+
+      expect(lateEvents(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('No encontré esa deuda');
+      expect(w.sessions).toHaveLength(1);
+    });
+
+    it('does not confirm while the convention is still pending', async () => {
+      const w = world({ answers: [lateAnswer({ mode: 'fixed', rate: { value: 3, period: 'monthly' } })] });
+      await handleDebt(w.deps, ctx());
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      expect(lateEvents(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('Antes de confirmar');
+    });
+  });
+
+  it('states that the cap applies to a fixed 40% and still writes the rate the user asked for', async () => {
+    const w = world({ answers: [lateAnswer({ mode: 'fixed', rate: { value: 40, period: 'annual' } })] });
+    const pending = await previewed(w);
+
+    expect(w.sent[0].text).toContain('Modo: tasa fija 40% EA');
+    expect(w.sent[0].text).toContain('se aplicará 28.59% E.A.');
+    await confirmDebt(w.deps, ctx(), pending);
+    expect(JSON.parse(lateEvents(w)[0].payloadJson)).toEqual({ late: { mode: 'fixed', graceDays: 0, rate: { value: 40, basis: 'effective', periodicity: 'annual', timing: 'arrears' } } });
+  });
+
+  it('reaches a confirmable preview in each of the four modes, with grace days', async () => {
+    const modes = [
+      [lateAnswer({ mode: 'none' }), 'Modo: sin mora', { mode: 'none', graceDays: 0 }],
+      [lateAnswer({ mode: 'usury', graceDays: 5 }), 'Días de gracia: 5', { mode: 'usury', graceDays: 5 }],
+      [lateAnswer({ mode: 'fixed', rate: { value: 20, period: 'annual' } }), 'Tasa de mora: 20% E.A.', { mode: 'fixed', graceDays: 0, rate: { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' } }],
+      [lateAnswer({ mode: 'contract_multiple', multiple: 1.5 }), 'Modo: 1.5 veces la tasa del contrato', { mode: 'contract_multiple', graceDays: 0, multiple: 1.5 }],
+    ];
+    for (const [answer, shown, late] of modes) {
+      const w = world({ answers: [answer] });
+      const pending = await previewed(w);
+
+      expect(w.sent[0].text).toContain(shown);
+      expect(pending).toMatchObject({ awaiting: 'confirm', draft: { late } });
+      await confirmDebt(w.deps, ctx(), pending);
+      expect(JSON.parse(lateEvents(w)[0].payloadJson)).toEqual({ late });
+    }
+  });
+
+  it('asks for the convention of a fixed rate with buttons, then previews with the rate it makes', async () => {
+    const w = world({ answers: [lateAnswer({ mode: 'fixed', rate: { value: 3, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx({ text: 'mora fija del 3% mensual' }));
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+    expect(w.lastPending()).toMatchObject({ action: 'late_policy', awaiting: 'convention', debtId: 'd1', draft: { rateValue: 3, effectiveOn: '2026-10-13', late: { mode: 'fixed', graceDays: 0 } } });
+    expect(w.lastPending().draft.late.rate).toBeUndefined();
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+    expect(w.sent[1].text).toContain('Modo: tasa fija 3% MV');
+    expect(w.sent[1].text).toContain('Pediste 42.58% E.A., pero el tope de usura es 28.59% E.A.');
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { late: { mode: 'fixed', rate: { value: 3, basis: 'effective', periodicity: 'monthly', timing: 'arrears' } } } });
+    expect(w.lastPending().draft.rateValue).toBeUndefined();
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+
+  it('asks for what is missing: the mode, the fixed rate or the multiple', async () => {
+    const w = world({ answers: [lateAnswer({ mode: null }), lateAnswer({ mode: 'fixed' }), lateAnswer({ mode: 'contract_multiple' })] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('Para configurar la mora necesito: si quieres mora a la tasa de usura');
+    expect(w.sent[1].text).toContain('la tasa de la mora');
+    expect(w.sent[2].text).toContain('cuántas veces la tasa del contrato');
+    expect(w.sessions.map((session) => session.pending)).toEqual([null, null, null]);
+  });
+
+  it('asks for a correction on a multiple above 3 or grace days above 90, writing nothing', async () => {
+    const w = world({ answers: [lateAnswer({ mode: 'contract_multiple', multiple: 5 }), lateAnswer({ graceDays: 120 })] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('mayor que 0 y de hasta 3');
+    expect(w.sent[1].text).toContain('días de gracia');
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+
+  it('refuses a card politely and keeps no pending', async () => {
+    const w = world({ debts: [cardRow()], answers: [lateAnswer({}, { debtRef: 'visa' })] });
+    w.tables.debt_events = [];
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('tarjetas');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+
+  it('asks which debt first when several match, then previews the chosen one', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [lateAnswer({}, { debtRef: 'banco' })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:pick:d1', 'nia:pick:d2']);
+    expect(w.lastPending()).toMatchObject({ action: 'late_policy', awaiting: 'pick', candidates: ['d1', 'd2'] });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:d2');
+    expect(w.sent[1].text).toContain('Mora de Moto');
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', debtId: 'd2' });
+  });
+
+  it('ignores a mode button on a mora pending as stale, with no write', async () => {
+    const w = world({ answers: [lateAnswer()] });
+    await previewed(w);
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:mode:keep_term');
+
+    expect(w.sent[1].text).toContain('ya no aplica');
+    expect(lateEvents(w)).toHaveLength(0);
+  });
+});
+
+describe('create: mora default by kind (F2)', () => {
+  const termsOf = (w) => JSON.parse(w.tables.debts[0].termsJson);
+
+  it('previews and writes the usury mora for a bank kind, as the web wizard does', async () => {
+    const w = world({ debts: [], answers: [loanAnswer()] });
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.sent[0].text).toContain('Mora: si una cuota se vence, cobra la tasa de usura vigente');
+    expect(termsOf(w).late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
+  it('writes the usury mora for a mortgage too, and no mora for a family loan', async () => {
+    const mortgage = world({ debts: [], answers: [loanAnswer({ kind: 'mortgage', name: 'Casa' })] });
+    await handleDebt(mortgage.deps, ctx());
+    await confirmDebt(mortgage.deps, ctx(), mortgage.lastPending());
+    const family = world({ debts: [], answers: [loanAnswer({ kind: 'family', name: 'Tío', rate: null })] });
+    await handleDebt(family.deps, ctx());
+    await confirmDebt(family.deps, ctx(), family.lastPending());
+
+    expect(termsOf(mortgage).late).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(termsOf(family).late).toBeUndefined();
+    expect(family.sent[0].text).not.toContain('Mora');
+  });
+});
