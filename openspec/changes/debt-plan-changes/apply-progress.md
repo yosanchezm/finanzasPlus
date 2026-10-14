@@ -517,3 +517,68 @@ None new. The existing gates apply to what C3 enables: deploy A1 on web and Nia 
 ### Remaining
 
 D1 onward (not started).
+
+
+## Batch D1 (RestructureDialog in three steps, Más acciones wiring): COMPLETE
+
+Branch `feat/dpc-d1-restructure` (from master dc78f83). Web only: no core, Nia, schema or deploy change. No live Appwrite call was made (web tests mock `src/appwrite`). No dev server was started, so the layout was not checked in a browser.
+
+### Tasks
+
+- [x] D1a.1 RED `wizard/fromTerms.test.js` (10 tests), `restructureModel.test.js` (23 tests)
+- [x] D1a.2 GREEN `wizard/fromTerms.js`, `restructureModel.js`
+- [x] D1b.1 RED `RestructureDialog.test.jsx` steps 1-2 (14 tests)
+- [x] D1b.2 GREEN `RestructureDialog.jsx` steps 1-2, `wizard/steps/PlanStep.jsx` (two optional props)
+- [x] D1c.1 RED `RestructureDialog.test.jsx` step 3 and saving states (10 tests), `DebtDetailContainer.test.jsx` restructure flow (7 tests; the old "lists both plan changes" test moved into it with the third item)
+- [x] D1c.2 GREEN `RestructureDialog.jsx` step 3, `DebtDetailContainer.jsx` (dialog, `useCommitDialog`, `onRestructure`)
+- [x] D1.CP checkpoint
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| b0227fe `feat(debts): model the restructure dialog with a terms-to-draft round trip, arrears breakdown, mora waiver and payload limit` | D1a | 4 files, 524 insertions |
+| d7ad681 `feat(debts): add the restructure dialog with the arrears step and the new conditions step` | D1b | 3 files, 314 insertions, 5 deletions |
+| bbf5226 `feat(debts): restructure a loan from Más acciones with a before/after summary, mora waiver and payload limit` | D1c | 4 files, 327 insertions, 14 deletions |
+
+Total vs master before this progress/tasks commit: 9 files, 1,160 insertions, 14 deletions = 1,174 changed lines (budget 2,000; each group <= 800; D1a+D1b = 843, under the 1,400 size-review trigger).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| D1a.1 / D1a.2 `fromTerms.js` | Safety net `src/features/debts`: 33 files, 370 tests passed. `fromTerms.test.js` failed at import (module did not exist) | 10 tests: strings of a French loan with a fee and a percentage insurance (`0,05` keeps its comma), grace, balloon and manual plan; round trip `validateTerms({...terms, ...toPlanFields(fromTerms(terms)), charges})` equals the terms for six shapes (French with charges, nominal monthly rate, German with grace on principal, interest-only with balloon, manual plan, fixed mora policy with modality); blank `n` is `NaN` and the core rejects it; grace and balloon only for the systems that support them | None needed |
+| D1a.1 / D1a.2 `restructureModel.js` | `restructureModel.test.js` failed at import | 23 tests: golden breakdown 10,000,000 / 180,876 / 10,000 / 1,375 with total 10,192,251 equal to the sum of the rows; taxes grouped with charges (11,900); after a 100,000 payment only 92,251 of interest is left; invalid date and a settled debt block step 1; "condonar mora" only when mora > 0 (10,190,876 carried, `waiveLate` only when set, a leftover choice ignored without mora); `n` always passed (48 gives `remainingPeriods` 48); blank `firstDueOn` follows the effective date; on or before the effective date is an inline error and `canAdvance` is false; `payloadChars` > 8000 gives `tooLarge`, no draft and the message; usury notice at 40% against the 28.59% cap; backdated `impacted` | None needed. Mutations: forgetting the waive in the carried balance failed 1, `waivable = true` failed 2, payload limit doubled failed 1, initial `n` = `terms.n` failed 1; `<` instead of `<=` in the local first-due check survived because `buildRestructureTerms` rejects an equal date with the same field message (equivalent mutant, the core backs it) |
+| D1b.1 / D1b.2 `RestructureDialog.jsx` steps 1-2 | Safety net: the model suites above plus `src/features/debts` stayed green. `RestructureDialog.test.jsx` failed at import | 14 tests: arrears and mora rows with the total, another effective date (due day: no mora, 10,190,876), invalid date blocks, Atrás keeps typed values, prefill (rate, convention, French, 36, monthly, first installment 2026-03-15, grace 0, fee 10000), EA echo 26.82%, interest-only asks for the final payment and a French plan for grace (options exactly `interest_only`, `french`), no manual plan for a family loan, inline first-due error with `aria-invalid` and Siguiente disabled, blank `n`, waive checkbox only with mora and the refinanced balance line, wrong charge blocks the step | None needed. Mutations: waive checkbox always shown failed 1, dropping `systems`/`invalid` failed 2, silencing the issue messages failed 3, a submit that ignores `ready` survived until one more test submitted the form another way (added) and then failed 1 |
+| D1c.1 / D1c.2 step 3 | 8 failed in the first RED run (no step 3: no preview group, no note, no alert) | `RestructureDialog.test.jsx` 24 tests: before/after rows (Saldo 10,000,000 to 10,192,251; Vencido 391,756 to 0; Mora 1,375 to 0; Cuotas 36 to 48; Próxima cuota 380,381 to 319,488 checked against `buildSchedule`), draft sent with `terms` and no `waiveLate`, waive sends `waiveLate: true` and shows "Mora condonada $ 1.375", usury notice at 40% never blocks, no notice under the cap, backdated notice names the 20 feb payment, `payload_too_large` (terms padded to 7,995 characters) shows the message and disables save, back and forth, saving and failed states keep the summary | None needed. Mutations: no backdated notice failed 1, no usury notice failed 1, no `preview.issue` failed 1, no waived-mora row failed 1 |
+| D1c.1 / D1c.2 wiring | 7 container tests failed (no menu item) | `DebtDetailContainer.test.jsx` 38 tests (7 new): loan menu lists three items, nothing written before the summary is confirmed, one `restructure` event with `de` + nonce id, `web:n1` key, amount 0, new terms in the payload and no cost row; reload, then reconcile on fresh events, then refresh with "Se actualizaron 2 filas"; double tap one event; failed write keeps the summary and the retry reuses id and key; reconcile failure keeps the save; end to end: the event written by the dialog is read back, its void asks for the confirmation, and a later payment blocks it naming "el pago del 20 feb" with nothing written. The card container test (exactly two items) stays green | None needed. Mutation: dropping `afterSave` from the restructure failed 2 |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run src/features/debts` exit 0: 36 files, 433 tests passed (baseline before D1: 33 files, 370). Full `npm test -- --maxWorkers=4`: 116 files, 1,581 tests passed on the first run (baseline before D1: 113 files, 1,518) |
+| Runtime harness command/scenario and exact result | `npm run build` exit 0 (`DebtsContainer-*.js` emitted). `npm run package:nia` not required for D1 (no core or Nia change) |
+| Rollback boundary | Revert the three commits (D1c, D1b, D1a): `RestructureDialog.jsx`, `restructureModel.js`, `wizard/fromTerms.js` with their tests, the `restructure` dialog and `onRestructure` in `DebtDetailContainer.jsx`, and the `systems`/`invalid` props of `PlanStep.jsx`. No stored data depends on them: the event kind, the guarded void and the reconcile were already in place |
+
+### Decisions and deviations from design
+
+- `fromTerms(terms)` returns the plan fields with the wizard state's names (`rate`, `system`, `periodicity`, `n`, `firstDueOn`, `grace`, `balloon`, `manualPlan`) plus `chargeRows` (drafts of the charges editor). `toPlanFields(draft)` is its inverse (an export beyond the design) and the round trip is tested against `validateTerms`. A manual plan round-trips even though the dialog never offers one.
+- The initial form is `fromTerms(projection.terms)` with four changes: the effective date is today, `n` is the installments still to pay (`projection.remainingPeriods`, else the current `n`), `firstDueOn` is blank (follows the effective date: one period later) and grace, balloon and manual rows are reset (they belong to the old calendar). `n` is always sent as an override, as C3 asked.
+- `PlanStep` is reused as is for the plan fields. It gained two optional props: `systems` (the dialog leaves out the manual plan, so a family or "other" debt gets no system select) and `invalid` (marks `n`, `firstDueOn`, grace and balloon with `aria-invalid`; the dialog shows the messages in `role="alert"` lines).
+- The effective date ("Vigente desde") is in step 1 because the arrears depend on it. "Condonar los intereses de mora" is in step 2 (spec), with a running "Saldo que se refinancia" line; step 1 always shows the unwaived total (the sum of its rows), and the waived balance appears in step 2 and in the step 3 summary.
+- Step 3 shows the new plan (rate echo, system, installments, first installment, waived mora) and a before/after table: Saldo, Vencido, Mora por pagar (only when mora exists before or after), Próxima cuota, Cuotas restantes, Intereses por pagar, Última cuota. The usury notice (informational, from `debt.legal` through `rateEcho`) and the backdated notice (`impacted` payments) sit above the table.
+- `payload_too_large` is shown as a Spanish message ("Esta reestructuración es demasiado grande...") and `previewRestructure` returns no draft, so the save stays disabled; the code itself is not displayed.
+- "Reestructurar" is wired only for a loan with installments (`system !== 'none'`): a card never gets it (the menu also filters it), and an informal balance-only debt has no plan to replace. The spec only says "loans only"; this narrows it for `none`.
+- The new terms start from the terms in force today (`projection.terms`) even for a backdated effective date; the core rebuilds the carried balance at replay (AD13), so only the rate, charges and mora policy come from today's terms.
+- In the D1b commit the dialog is complete for steps 1-2 but not mounted anywhere, and its last step has no body yet; D1c adds step 3 and the wiring. The commit is green and unreachable by users.
+- `MAX_PERIODS` (2000) is duplicated in `restructureModel.js` because the core barrel does not export it; the core still has the last word.
+- The guarded void flow (`voidRuleOf`, `VoidDialog`, the container reconcile) came with B1/B2; D1c adds an end-to-end test over an event written by the new dialog instead of new production code.
+
+### Owner gate
+
+None for D1 (no schema, no deploy order). D2 still has its own gate (D2.0: A1 deployed on web and Nia) and was not started.
+
+### Remaining
+
+D2 onward (not started; D2.0 is an owner gate).

@@ -146,13 +146,13 @@ Groups: C3a event + waive (about 400), C3b restructure helpers (about 240).
 ### D1 restructure dialog (design 1,050; most likely to exceed) · deps: B3, C3
 Groups: D1a model (about 350), D1b steps 1-2 (about 400), D1c step 3 + wiring (about 300).
 
-- [ ] D1a.1 RED `fromTerms.test.js` (round-trips `projection.terms` to a valid draft) and `restructureModel.test.js`: carried balance equals breakdown sum; `firstDueOn` <= effective date inline error and no advance; "condonar mora" only when mora > 0 and excluded from carried; `payload_too_large` above 8000. Reqs WM5, DL3.
-- [ ] D1a.2 GREEN `wizard/fromTerms.js`, `restructureModel.js`.
-- [ ] D1b.1 RED `RestructureDialog.test.jsx` steps 1-2: arrears + mora, rate/system/periodicity/n/`firstDueOn`/grace or balloon, embedded `ChargesEditor`. Reqs WM5.
-- [ ] D1b.2 GREEN `RestructureDialog.jsx` steps 1-2.
-- [ ] D1c.1 RED step 3 before/after + usury notice, `payload_too_large` disables save, double submit one event, afterSave reconcile; menu shows "Reestructurar" for loans only; end-to-end guarded void blocked by a later payment names it, writes nothing; allowed when none follows. Reqs WM5, WM1, WM6, DL4, DL5.
-- [ ] D1c.2 GREEN step 3, container, menu item.
-- [ ] D1.CP checkpoint.
+- [x] D1a.1 RED `fromTerms.test.js` (round-trips `projection.terms` to a valid draft) and `restructureModel.test.js`: carried balance equals breakdown sum; `firstDueOn` <= effective date inline error and no advance; "condonar mora" only when mora > 0 and excluded from carried; `payload_too_large` above 8000. Reqs WM5, DL3.
+- [x] D1a.2 GREEN `wizard/fromTerms.js`, `restructureModel.js`.
+- [x] D1b.1 RED `RestructureDialog.test.jsx` steps 1-2: arrears + mora, rate/system/periodicity/n/`firstDueOn`/grace or balloon, embedded `ChargesEditor`. Reqs WM5.
+- [x] D1b.2 GREEN `RestructureDialog.jsx` steps 1-2.
+- [x] D1c.1 RED step 3 before/after + usury notice, `payload_too_large` disables save, double submit one event, afterSave reconcile; menu shows "Reestructurar" for loans only; end-to-end guarded void blocked by a later payment names it, writes nothing; allowed when none follows. Reqs WM5, WM1, WM6, DL4, DL5.
+- [x] D1c.2 GREEN step 3, container, menu item.
+- [x] D1.CP checkpoint.
 
 ### D2 mora UI (design 850) · deps: C3, A1 deployed
 Groups: D2a wizard (about 250), D2b detail + payment (about 330), D2c `LatePolicyDialog` (about 270).
