@@ -210,3 +210,78 @@ describe('DebtWizard plan and charges', () => {
     expect(onSubmit.mock.calls[0][0].terms.charges.map((charge) => charge.id)).toEqual(['fee', 'iva', 'gmf']);
   });
 });
+
+describe('DebtWizard mora policy', () => {
+  const toPlan = async (user, kind, rate) => {
+    await pick(user, kind);
+    await basics(user, 'Crédito', '1200000');
+    if (rate) await fillIn(user, 'Valor de la tasa', rate);
+    await next(user);
+  };
+  const MORA = 'Interés de mora';
+
+  it('presets usury for a bank loan, explains it and saves it with the created terms', async () => {
+    const { user, onSubmit } = renderWizard();
+    await toPlan(user, 'Consumo', '25');
+
+    expect(screen.getByLabelText(MORA)).toHaveValue('usury');
+    expect(screen.getByText('Las cuotas vencidas generan mora a la tasa máxima legal vigente.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Días de gracia antes de cobrar mora')).toHaveValue(0);
+    await next(user); await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
+  it('presets none for a family loan and saves it without a policy', async () => {
+    const { user, onSubmit } = renderWizard();
+    await toPlan(user, 'Familiar');
+
+    expect(screen.getByLabelText(MORA)).toHaveValue('none');
+    expect(screen.queryByLabelText('Días de gracia antes de cobrar mora')).not.toBeInTheDocument();
+    await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.late).toBeUndefined();
+  });
+
+  it('asks for a rate when the user picks a fixed mora and saves it with its grace days', async () => {
+    const { user, onSubmit } = renderWizard();
+    await toPlan(user, 'Familiar');
+    await user.selectOptions(screen.getByLabelText(MORA), 'fixed');
+
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+    await fillIn(user, 'Tasa de mora', '36');
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeEnabled();
+    expect(screen.getByText('36% EA')).toBeInTheDocument();
+    await fillIn(user, 'Días de gracia antes de cobrar mora', '5');
+    await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.late).toEqual({
+      mode: 'fixed', graceDays: 5, rate: { value: 36, basis: 'effective', periodicity: 'annual', timing: 'arrears' },
+    });
+  });
+
+  it('lets a bank loan turn mora off, and blocks the step with a message for grace days out of range', async () => {
+    const { user, onSubmit } = renderWizard();
+    await toPlan(user, 'Vehículo', '20');
+    await fillIn(user, 'Días de gracia antes de cobrar mora', '120');
+
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Los días de gracia deben ser un número entero de 0 a 90.');
+    await user.selectOptions(screen.getByLabelText(MORA), 'none');
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeEnabled();
+    await next(user); await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.late).toBeUndefined();
+  });
+
+  it('does not offer the multiple of the contract rate in the wizard', async () => {
+    const { user } = renderWizard();
+    await toPlan(user, 'Consumo', '25');
+
+    expect(within(screen.getByLabelText(MORA)).getAllByRole('option').map((option) => option.value)).toEqual(['none', 'usury', 'fixed']);
+  });
+});

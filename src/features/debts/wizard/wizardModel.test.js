@@ -205,3 +205,70 @@ describe('household legal tables in the wizard', () => {
     expect(evaluate(state, legal).notices).toEqual([expect.objectContaining({ code: 'ley1555_scope_unverified', thresholdMinor: 1760000000, aboveThreshold: false })]);
   });
 });
+
+describe('mora policy in the wizard', () => {
+  const late = (patch) => ({ type: 'set', patch: { late: patch } });
+  const lateOf = (state, patch) => ({ ...state.late, ...patch });
+  const fixedRate = { value: '36', basis: 'effective', periodicity: 'annual', timing: 'arrears' };
+
+  it('presets the mora mode by kind: usury for bank loans, none for family and other', () => {
+    expect(run([{ type: 'kind', kind: 'consumer' }]).late.mode).toBe('usury');
+    expect(run([{ type: 'kind', kind: 'mortgage' }]).late.mode).toBe('usury');
+    expect(run([{ type: 'kind', kind: 'family' }]).late.mode).toBe('none');
+    expect(run([{ type: 'kind', kind: 'other' }]).late.mode).toBe('none');
+  });
+
+  it('keeps a chosen mode when the same kind is picked again and resets it for another kind', () => {
+    const chosen = run([{ type: 'kind', kind: 'consumer' }, { type: 'set', patch: { late: { ...initialWizard(TODAY).late, mode: 'none' } } }]);
+
+    expect(run([{ type: 'kind', kind: 'consumer' }], chosen).late.mode).toBe('none');
+    expect(run([{ type: 'kind', kind: 'vehicle' }], chosen).late.mode).toBe('usury');
+  });
+
+  it('writes the default policy of a bank loan into the created terms', () => {
+    expect(toTerms(fill('consumer', { principal: '10000000' }, [rate({ value: '25' })])).late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
+  it('writes no policy for a family loan left on none, and none when the user turns a bank loan off', () => {
+    expect(toTerms(fill('family', { principal: '500000' })).late).toBeUndefined();
+    const off = fill('consumer', { principal: '10000000' }, [rate({ value: '25' })]);
+    expect(toTerms({ ...off, late: lateOf(off, { mode: 'none' }) }).late).toBeUndefined();
+  });
+
+  it('writes a fixed mora rate and grace days a family loan chose', () => {
+    const state = fill('family', { principal: '500000' });
+    const terms = toTerms({ ...state, late: lateOf(state, { mode: 'fixed', rate: fixedRate, graceDays: '3' }) });
+
+    expect(terms.late).toEqual({ mode: 'fixed', graceDays: 3, rate: { value: 36, basis: 'effective', periodicity: 'annual', timing: 'arrears' } });
+  });
+
+  it('asks for the rate of a fixed mora in the plan step, without blocking other steps', () => {
+    const state = fill('family', { principal: '500000' });
+    const result = evaluate({ ...state, late: lateOf(state, { mode: 'fixed' }) });
+
+    expect(result.issues).toEqual([{ step: 'plan', message: 'Escribe la tasa de la mora.', missing: true }]);
+    expect(result.terms).toBeUndefined();
+  });
+
+  it('explains an invalid mora in the plan step instead of blaming the interest rate', () => {
+    const state = fill('family', { principal: '500000' });
+    const zero = evaluate({ ...state, late: lateOf(state, { mode: 'fixed', rate: { ...fixedRate, value: '0' } }) });
+    const grace = evaluate({ ...state, late: lateOf(state, { mode: 'usury', graceDays: '120' }) });
+
+    expect(zero.issues).toEqual([{ step: 'plan', message: 'La tasa de la mora debe ser mayor que cero.' }]);
+    expect(grace.issues).toEqual([{ step: 'plan', message: 'Los días de gracia deben ser un número entero de 0 a 90.' }]);
+  });
+
+  it('is valid with the default policy and leaves a card without a policy', () => {
+    const loan = fill('consumer', { principal: '10000000' }, [rate({ value: '25' })]);
+    expect(evaluate(loan).issues).toEqual([]);
+    expect(evaluate(loan).terms.late).toEqual({ mode: 'usury', graceDays: 0 });
+
+    const card = run([
+      { type: 'kind', kind: 'card' },
+      { type: 'set', patch: { name: 'Visa', card: { ...initialWizard(TODAY).card, statementDay: '10', dueDay: '25' } } },
+      rate({ value: '28' }),
+    ]);
+    expect(toTerms(card).late).toBeUndefined();
+  });
+});

@@ -2,6 +2,7 @@ import {
   CONVENTIONS, buildSchedule, ley1555Notice, normalizeRate, periodDates, rateLabel, summarizeSchedule,
   toEffectiveAnnual, usuryNotice, validateTerms,
 } from '@finance-core';
+import { defaultLateDraft, lateFromDraft, lateIssueOf } from '../lateModel';
 
 // Pure state of the "Nueva deuda" wizard. Form values stay as the strings the inputs hold;
 // `toTerms` converts them and lets the finance core be the judge of what is valid.
@@ -65,14 +66,14 @@ const isInterestFree = (kind) => kind === 'family' || kind === 'informal';
 export const initialWizard = (today) => ({
   step: 'kind', kind: null, name: '', lender: '', ownerScope: 'shared', principal: '', openedOn: today,
   rate: BLANK_RATE, system: 'french', periodicity: 'monthly', n: '12', firstDueOn: '',
-  grace: { periods: '0', type: 'total' }, balloon: '', manualPlan: [], charges: {}, card: DEFAULT_CARD,
+  grace: { periods: '0', type: 'total' }, balloon: '', manualPlan: [], charges: {}, card: DEFAULT_CARD, late: defaultLateDraft(null),
 });
 
 export function wizardReducer(state, action) {
   switch (action.type) {
     case 'set': return { ...state, ...action.patch };
     case 'rate': return { ...state, rate: { ...state.rate, ...action.patch } };
-    case 'kind': return action.kind === state.kind ? state : { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '', card: DEFAULT_CARD };
+    case 'kind': return action.kind === state.kind ? state : { ...state, kind: action.kind, system: SYSTEMS_BY_KIND[action.kind][0], rate: isInterestFree(action.kind) ? ZERO_RATE : BLANK_RATE, charges: {}, balloon: '', card: DEFAULT_CARD, late: defaultLateDraft(action.kind) };
     case 'card': return { ...state, card: { ...state.card, ...action.patch } };
     case 'step': {
       const steps = stepsFor(state.kind);
@@ -160,6 +161,7 @@ export function toTerms(state) {
     }
     if (['french', 'german'].includes(system) && num(state.grace.periods) > 0) terms.grace = { periods: num(state.grace.periods), type: state.grace.type };
     if (system === 'interest_only' && state.balloon !== '') terms.balloonMinor = pesos(state.balloon);
+    if (state.late.mode !== 'none') terms.late = lateFromDraft(state.late);
   }
   return validateTerms(terms);
 }
@@ -235,6 +237,8 @@ function missingFields(state) {
  */
 export function evaluate(state, legal) {
   const issues = missingFields(state);
+  const lateIssue = state.kind === 'card' || state.system === 'none' ? null : lateIssueOf(state.late);
+  if (lateIssue) return { issues: [...issues, { step: 'plan', ...lateIssue }] };
   try {
     const terms = toTerms(state);
     if (issues.length) return { issues };

@@ -44,7 +44,7 @@ export default function DebtWizard({ saveState, onSubmit, onClose, legal, today 
       case 'basics': return <BasicsStep state={state} set={set} />;
       case 'rate': return <RateStep rate={state.rate} echo={rateEcho(state.rate, state.kind === 'mortgage' ? 'mortgage' : 'consumer', state.openedOn, legal)} onChange={(patch) => dispatch({ type: 'rate', patch })} />;
       case 'card': return <CardStep card={state.card} dispatch={dispatch} />;
-      case 'plan': return <PlanStep state={state} set={set} />;
+      case 'plan': return <PlanStep state={state} set={set} withLate legal={legal} />;
       case 'charges': return <ChargesStep charges={state.charges} dispatch={dispatch} />;
       default: return <ReviewStep result={result} />;
     }

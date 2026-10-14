@@ -1,7 +1,8 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '../../../../shared/ui/Button';
 import { SelectField, TextField } from '../../../../shared/ui/TextField';
-import { PERIODICITY_ADJECTIVES, SYSTEMS_BY_KIND, SYSTEM_LABELS, firstDueOf } from '../wizardModel';
+import LateFields from '../../LateFields';
+import { PERIODICITY_ADJECTIVES, SYSTEMS_BY_KIND, SYSTEM_LABELS, firstDueOf, usuryModality } from '../wizardModel';
 
 const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -26,8 +27,9 @@ function ManualRows({ rows, set }) {
 }
 
 // `systems` narrows the payment systems on offer (the restructure dialog leaves out the manual plan); by default the kind's own.
+// `withLate` adds the mora policy (the wizard; a restructure keeps the policy in force). `legal` feeds the echo of a fixed mora rate.
 // `invalid` marks the fields (n, firstDueOn, grace, balloon) the owner found wrong; the owner shows the messages.
-export default function PlanStep({ state, set, systems = SYSTEMS_BY_KIND[state.kind], invalid = {} }) {
+export default function PlanStep({ state, set, systems = SYSTEMS_BY_KIND[state.kind], invalid = {}, withLate = false, legal }) {
   const graced = ['french', 'german'].includes(state.system);
   const flag = (field) => (invalid[field] ? { 'aria-invalid': true } : {});
   const bind = (field) => ({ value: state[field], onChange: (event) => set({ [field]: event.target.value }), ...flag(field) });
@@ -61,6 +63,12 @@ export default function PlanStep({ state, set, systems = SYSTEMS_BY_KIND[state.k
             </div>
           )}
         </>
+      )}
+      {withLate && (
+        <LateFields
+          draft={state.late} modes={['none', 'usury', 'fixed']} modality={usuryModality(state.kind)} asOf={state.openedOn} legal={legal}
+          onChange={(patch) => set({ late: { ...state.late, ...patch } })}
+        />
       )}
     </div>
   );

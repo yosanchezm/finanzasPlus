@@ -19,8 +19,9 @@ const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
  * Rate entry in any convention: the value as the lender states it plus basis, periodicity and
  * timing, with a live echo of its EA equivalent. `rate` holds strings (the inputs' values),
  * `echo` is `rateEcho(...)`, and `onChange` receives a partial rate.
+ * `valueLabel` names the value input where "Valor de la tasa" would be ambiguous (the mora rate).
  */
-export default function RateField({ rate, echo, onChange }) {
+export default function RateField({ rate, echo, onChange, valueLabel = 'Valor de la tasa' }) {
   const named = conventionOf(rate);
   const [custom, setCustom] = useState(named === 'custom');
   const showCustom = custom || named === 'custom';
@@ -34,7 +35,7 @@ export default function RateField({ rate, echo, onChange }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
-        <TextField label="Valor de la tasa" type="number" step="any" inputMode="decimal" value={rate.value} onChange={field('value')} placeholder="Ej. 24" inputClassName="tabular-nums" />
+        <TextField label={valueLabel} type="number" step="any" inputMode="decimal" value={rate.value} onChange={field('value')} placeholder="Ej. 24" inputClassName="tabular-nums" />
         <SelectField label="Convención" value={showCustom ? 'custom' : named} onChange={(event) => pickConvention(event.target.value)}>
           {CONVENTION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </SelectField>
