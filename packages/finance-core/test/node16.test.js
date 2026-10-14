@@ -106,8 +106,10 @@ describe('finance-core sources', () => {
         'src/ledger/allocate.js',
         'src/ledger/commit.js',
         'src/ledger/events.js',
+        'src/ledger/preview.js',
         'src/ledger/project.js',
         'src/ledger/rows.js',
+        'src/ledger/snapshot.js',
         'src/ledger/tail.js',
         'src/legal.js',
         'src/money.js',
@@ -180,14 +182,17 @@ describe('public barrel (index.js)', () => {
         'legalOf',
         'ley1555Notice',
         'minimumPayment',
+        'normalizeCharges',
         'normalizeRate',
         'parseTerms',
         'periodDates',
         'periodicRate',
         'planCommit',
+        'previewChange',
         'project',
         'rateLabel',
         'registerProjector',
+        'removeCharge',
         'renderSummary',
         'resolveLegal',
         'roundUnit',
@@ -216,5 +221,8 @@ describe('public barrel (index.js)', () => {
     expect(api.capOn(api.DEFAULT_LEGAL.usuryTable, 'consumer', '2026-12-05')).toMatchObject({ capEA: 28.59, stale: true });
     expect(api.smmlvFor(api.legalOf({}).smmlvTable, 2026)).toEqual({ valueMinor: 1750905, stale: false });
     expect(api.LEGAL_MODALITIES).toContain('mortgage');
+    expect(api.removeCharge([{ id: 'a', basis: 'fixed' }, { id: 'b', basis: 'pctOfCharge', refId: 'a' }], 'a')).toEqual([]);
+    expect(api.normalizeCharges([{ id: 'a', kind: 'fee', basis: 'fixed', value: 10 }])[0]).toMatchObject({ id: 'a', cadence: 'per_installment' });
+    expect(typeof api.previewChange).toBe('function');
   });
 });

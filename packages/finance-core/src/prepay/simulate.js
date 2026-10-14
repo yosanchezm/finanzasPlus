@@ -1,6 +1,7 @@
-import { compareIso, isIsoDate } from '../calendar.js';
+import { isIsoDate } from '../calendar.js';
 import { ValidationError } from '../errors.js';
 import { project } from '../ledger/project.js';
+import { snapshot } from '../ledger/snapshot.js';
 import { assertMinor, roundUnit } from '../money.js';
 import { toEffectiveAnnual } from '../rates.js';
 
@@ -11,20 +12,6 @@ export const STRATEGIES = Object.freeze(['reduce_term', 'reduce_installment', 'a
 
 // Sorts after every real event of the same day, so the simulated payment is the last one applied.
 const SIMULATED = Object.freeze({ id: 'simulation:extra', createdAt: '9999-12-31T23:59:59.999Z' });
-
-function snapshot(projection, on) {
-  const open = projection.plan.filter((row) => row.outstandingMinor > 0);
-  const next = open.find((row) => compareIso(row.dueOn, on) > 0);
-  return {
-    balanceMinor: projection.balanceMinor,
-    remainingPeriods: projection.remainingPeriods,
-    installmentMinor: next ? next.installmentMinor : 0,
-    nextDueOn: next ? next.dueOn : null,
-    lastDueOn: open.length > 0 ? open[open.length - 1].dueOn : null,
-    remainingInterestMinor: projection.totals.remainingInterest,
-    remainingChargesMinor: projection.totals.remainingCharges + projection.totals.remainingTaxes,
-  };
-}
 
 // Interest and charges over the whole life of the debt: already paid plus still to pay.
 const lifetimeInterest = ({ totals }) => totals.interestPaid + totals.remainingInterest;

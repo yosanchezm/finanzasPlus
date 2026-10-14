@@ -35,6 +35,28 @@ function baseAmount(charge, ctx) {
 }
 
 /**
+ * Removes a charge together with every charge that references it through `pctOfCharge`,
+ * transitively (an IVA on a fee goes with the fee). Pure: the input is not touched.
+ * @param {object[]} charges Normalized charges (see `normalizeCharges`).
+ * @param {string} id Id of the charge to remove; an unknown id removes nothing.
+ * @returns {object[]} A new array with the remaining charges, in their order.
+ */
+export function removeCharge(charges, id) {
+  const gone = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const charge of charges) {
+      if (!gone.has(charge.id) && charge.basis === REFERENCE_BASIS && gone.has(charge.refId)) {
+        gone.add(charge.id);
+        grew = true;
+      }
+    }
+  }
+  return charges.filter((charge) => !gone.has(charge.id));
+}
+
+/**
  * Evaluates the charges that apply in one period.
  * @param {object[]} charges Normalized charges (see `validateTerms`).
  * @param {{ period: number, openingMinor: number, installmentMinor: number, originalMinor: number,

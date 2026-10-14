@@ -33,14 +33,15 @@ export {
   usuryFromIbcBp,
   usuryNotice,
 } from './src/legal.js';
-export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
-export { evaluateCharges } from './src/charges.js';
+export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, normalizeCharges, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
+export { evaluateCharges, removeCharge } from './src/charges.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
 export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
 export { allocate } from './src/ledger/allocate.js';
 export { cycleDates, minimumPayment } from './src/card/card.js';
 export { project, registerProjector } from './src/ledger/project.js';
 export { buildCostRow, commitPlan, planCommit } from './src/ledger/commit.js';
+export { previewChange } from './src/ledger/preview.js';
 export { simulateExtra } from './src/prepay/simulate.js';
 export { compareStrategies } from './src/prepay/compare.js';
 export { ADVICE_DEFAULTS, advise } from './src/advice/advice.js';

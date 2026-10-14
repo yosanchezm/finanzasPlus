@@ -1,4 +1,5 @@
 import { compareIso } from '../calendar.js';
+import { toEffectiveAnnual } from '../rates.js';
 import { addCharges, buildSchedule } from '../schedule/index.js';
 import { balanceAt, newRow, payBalanceOnly, payRows, rowDue, rowOutstanding } from './rows.js';
 
@@ -82,13 +83,17 @@ export function applyExtra(state, event) {
   };
 }
 
-/** rate_change: the new rate applies to the installments after the effective date. */
+/**
+ * rate_change: the new rate applies to the installments after the effective date.
+ * Reports the effective annual rate before and after (`fromEA`, `toEA`) for the history.
+ */
 export function applyRateChange(state, event) {
   const { rate, mode } = event.payload;
+  const fromEA = toEffectiveAnnual(state.work.rate);
   state.work = { ...state.work, rate };
   const index = tailStart(state.rows, event.effectiveOn);
   if (index >= 0) rebuildTail(state, index, state.rows[index].openingMinor, mode === 'keep_installment');
-  return {};
+  return { fromEA, toEA: toEffectiveAnnual(rate) };
 }
 
 /** charge_change: the new charge set replaces the old one on the installments after the effective date. */
@@ -130,7 +135,7 @@ export function applyRestructure(state, event) {
     const tail = buildSchedule(terms, { balanceMinor: carried });
     state.rows = kept.concat(tail.map((row) => newRow({ ...row, period: row.period + kept.length })));
   }
-  return {};
+  return { carriedMinor: carried };
 }
 
 /**
