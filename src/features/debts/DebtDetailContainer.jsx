@@ -7,7 +7,7 @@ import PrepaymentSimulator from './PrepaymentSimulator';
 import VoidDialog from './VoidDialog';
 import { findDebtEventByDedupe } from '../../appwrite';
 import { loadCashflow } from './cashflow';
-import { buildDebtDetail, voidSuccessMessage } from './debtDetailModel';
+import { PLAN_CHANGE_KINDS, buildDebtDetail, voidSuccessMessage, withReconcileNote } from './debtDetailModel';
 import { defaultNonce } from './nonce';
 import { saveDebtEvent } from './saveDebtEvent';
 import { useCommitDialog } from './useCommitDialog';
@@ -64,9 +64,13 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
   const purchase = useCommitDialog(eventWriter('Compra registrada.', 'La compra ya se había registrado, así que no se guardó de nuevo.'));
   const isCard = Boolean(detail?.projection.card);
 
+  // After a plan change is saved or voided the cost of past payments can move: repair the cost rows on fresh events (AD16).
+  const reconcileAfter = () => reconcileCosts(debt.$id, { fresh: true });
+
   const voiding = useCommitDialog({
     ...flow,
-    successMessage: ({ kind }) => voidSuccessMessage(kind),
+    afterSave: ({ input }) => (PLAN_CHANGE_KINDS.includes(input.kind) ? reconcileAfter() : undefined),
+    successMessage: ({ kind }, after) => withReconcileNote(voidSuccessMessage(kind), after),
     alreadySaved: 'La anulación ya se había registrado, así que no se guardó de nuevo.',
     findSaved: ({ context }) => findDebtEventByDedupe(`void:${context.id}`),
     save: ({ input, nonce, context }) => saveDebtEvent({ debt, events, draft: { kind: 'void', effectiveOn: today, targetEventId: context.id, reason: input.reason }, nonce, actorId: user.$id, today }),

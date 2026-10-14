@@ -24,8 +24,10 @@ async function readLegal() {
  * never shows balances it could not confirm. Only the newest request may update the state.
  * - `retry()`: back to `loading`, then fetch. `reload()`: fetch while the current rows stay visible.
  * Both resolve (never reject); read `status` and `error`.
- * - `reconcileCosts(debtId)`: repairs the debt's cost rows against its events (AD8) and resolves with
- *   `{ created, updated, removed }`. It rejects when a read or a repair write fails.
+ * - `reconcileCosts(debtId, { fresh })`: repairs the debt's cost rows against its events (AD8) and resolves with
+ *   `{ created, updated, removed }`. It rejects when a read or a repair write fails. It reads the events held in state,
+ *   which are current right after a load; right after a save pass `{ fresh: true }` to read that debt's events again,
+ *   because the state only catches up on the next render (AD16).
  */
 export function useDebtData() {
   const [state, setState] = useState(LOADING);
@@ -50,11 +52,11 @@ export function useDebtData() {
   const retry = useCallback(() => load({ showLoading: true }), [load]);
   const reload = useCallback(() => load({ showLoading: false }), [load]);
 
-  const reconcileCosts = useCallback(async (debtId) => {
+  const reconcileCosts = useCallback(async (debtId, { fresh = false } = {}) => {
     const none = { created: 0, updated: 0, removed: 0 };
     const debt = current.current.debts.find((item) => item.$id === debtId);
     if (!debt) return none;
-    const events = current.current.events.filter((event) => event.debtId === debtId);
+    const events = fresh ? await listDebtEvents(debtId) : current.current.events.filter((event) => event.debtId === debtId);
     const plan = planReconcile(debt, events, await listCostRows(debtId));
     if (plan.create.length > 0) {
       const categoryId = await ensureCostCategory(debt.householdId);

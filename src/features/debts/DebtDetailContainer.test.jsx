@@ -230,6 +230,43 @@ describe('DebtDetailContainer void flow', () => {
     expect(onNotify).toHaveBeenCalledWith('Cambio de tasa anulado.');
   });
 
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const RATE_CHANGE = makeEvent('rc1', 'rate_change', '2026-01-20', 0, { rate: { value: 30, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' });
+
+  it('reconciles the cost rows on fresh events after voiding a plan change, and reports how many rows moved', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+    const { user, onNotify } = setup({ events: [...PAID, RATE_CHANGE], reconcileCosts });
+    await user.click(screen.getByRole('button', { name: 'Anular cambio de tasa del 20 ene' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Anular cambio de tasa' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Cambio de tasa anulado. Se actualizaron 2 filas de Costos financieros.');
+  });
+
+  it('keeps the void when the reconcile after it fails, and says the costs were not refreshed', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('sin red'));
+    const { user, onNotify } = setup({ events: [...PAID, RATE_CHANGE], reconcileCosts });
+    await user.click(screen.getByRole('button', { name: 'Anular cambio de tasa del 20 ene' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Anular cambio de tasa' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith('Cambio de tasa anulado. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+
+  it('does not reconcile again after voiding a payment, whose cost row the void already deletes', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValue(NONE);
+    const { user } = setup({ events: PAID, reconcileCosts });
+    await openVoid(user);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Anular pago' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenCalledTimes(1); // only the repair on open
+  });
+
   it('refuses to void a restructure that a payment follows, names the payment and writes nothing', async () => {
     const terms = { kind: 'consumer', principalMinor: 9000000, openedOn: '2026-02-01', system: 'french', periodicity: 'monthly', n: 24, firstDueOn: '2026-03-05', rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' } };
     const events = [...EVENTS, makeEvent('rs1', 'restructure', '2026-02-01', 0, { terms }), makePayment('p1', TODAY, 390381)];

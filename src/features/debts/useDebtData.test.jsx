@@ -207,4 +207,42 @@ describe('useDebtData reconcileCosts', () => {
     expect(await result.current.reconcileCosts('missing')).toEqual({ created: 0, updated: 0, removed: 0 });
     expect(api.listCostRows).not.toHaveBeenCalled();
   });
+
+  describe('with fresh events', () => {
+    const rateChange = {
+      $id: 'rc1', $createdAt: '2026-03-01T10:00:00.000Z', debtId: 'd1', kind: 'rate_change', effectiveOn: '2026-01-20', amountMinor: 0,
+      payloadJson: JSON.stringify({ rate: { value: 30, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }),
+      actorId: 'u1', source: 'web', dedupeKey: 'krc1',
+    };
+
+    it('reads the debt events again so a change saved a moment ago is not missed by the stale hook state', async () => {
+      const { result } = await ready([payment('e1', '2026-02-05')]); // the hook loaded before the rate change existed
+      api.listDebtEvents.mockResolvedValueOnce([payment('e1', '2026-02-05'), rateChange]);
+      api.listCostRows.mockResolvedValueOnce([row('dce1', 18088)]);
+
+      const outcome = await result.current.reconcileCosts('d1', { fresh: true });
+
+      expect(api.listDebtEvents).toHaveBeenLastCalledWith('d1');
+      expect(outcome).toEqual({ created: 0, updated: 1, removed: 0 });
+      expect(api.updateCostRow).toHaveBeenCalledWith('dce1', { amountMinor: 22104 }); // the backdated 30% EA re-costs the payment
+    });
+
+    it('does not read the events again by default, where the loaded state is current', async () => {
+      const { result } = await ready([payment('e1', '2026-02-05')]);
+      api.listCostRows.mockResolvedValueOnce([row('dce1', 18088)]);
+      api.listDebtEvents.mockClear();
+
+      expect(await result.current.reconcileCosts('d1')).toEqual({ created: 0, updated: 0, removed: 0 });
+      expect(api.listDebtEvents).not.toHaveBeenCalled();
+    });
+
+    it('rejects and writes nothing when the fresh read fails', async () => {
+      const { result } = await ready([payment('e1', '2026-02-05')]);
+      api.listDebtEvents.mockRejectedValueOnce(new Error('timeout'));
+
+      await expect(result.current.reconcileCosts('d1', { fresh: true })).rejects.toThrow('timeout');
+      expect(api.listCostRows).not.toHaveBeenCalled();
+      expect(api.updateCostRow).not.toHaveBeenCalled();
+    });
+  });
 });

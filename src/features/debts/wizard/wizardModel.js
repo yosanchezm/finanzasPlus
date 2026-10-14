@@ -95,7 +95,8 @@ export function wizardReducer(state, action) {
 
 const num = (text) => (String(text).trim() === '' ? NaN : Number(text));
 const pesos = (text) => Math.round(num(text));
-const toRate = (rate) => ({ value: num(rate.value), basis: rate.basis, periodicity: rate.periodicity, timing: rate.timing });
+/** The numeric rate of a form rate (its value is the string the input holds). */
+export const toRate = (rate) => ({ value: num(rate.value), basis: rate.basis, periodicity: rate.periodicity, timing: rate.timing });
 
 /** Due date of the first installment: the explicit one, else one period after the opening date. */
 export function firstDueOf(state) {
@@ -175,7 +176,8 @@ export function describeRate(rate) {
   return `${trimmed(rate.value)}% ${kind} ${PERIODICITY_ADJECTIVES[rate.periodicity]}${rate.timing === 'advance' ? ' anticipada' : ''} ≈ ${toEffectiveAnnual(rate).toFixed(2)}% EA`;
 }
 
-const usuryModality = (kind) => (kind === 'mortgage' ? 'mortgage' : 'consumer');
+/** Legal modality whose usury cap applies to a debt kind. */
+export const usuryModality = (kind) => (kind === 'mortgage' ? 'mortgage' : 'consumer');
 
 /**
  * Live echo of a rate entry: its label with the EA equivalent and the (informational) usury notice.

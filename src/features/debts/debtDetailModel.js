@@ -22,6 +22,23 @@ const VOID_MESSAGES = {
 /** Toast shown once a void of an event of this kind was saved. */
 export const voidSuccessMessage = (kind) => VOID_MESSAGES[kind] ?? 'Movimiento anulado.';
 
+/** Events whose save or void changes the cost of other events, so the cost rows are reconciled afterwards (AD16). */
+export const PLAN_CHANGE_KINDS = ['rate_change', 'charge_change', 'restructure', 'late_policy'];
+
+/**
+ * Adds to a success toast what the reconcile after a plan change did. `after` is what `useCommitDialog` hands to the message:
+ * `{ value: { created, updated, removed } }`, `{ error }` when the reconcile failed (the change itself is saved), or nothing.
+ */
+export function withReconcileNote(message, after) {
+  if (!after) return message;
+  if (after.error) return `${message} No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.`;
+  if (!after.value) return message; // the follow-up had nothing to reconcile for this movement
+  const { created, updated, removed } = after.value;
+  const rows = created + updated + removed;
+  if (rows === 0) return message;
+  return `${message} ${rows === 1 ? 'Se actualizó 1 fila' : `Se actualizaron ${rows} filas`} de Costos financieros.`;
+}
+
 /**
  * What the history may do with one event. `voidable` is whether a void action is offered at all;
  * a `guarded` void (restructure) asks for explicit confirmation and is refused while later events

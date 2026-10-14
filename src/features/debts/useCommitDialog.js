@@ -13,13 +13,16 @@ const PARTIAL = 'El movimiento se guardó, pero falta actualizar su gasto financ
  *   server: `findSaved({ nonce, context })` must say whether it did. If it did, nothing more is written (the dialog closes
  *   after a reload); a new nonce is minted only when it is known that nothing was saved, and while that is unknown
  *   (the check fails) the nonce stays and the form asks to retry.
- * - `submit(input)` runs `save({ input, nonce, context })`; only after it resolves does it `reload()`, then `onRefresh()`.
+ * - `submit(input)` runs `save({ input, nonce, context })`; only after it resolves does it `reload()`, then `afterSave`, then `onRefresh()`.
+ *   `afterSave({ input, context })` is the follow-up work that belongs to the saved movement (repairing cost rows). It never
+ *   undoes the save: if it rejects, the dialog still closes and `successMessage(input, after)` hears about it. `after` is
+ *   `{ value }` with what it resolved, `{ error }` when it rejected, and `undefined` when the flow has no `afterSave`.
  * - A half-saved write (`CommitError`: event saved, expense not) locks the form until the retry completes it;
  *   closing a locked dialog reloads, so the saved event shows.
  * @returns {{ dialog: ({ context: unknown, nonce: string, signature: (string | null) } | null),
  *   saveState: { status: string, error: (string | null), locked: boolean }, open: Function, close: Function, submit: Function }}
  */
-export function useCommitDialog({ createNonce, save, findSaved, reload, onRefresh, onNotify, successMessage, alreadySaved }) {
+export function useCommitDialog({ createNonce, save, findSaved, reload, onRefresh, onNotify, successMessage, alreadySaved, afterSave }) {
   const [dialog, setDialog] = useState(null);
   const [saveState, setSaveState] = useState(IDLE);
   const busy = useRef(false);
@@ -35,6 +38,15 @@ export function useCommitDialog({ createNonce, save, findSaved, reload, onRefres
     setDialog(null);
     setSaveState(IDLE);
     if (stale) await reload();
+  };
+
+  const settleAfterSave = async (input, context) => {
+    if (!afterSave) return undefined;
+    try {
+      return { value: await afterSave({ input, context }) };
+    } catch (error) {
+      return { error };
+    }
   };
 
   const submit = async (input) => {
@@ -53,6 +65,7 @@ export function useCommitDialog({ createNonce, save, findSaved, reload, onRefres
       }
       if (saved) {
         await reload();
+        await settleAfterSave(input, dialog.context);
         Promise.resolve(onRefresh?.()).catch(() => {});
         setDialog(null);
         setSaveState(IDLE);
@@ -75,11 +88,12 @@ export function useCommitDialog({ createNonce, save, findSaved, reload, onRefres
       return;
     }
     await reload();
+    const after = await settleAfterSave(input, dialog.context);
     Promise.resolve(onRefresh?.()).catch(() => {});
     setDialog(null);
     setSaveState(IDLE);
     busy.current = false;
-    onNotify?.(successMessage(input));
+    onNotify?.(successMessage(input, after));
   };
 
   return { dialog, saveState, open, close, submit };

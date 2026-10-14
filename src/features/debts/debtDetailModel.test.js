@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { buildDebtDetail, voidRuleOf, voidSuccessMessage } from './debtDetailModel';
+import { PLAN_CHANGE_KINDS, buildDebtDetail, voidRuleOf, voidSuccessMessage, withReconcileNote } from './debtDetailModel';
 import { INSTALLMENT, makeDebt, makeEvent, makePayment } from './debtFixtures';
 
 const disbursement = makeEvent('e0', 'disbursement', '2026-01-05', 1000000);
@@ -160,5 +160,31 @@ describe('buildDebtDetail: plan-change history', () => {
     const events = [disbursement, makeEvent('rs1', 'restructure', '2026-03-01', 0, { terms: newTerms }), makePayment('p9', '2026-04-05'), makeEvent('v1', 'void', '2026-04-06', 0, { targetEventId: 'p9', reason: 'x' })];
     const { history } = buildDebtDetail({ debt: makeDebt(), events, asOf: '2026-04-10' });
     expect(history.find((item) => item.id === 'rs1').voidBlocked).toBeNull();
+  });
+});
+
+
+describe('withReconcileNote', () => {
+  it('adds the number of cost rows the reconcile changed, singular and plural', () => {
+    expect(withReconcileNote('Cambio de tasa registrado.', { value: { created: 0, updated: 2, removed: 0 } })).toBe('Cambio de tasa registrado. Se actualizaron 2 filas de Costos financieros.');
+    expect(withReconcileNote('Cambio de tasa registrado.', { value: { created: 1, updated: 0, removed: 0 } })).toBe('Cambio de tasa registrado. Se actualizó 1 fila de Costos financieros.');
+    expect(withReconcileNote('Cambio de tasa registrado.', { value: { created: 1, updated: 2, removed: 1 } })).toBe('Cambio de tasa registrado. Se actualizaron 4 filas de Costos financieros.');
+  });
+
+  it('stays silent when nothing changed or when there was no reconcile', () => {
+    expect(withReconcileNote('Cambio de tasa registrado.', { value: { created: 0, updated: 0, removed: 0 } })).toBe('Cambio de tasa registrado.');
+    expect(withReconcileNote('Pago registrado.', undefined)).toBe('Pago registrado.');
+    expect(withReconcileNote('Pago anulado.', { value: undefined })).toBe('Pago anulado.');
+  });
+
+  it('tells the user the save worked but the costs were not refreshed, when the reconcile failed', () => {
+    expect(withReconcileNote('Cambio de tasa registrado.', { error: new Error('sin red') })).toBe('Cambio de tasa registrado. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+});
+
+describe('PLAN_CHANGE_KINDS', () => {
+  it('names the events whose save or void moves the cost of other events', () => {
+    expect(PLAN_CHANGE_KINDS).toEqual(['rate_change', 'charge_change', 'restructure', 'late_policy']);
+    expect(PLAN_CHANGE_KINDS).not.toContain('payment');
   });
 });
