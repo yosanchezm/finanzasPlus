@@ -1,6 +1,6 @@
 # Apply progress: nia-debt-guide
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f).
 
 ## Batch S0 (explain plumbing): COMPLETE (18/18 tasks)
 
@@ -120,6 +120,61 @@ Triangulation: rates (NAMV, MV, EA, 0 %, debt with a rate change, stated over de
 - The mora golden fixture covers all of 2026, so the stale-cap case needs a 2027 date.
 - `planCommit` spreads an overpayment over the next installments (charges first); `surplus` only appears once the whole debt is covered.
 
+## Batch S2 (card topics): COMPLETE (6/6 tasks and the checkpoint)
+
+S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f).
+
+### Tasks
+
+- [x] S2a.1 to S2a.2 (core: `revolvingBaseMinor`, `excludedBaseMinor` and `lateExcludedBaseMinor` on every statement row of the card projection, additive)
+- [x] S2a.3 to S2a.4 (core facts `card_statement` and `card_interest_drop` with the minimum-only what-if, the card paths of `mora`, `payment_allocation` and `charges`, two draft copy samples)
+- [x] S2b.1 to S2b.2 (card templates with «aproximado» labels, follow-ups, card applicability in the pick, property test with card fixtures)
+- [x] S2.CP checkpoint (tests, build, package with the override, plain package still refuses). Not deployed until gate G.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 0dc216d `feat(card): expose the revolving, excluded and mora-excluded base of each statement` | S2a (1/2) | 2 files, 160 insertions (the projector change is 10 lines) |
+| ba19deb `feat(explain): build the card statement, interest-drop and minimum-only what-if facts from the core projection` | S2a (2/2) | 12 files, 510 insertions, 29 deletions |
+| 9e67dbc `feat(nia): render the card topics with aproximado labels and offer a card topic only the cards` | S2b | 8 files, 408 insertions, 22 deletions |
+
+Code total vs master before the bookkeeping commit: 21 files, 1,076 insertions, 49 deletions = 1,125 changed lines (budget 2,000; each commit at most 538; below the 1,500 size-review trigger). The slice came to 1,125 against 900 estimated (1.25x).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S2a.1/2 | `card.base.test.js` written first: 8 of 9 failed (the three fields missing); the 9th is the additive characterization of the F3 fixture rows 1 and 2 (captured from the code before the change), which passes before and after on purpose | 58/58 in `test/card`; 1,892/1,892 in core + `src/features/debts` + `functions/nia` (no deep-equal golden moved) | None needed |
+| S2a.3/4 | `facts.card.test.js` (10 cases), the card cases added to `facts.mora/allocation/charges.test.js` and the node16 source list: 20 failed | 760/760 core + scripts. Only the 9,526 interest, the 41,667 excluded capital and the 475,000/9,873 what-if were checked against the fixture, and all matched on the first run; `copy.shape.test.js` listed the exact key set, so it was updated for the two S2 keys | None needed |
+| S2b.1/2 | card goldens in `render.test.js`, the card fixtures in `render.property.test.js`, the applicability and paging cases in `flow.test.js` and four card cases in `handler.test.js`: 24 failed (2 characterization cases passed) | 1,461/1,461 in `functions/nia` + core + scripts; the longest callbacks stay at 63 and 64 bytes | The statement sample was shortened so the whole statement fits one message. Mutation check: a literal digit and a spelled number added to two card templates turned all 4 seeds of the property red; restored |
+
+Triangulation: bases (first statement, 300,000 unpaid, 800,000 paid in full, clamped due day, mora with and without grace, 40 seeded random cards), statement (two rules plus the default, partial payment, past due, no statement yet), interest drop (first cycle, paid in full, partly paid, mora, no mora, no statement, generic, payments after the statement ignored), card mora (billed, partial payment, example, no statement), allocation (stated, minimum, no statement), charges (lines, year, no charges, no statement), render (11 goldens), property (7 topics x 11 debts x 6 dates x 4 seeds, with a card paid in full and a card partly paid), applicability (one card, several cards, none, a named loan).
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions/nia packages/finance-core scripts` exit 0: 67 files, 1,461 tests passed (card base 9, card facts 10 plus the card cases of mora, allocation and charges, render card goldens 11, property 4 seeds, flow and handler card cases) |
+| Runtime harness | `NIA_ALLOW_UNREVIEWED=1 npm run package:nia` exit 0 (14 keys listed: 10 draft unreviewed, 4 missing; `functions/nia.tar.gz` written); plain `npm run package:nia` exit 1 listing the same 14 keys |
+| Full suite and build | `npm test -- --maxWorkers=4`: 140 files, 2,357 tests (the first run had 2 `App.test.jsx` jsdom timeouts, known; the file passes alone, 8/8); `npm run build` exit 0 |
+| Rollback boundary | core `card/card.js` (`closedBilled`, the `bases` of a cycle and three plan-row fields), `explain/facts/card.js`, the card paths of `facts/{mora,allocation,charges}.js`, the two card builders in `explain.js`, the two card entries of `copy.js`; Nia `render.js` card templates, `flow.js` `applicableDebts`/`cardOnly`, the card branch of `startExplain` in `handler.js`. Read-only feature, no data written |
+
+### Deviations from design
+
+- `closedBilled` starts at the opening balance, so the first statement counts the opening balance as already billed (the documented first-cycle approximation): a payment made before the first close shows as excluded base. The facts mark the first statement `first_cycle` and its figures «aproximado».
+- `lateExcludedBaseMinor` is rounded to whole units (`Math.round`) so the three fields are integers, and `revolvingBaseMinor = base - lateExcluded`. The statement interest is still computed from the unrounded exclusion, as before (existing values must not change), so `revolving x rate` can differ from the interest by at most 1 minor unit (the seeded property asserts that bound). The spec text says «equal»; this is the only gap.
+- The card mora rule («el capital del mínimo sin pagar») is a template paragraph, not a copy key: `topicCopyKeys('mora')` is fixed by `topics.test.js` as `['legal.mora', 'mora.sample']`. The owner reads it in the render goldens, not in `--print`.
+- The what-if drops the payments recorded after the last statement and adds one synthetic payment on its due date, then reads the next statement of the same projection (design: «with `project` and a synthetic payment»). A real payment after the statement is therefore not mixed into a hypothetical.
+- The card example of the mora topic shows the days the mora really runs until the next close (`lateDays`), not a fixed 10, because the card mora stops at the close. The loan example is unchanged.
+- Beyond the task text, `flow.js` exports `applicableDebts` and `cardOnly`, and `startExplain` sends a card topic to the only card (or a pick among cards, or «No encuentro una tarjeta...»), because with a loan and a card and no name the generic answer would hide the card. A marker follow-up still keeps the marker debt.
+- Three S1 tests changed: the «card gets the generic answer until S2» cases of charges and mora (now the card paths), the `flow.test.js` fallback case (now `restructure_whatif`, the next topic with no template) and the exact key list of `copy.shape.test.js` (two S2 keys).
+
+### Issues found
+
+- Verify W4 (card revolving exclusion prorated `baseDays / cycleDays`) is labelled «aproximado» in every figure that depends on it (`lateExcluded`, `revolving`, the interest without mora and their difference).
+- Quirk, not fixed: when the due date clamps onto the statement day, a payment made after that close and before the next one counts as «excluded» base because the base is the balance at the close (the existing core rule).
+
 ### Remaining
 
-S2 to S7 and gate G (owner copy review G.1 to G.3 blocks the first deploy of S1 to S3).
+S3 to S7 and gate G (owner copy review G.1 to G.3 blocks the first deploy of S1 to S3).
