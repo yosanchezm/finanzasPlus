@@ -83,7 +83,7 @@ Nia también tiene tres modos de respuesta:
 
 ## Deudas
 
-El intent `debt` tiene diez acciones. Gemini solo extrae lo que dijo la persona; los montos, las cuotas, las tasas y las recomendaciones los calcula el núcleo compartido (`packages/finance-core`) y todo cambio de datos pide confirmación.
+El intent `debt` tiene trece acciones (`setup`, armar o ajustar una deuda, se describe junto a `create`). Gemini solo extrae lo que dijo la persona; los montos, las cuotas, las tasas y las recomendaciones los calcula el núcleo compartido (`packages/finance-core`) y todo cambio de datos pide confirmación.
 
 | Acción | Ejemplo | Qué hace |
 |---|---|---|
@@ -98,8 +98,27 @@ El intent `debt` tiene diez acciones. Gemini solo extrae lo que dijo la persona;
 | `terms_correction` | “El corte de la tarjeta es el 20, no el 15” | Corrige un dato que estaba mal desde el inicio de la deuda: día de corte, día de pago, pago mínimo (regla, porcentaje, piso), tasa tal como la dice el banco o modalidad. Muestra el antes y el después, la tasa E.A. y, si algún pago anterior cambia de costo, la nota de que los costos se actualizan al abrir la deuda en la web (Nia no los recalcula). Un valor igual al registrado no cambia nada. El cupo, la tasa de avances, la penalización por abono anticipado, el orden de aplicación y la base de la mora se responden “no soportado aún” y no se guardan |
 | `restructure` | “Reestructura el crédito a 48 cuotas, primera cuota el 2026-12-05” | Rehace el plan de un préstamo (no de una tarjeta) con el saldo de hoy más lo vencido: intereses, cargos, impuestos y mora. Muestra ese desglose, el saldo que pasa al plan nuevo, la cuota y las cuotas antes y después, el costo restante y el aviso de usura del hogar. Se puede cambiar la tasa (con los botones de convención si falta), el sistema, la periodicidad, la primera cuota y los cargos, o pedir que se condone la mora. Si no dices la primera cuota, queda un periodo después de la fecha. Al confirmar, Nia vuelve a calcular todo con la deuda de ese momento: un pago registrado entre la vista previa y el botón cambia el saldo que se escribe. Si el plan no es válido o no cabe en un solo cambio, no guarda nada y lo explica |
 | `late_policy` | “Activa la mora a la usura en la tarjeta desde el 10 de octubre” | Configura la política de mora de un préstamo o de una tarjeta: tasa de usura, tasa fija, múltiplo de la tasa del contrato o sin mora, con días de gracia y fecha de vigencia. Muestra el modo, la fecha, el tope de usura vigente (y avisa si la tasa pedida lo supera) y la mora acumulada a hoy antes y después; la mora no es retroactiva. En una tarjeta la mora se calcula sobre el capital del pago mínimo sin cubrir y se cobra en el próximo extracto. Se confirma con el botón **Confirmar** y se registra una sola vez |
+| `explain` | “¿Qué es la mora?”, “explícame la usura”, “¿por qué bajaron los intereses de mi tarjeta?” | Explica un tema de deudas con tus números y no guarda nada (ver [Guía de deudas](#guía-de-deudas-explicar-configurar-y-corregir)) |
 
 Simular y recomendar aplican a préstamos con plan de cuotas; todavía no a tarjetas (tampoco en la web). Los cambios de tasa, de cargos y las reestructuraciones se confirman con el mismo botón **Confirmar** y se registran una sola vez; si el cambio es con fecha pasada y toca un pago ya registrado, Nia avisa que los costos de pagos anteriores se actualizan al abrir la deuda en la web. En sistemas que no acortan el plazo con un abono (por ejemplo, el alemán), reducir plazo y reducir cuota dan el mismo resultado y Nia lo dice.
+
+### Guía de deudas: explicar, configurar y corregir
+
+**Explicar (`explain`).** Los hechos (cifras ya formateadas) y los textos legales revisados viven en el núcleo (`packages/finance-core/src/explain/`); Nia solo les pone la plantilla en español (`functions/nia/debt/explain/render.js`) y la web arma sus propios popovers con los mismos hechos y los mismos textos. Hay nueve temas: tasas (E.A., N.A.M.V., M.V.), usura e IBC, mora, a dónde va el pago, cargos y GMF, extracto y pago mínimo, por qué bajan los intereses de una tarjeta, reestructurar y abonos extra.
+
+- Una pregunta como “¿qué es la mora?” que el clasificador dejó como conversación o análisis pasa por un enrutador local (sin llamar a Gemini): exige una pregunta y un concepto, y un verbo de escritura (“pagué la mora”) lo descarta. “Explícame” muestra el menú de temas con botones; si hay varias deudas pregunta de cuál.
+- Los botones `nia:exp:<tema>[:<deuda>][:<n>]` no tienen estado, no guardan nada y siguen funcionando después de un redespliegue.
+- Cada explicación termina con la línea de fuente y el aviso exacto «Información educativa con tus datos; no es asesoría financiera.». Las cifras estimadas llevan «aproximado». Una guarda numérica descarta cualquier número que no esté en los hechos.
+- Un tema cuyo texto legal no está revisado responde «Este tema está en revisión» y no muestra cifras. La revisión del dueño y el override `NIA_ALLOW_UNREVIEWED=1` se explican en `docs/deploy.md`.
+- La paráfrasis opcional (`NIA_EXPLAIN_PARAPHRASE`) viene apagada: con ella, una explicación cuesta una llamada más a Gemini. Sin ella, explicar no llama a Gemini.
+
+**Configurar y ajustar (asesor).** Para una tarjeta o una deuda descrita con sus cargos (`setup`), Nia muestra los supuestos, pregunta lo que falta (corte, pago, regla del pago mínimo) y no ofrece **Confirmar** mientras haya una pregunta abierta. Si lo descrito corresponde a una deuda registrada, compara y propone una cadena de pasos ordenados (correcciones, tasa, cargos, mora); cada paso se confirma con su propio botón **Confirmar** (`nia:confirm:<id>`), se guarda una sola vez y, si uno falla o se cancela, los siguientes no se ejecutan y Nia dice qué quedó hecho. Lo que Nia no puede guardar todavía (cupo, tasa de avances, penalización por abono anticipado, orden de aplicación del pago, base de la mora) se responde «no soportado aún». Si durante una configuración abierta describes otra deuda, Nia pregunta «¿Es otra deuda?» con los botones **Seguir con la actual** y **Empezar una nueva**.
+
+**Corregir datos (`terms_correction`).** Un dato que estaba mal desde el inicio se corrige como evento retroactivo, sin tocar los pagos ya registrados. Nia lo hace por chat (“el corte es el 20, no el 15”) y la web, desde **Más acciones → Corregir datos**. Ambos muestran el antes y el después, y la corrección se puede anular desde el historial. Una versión anterior de Nia o de la web ignora estos eventos (`unknown_event_kind`), por eso se despliegan juntas.
+
+**Popovers «¿Qué es esto?» en la web.** Junto a la tasa, la mora, los cargos, el pago mínimo y el extracto de la deuda, un botón abre la misma explicación del tema, con su fuente y el mismo aviso. Es de solo lectura, se opera con teclado y no aparece para un tema sin texto revisado. `npm run build` ejecuta `scripts/check-explain-copy.mjs` primero, igual que `npm run package:nia`.
+
+**`/ayuda`.** Lista estas capacidades (explicar, crear o configurar una deuda, ajustar y corregir datos) junto a las generales.
 
 ### Cómo se arma la recomendación
 

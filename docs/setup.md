@@ -354,6 +354,8 @@ Luego envía `/start` al bot y prueba primero un mensaje de texto; después una 
 
 Las variables `NIA_WEB_URL` y `DEBT_ADVICE_THRESHOLDS` son opcionales. `NIA_WEB_URL` es la URL pública de la app web: si la defines, las simulaciones de abonos largas incluyen el enlace al plan completo (sin ella, solo dicen que está en la web). `DEBT_ADVICE_THRESHOLDS` es un JSON que ajusta cuándo Nia considera apretado el margen o el peso de la cuota; si falta o es inválido se usan los valores por defecto (ver `functions/nia/README.md`, sección Deudas).
 
+Las explicaciones de deudas de Nia y los popovers «¿Qué es esto?» de la web usan textos legales revisados por el dueño: `npm run package:nia` y `npm run build` comprueban esa revisión antes de compilar (ver [deploy.md](deploy.md), sección 8). Cómo se usan los popovers y «Corregir datos» está en [debt-guide.md](debt-guide.md).
+
 Nunca guardar directamente la primera interpretación de una foto o frase. Gemini debe devolver JSON estructurado con:
 
 ```json

@@ -948,3 +948,34 @@ describe('advisor adjust in the Nia entry point (chain of steps)', () => {
     expect(events('terms_correction')).toHaveLength(1);
   });
 });
+
+describe('/ayuda in the Nia entry point', () => {
+  it('lists the explain, setup and «corregir datos» capabilities of the debt guide next to the base help', async () => {
+    fake = makeNet([]);
+    await run(message('/ayuda'));
+
+    expect(sent()).toHaveLength(1);
+    const { text } = sent()[0];
+    expect(text).toContain('Soy Nia y te tengo configurado como Camilo');
+    expect(text).toContain('Comandos: /cancelar · /confirmar · /editar corrección.');
+    expect(text).toContain('Deudas y tarjetas');
+    expect(text).toContain('explicar');
+    expect(text).toContain('«¿qué es la mora?»');
+    expect(text).toContain('crear o configurar una deuda');
+    expect(text).toContain('ajustar');
+    expect(text).toContain('«corregir datos»');
+    expect(text).toContain('no es asesoría financiera');
+    expect(fake.prompts).toHaveLength(0);
+  });
+
+  it('is the same help for /start and /help', async () => {
+    fake = makeNet([]);
+    await run(message('/ayuda'));
+    await run(message('/start'));
+    await run(message('/help'));
+
+    const [ayuda, start, help] = sent().map((call) => call.text);
+    expect(start).toBe(ayuda);
+    expect(help).toBe(ayuda);
+  });
+});

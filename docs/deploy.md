@@ -111,7 +111,7 @@ Seleccionar el deployment anterior en Dokploy y redesplegar. DNS y edge-traefik 
 
 ## 8. Nia se despliega por separado
 
-La imagen web no usa `functions/`: el `.dockerignore` excluye `functions`, `scripts`, `docs` y `dist-nia` del contexto de build. En cambio, `packages/` (código compartido que importa la web) debe seguir dentro del contexto, así que no lo agregues al `.dockerignore`.
+La imagen web no usa `functions/`: el `.dockerignore` excluye `functions`, `docs` y `dist-nia` del contexto de build. En cambio, `packages/` (código compartido que importa la web) y `scripts/` (`npm run build` ejecuta `scripts/check-explain-copy.mjs` antes de compilar) deben seguir dentro del contexto, así que no los agregues al `.dockerignore`.
 
 Nia es una Appwrite Function y no pasa por Dokploy. Para desplegarla o actualizarla, genera el paquete y súbelo en la consola de Appwrite como se describe en la sección 5 de [setup.md](setup.md):
 
@@ -151,7 +151,11 @@ Las explicaciones de deudas (`nia:exp`, «¿qué es la mora?») usan textos lega
 | S4 | Web y Nia **juntos** | Un Nia anterior ignora `terms_correction` y lee los datos sin corregir |
 | S5 | Nia y web | El refactor de presets no cambia el comportamiento de la web |
 | S6 | Nia | Escribe correcciones: la web de S4 debe estar publicada |
-| S7 | Web (necesita G.2 o el override, porque `build` ejecuta la comprobación) y luego Nia otra vez para `/ayuda` | |
+| S7 | Web (necesita G.2 o el override, porque `build` ejecuta la comprobación) y luego Nia otra vez para `/ayuda` | La web agrega los popovers «¿Qué es esto?»; el segundo despliegue de Nia solo cambia el texto de `/ayuda` |
+
+**Orden final de despliegue de la guía de deudas.** Si se despliega todo de una vez, el orden es: (1) web y Nia de S4 juntos, (2) Nia y web de S5, (3) Nia de S6, (4) web de S7 y (5) Nia otra vez para `/ayuda`. El Nia que lee o escribe correcciones nunca se despliega sin la web de S4.
+
+**Regla del override.** `NIA_ALLOW_UNREVIEWED=1` es la única forma de saltar la comprobación de textos revisados y solo sirve en la máquina que empaqueta o compila (`NIA_ALLOW_UNREVIEWED=1 npm run package:nia` o `npm run build`); la imagen de Docker no lo recibe. Como G.2 ya está en el repositorio, hoy no hace falta: `npm run build` y `npm run package:nia` pasan sin él, y si alguna vez fallan es porque una clave quedó sin revisar y hay que revisarla (`node scripts/check-explain-copy.mjs --print`), no saltarse la comprobación. El override solo vale para un arreglo urgente: los temas sin revisar responden «Este tema está en revisión» en Nia y no muestran popover en la web.
 
 No hay migración de Appwrite en ningún corte: **no ejecutes `npm run migrate:appwrite` por esta funcionalidad**. Antes de revertir S4, anula las correcciones cuyos valores anteriores no deban reaparecer.
 
