@@ -1,6 +1,6 @@
 # Apply progress: nia-debt-guide
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f). S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b). S5 branch: `feat/ndg-s5-advisor-create` (from master 5c31939).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f). S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b). S5 branch: `feat/ndg-s5-advisor-create` (from master 5c31939). S7 branch: `feat/ndg-s7-web-explain-docs` (from master 084cdde).
 
 ## Batch S0 (explain plumbing): COMPLETE (18/18 tasks)
 
@@ -613,3 +613,73 @@ Triangulation: lender (other, same in another case, a longer legal name, accents
 ### Remaining
 
 S6.CP (owner deploys Nia, action 6, after the S4 web), then S7 (popovers, build check and docs).
+
+## Batch S7 (web popovers, build check, docs and /ayuda): COMPLETE (8/8 tasks; the S7.CP checkpoint is the owner deploy and stays open)
+
+Branch: `feat/ndg-s7-web-explain-docs` (from master 084cdde). This is the last apply slice.
+
+### Tasks
+
+- [x] S7a.1 to S7a.2 (`explain/popoverModel.js`: `FIGURES`, `DISCLAIMER`, `popoverOf`, `popoversOf`)
+- [x] S7a.3 to S7a.4 (`explain/WhatIsThis.jsx` over the existing Radix popover; `debtDetailModel.js` adds `detail.explain`; `DebtDetail.jsx`, `CardPanel.jsx`, `LateNotices.jsx` carry the triggers)
+- [x] S7a.5 to S7a.6 (`package.json` `build` is `node scripts/check-explain-copy.mjs && vite build`)
+- [x] S7b.1 to S7b.2 (`/ayuda` in `functions/nia/index.js`; `functions/nia/README.md`, `docs/deploy.md`, `docs/setup.md`, new `docs/debt-guide.md`)
+- [ ] S7.CP checkpoint: tests, build and package are green (below); the owner deploys the web, then the Nia tarball again for `/ayuda` (action 7). Not done here.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 60494ae `feat(web): add «¿Qué es esto?» popovers next to rate, mora, charges, minimum payment and statement, built from the shared explain facts and reviewed copy` | S7a (1/2) | 11 files, 577 insertions, 17 deletions |
+| 4221c64 `build: run the explain copy check before the web build so unreviewed copy never ships` | S7a (2/2) | 2 files, 15 insertions, 2 deletions |
+| b0e0c2e `feat(nia): list the debt guide capabilities in /ayuda and document explain, advisor, correction, popovers and the override rule` | S7b | 6 files, 93 insertions, 4 deletions |
+
+Code and docs total vs master before the bookkeeping commit: 19 files, 685 insertions, 23 deletions = 708 changed lines (budget 2,000; the largest group is 594; the size-review trigger of 1,500 was never reached).
+
+### Behaviour
+
+- Design G1 held: the web renders its own short JSX from the core facts (`explainFacts`) and the reviewed copy (`EXPLAIN_COPY` through `facts.copy`); no legal text is duplicated and no key was added to `EXPLAIN_COPY`. `popoverModel.js` only adds small figure templates over `facts.text` (the pre-formatted figures), the title of each popover, and the source line `Fuente: <debt> · <function family> · <source labels>` (the same shape as the Telegram footer). The disclaimer constant is the exact sentence of the spec; a test pins it to Nia's `DISCLAIMER`.
+- Figure to topic: `rate` to `rate_conventions`, `mora` to `mora`, `charges` to `charges`, `minimum` and `statement` to `card_statement`. A topic that is not in `releasedTopics()`, that does not fit the debt kind (the minimum of a loan) or whose facts throw gives no popover (`null`); `popoversOf` leaves the figure out and the view shows no trigger.
+- `buildDebtDetail` now returns `explain` (the popovers by figure), computed once per detail with `debt.legal`, so the presentational `DebtDetail` stays free of I/O. The triggers are next to «Tasa», «Mora acumulada», «Cargos y seguros» and, for a card, «Pago mínimo», «Último extracto» and «Mora en curso»; the first legal notice of the mora carries «Aviso de mora». Each trigger is named «¿Qué es esto? <figure>».
+- `WhatIsThis` uses `@radix-ui/react-popover` (already a dependency, used by `MonthPopover`), so Enter, Space, Escape, `aria-expanded`, the focus return and the screen-edge collision are the library's. A tap opens it on a phone. It is read-only: no port is touched (a container test spies every write port).
+- `npm run build` runs the copy check first. The Docker build keeps working because `.dockerignore` excludes only `functions` and `docs` (not `scripts` or `packages`); `docs/deploy.md` said it also excluded `scripts` and was corrected.
+- `/ayuda` (and `/start`, `/help`) gains a paragraph «Deudas y tarjetas» (explain, create or configure, adjust, «corregir datos», educational disclaimer).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S7a.1 to S7a.2 | `popoverModel.test.js` (19 cases): the module did not exist, the file failed to load | `popoverModel.js`: first run 17/19; two of my expectations were wrong, not the code (a 24 % E.A. is 1,81 % monthly, not 1,76 %; the «aproximado» of a card mora goes at the end of the sentence), fixed in the test and the template: 19/19 | None needed |
+| S7a.3 to S7a.4 | `WhatIsThis.test.jsx` (module missing), 7 cases in `DebtDetail.test.jsx`, 3 in `DebtDetail.card.test.jsx`, 1 in `DebtDetailContainer.test.jsx`: 6 failed plus the new file that failed to load (absence assertions, such as no trigger without `detail.explain`, passed on arrival) | `WhatIsThis.jsx`, `detail.explain`, the three views: `src/features/debts` 634/634, full suite 2,824 | None needed |
+| S7a.5 to S7a.6 | 2 cases in `check-explain-copy.test.mjs`: the `build` script assertion failed (the second case, that `package:nia` and `dev` are untouched, passed on arrival) | `package.json`: 13/13, `npm run build` prints «Explain copy check passed: 14 keys are reviewed» | None needed |
+| S7b.1 to S7b.2 | 2 cases in `index.test.js`: the `/ayuda` text lacked «Deudas y tarjetas» (the one that `/start` and `/help` equal `/ayuda` passed on arrival) | `index.js`: `functions/nia` 967/967 | None needed |
+
+Triangulation: five figures, loan and card, mora with an overdue installment, not overdue (example), card (approximate), no policy; charges with and without lines; rate with the stated convention; unreleased topic by removing a copy key; unknown figure; broken terms; the printed numbers checked against `allowedTexts(facts)`; keyboard Enter, Space, Escape and the tap toggle.
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run src/features/debts` 43 files, 634 tests passed (after S7a.4); `npx vitest run functions/nia` 24 files, 967 tests passed; `npx vitest run scripts/check-explain-copy.test.mjs` 13 passed |
+| Runtime harness | the real entry point against the in-memory Appwrite, Telegram and Gemini of `index.test.js`: `/ayuda` answers with the debt paragraph and no model call; in the web, RTL renders the real `DebtDetail` over `buildDebtDetail` and the `DebtDetailContainer` with spied ports. No dev server was started and no browser check was done |
+| Full suite | `npm test -- --maxWorkers=4`: 157 files, 2,828 tests passed |
+| Build and package | `npm run build` (copy check passed, 14 keys reviewed) and plain `npm run package:nia` (no override) succeeded |
+| Rollback boundary | the three commits above: `explain/{popoverModel,WhatIsThis}`, `detail.explain` in `debtDetailModel.js` and the three view hooks (`DebtDetail.jsx`, `CardPanel.jsx`, `LateNotices.jsx`), the `build` script, the `/ayuda` paragraph and the docs; the earlier slices do not depend on any of them |
+
+### Deviations from design
+
+- The design names a disclosure «like `MoreActionsMenu`, no new dependency»; `WhatIsThis` uses the Radix popover already in the project (no new dependency), which gives collision handling and the focus return for free.
+- `detail.explain` is new in `buildDebtDetail` (the design only named `popoverModel.js` and three view hooks): it is how the presentational views get the popovers without events or I/O.
+- A «Mora en curso» trigger in `CardPanel` and an «Aviso de mora» trigger in `LateNotices` are part of the wiring of the three views.
+- A new user guide `docs/debt-guide.md` was added for «Corregir datos» and «¿Qué es esto?»; `docs/setup.md` links to it.
+
+### Issues found
+
+- The popovers use no new copy key, so the copy gate is unchanged (14 reviewed keys); the popover text is exactly the reviewed copy plus fixed, short templates written for the web (for example «Tasa de mora vigente», «Último extracto (corte del …)»). Those templates are UI wording, not legal copy, but the owner may want to read them before the deploy.
+- `buildDebtDetail` now runs up to four `explainFacts` per detail render (rate, mora, charges, and the statement for cards); each re-projects the debt. The container memoises the detail, but a very long debt history could make it slower to open.
+- The visual result (trigger size, popover width on a phone) was not checked in a browser. The trigger is 32 px with the icon at 16 px; the popover width is `min(360px, 100vw - 32px)`.
+- The deploy is the owner's: web first (the reviewed copy is already in the repository), then the Nia tarball for `/ayuda`.
+
+### Remaining
+
+Nothing to apply. The owner deploys S7 (web, then the Nia tarball), and the change goes to `sdd-verify`.

@@ -204,14 +204,14 @@ Groups: S6a charge add and correction action (about 600); S6b checklist, chain a
 
 Groups: S7a popovers (about 600); S7b docs (about 250).
 
-- [ ] S7a.1 RED `src/features/debts/explain/popoverModel.test.js`: figure to topic mapping (rate, mora, charges, minimum payment, statement); content from `explainFacts` and `EXPLAIN_COPY` with the same source line and exact disclaimer; a topic not in `releasedTopics()` yields no popover; no writes. Reqs WM3, DE3, DE4.
-- [ ] S7a.2 GREEN `src/features/debts/explain/popoverModel.js`. Done: S7a.1 passes.
-- [ ] S7a.3 RED `WhatIsThis.test.jsx`, `DebtDetail.test.jsx`, `DebtDetail.card.test.jsx`: the disclosure opens and closes with Enter, Space and Escape, sets `aria-expanded`, returns focus; renders the `mora` explanation with its disclaimer next to the mora figure and writes nothing (port spies); triggers appear next to rate, mora, charges, minimum and statement figures only when the topic is released; absent for unreleased topics. Reqs WM3.
-- [ ] S7a.4 GREEN `explain/WhatIsThis.jsx` (a disclosure like `MoreActionsMenu`, no new dependency), `DebtDetail.jsx`, `CardPanel.jsx`, `LateNotices.jsx`. Done: S7a.3 passes.
-- [ ] S7a.5 RED `scripts/check-explain-copy.test.mjs` addition: root `package.json` `build` script runs the copy check first. Reqs DE4.
-- [ ] S7a.6 GREEN `package.json` (`build` runs `node scripts/check-explain-copy.mjs`). Done: S7a.5 passes. Note: the S7 build needs gate G.2 done or `NIA_ALLOW_UNREVIEWED=1`.
-- [ ] S7b.1 RED `functions/nia/index.test.js`: `/ayuda` lists explain, setup/configure and «corregir datos» capabilities. Reqs NA7.
-- [ ] S7b.2 GREEN `functions/nia/index.js` `/ayuda`; DOCS `functions/nia/README.md` (explain, advisor, `terms_correction`, buttons, override), `docs/deploy.md` (final deploy order and the override rule), `docs/` user guide for «Corregir datos» and «¿Qué es esto?». Done: S7b.1 passes; docs reviewed by reading.
+- [x] S7a.1 RED `src/features/debts/explain/popoverModel.test.js`: figure to topic mapping (rate, mora, charges, minimum payment, statement); content from `explainFacts` and `EXPLAIN_COPY` with the same source line and exact disclaimer; a topic not in `releasedTopics()` yields no popover; no writes. Reqs WM3, DE3, DE4.
+- [x] S7a.2 GREEN `src/features/debts/explain/popoverModel.js`. Done: S7a.1 passes.
+- [x] S7a.3 RED `WhatIsThis.test.jsx`, `DebtDetail.test.jsx`, `DebtDetail.card.test.jsx`: the disclosure opens and closes with Enter, Space and Escape, sets `aria-expanded`, returns focus; renders the `mora` explanation with its disclaimer next to the mora figure and writes nothing (port spies); triggers appear next to rate, mora, charges, minimum and statement figures only when the topic is released; absent for unreleased topics. Reqs WM3.
+- [x] S7a.4 GREEN `explain/WhatIsThis.jsx` (a disclosure like `MoreActionsMenu`, no new dependency), `DebtDetail.jsx`, `CardPanel.jsx`, `LateNotices.jsx`. Done: S7a.3 passes.
+- [x] S7a.5 RED `scripts/check-explain-copy.test.mjs` addition: root `package.json` `build` script runs the copy check first. Reqs DE4.
+- [x] S7a.6 GREEN `package.json` (`build` runs `node scripts/check-explain-copy.mjs`). Done: S7a.5 passes. Note: the S7 build needs gate G.2 done or `NIA_ALLOW_UNREVIEWED=1`.
+- [x] S7b.1 RED `functions/nia/index.test.js`: `/ayuda` lists explain, setup/configure and «corregir datos» capabilities. Reqs NA7.
+- [x] S7b.2 GREEN `functions/nia/index.js` `/ayuda`; DOCS `functions/nia/README.md` (explain, advisor, `terms_correction`, buttons, override), `docs/deploy.md` (final deploy order and the override rule), `docs/` user guide for «Corregir datos» and «¿Qué es esto?». Done: S7b.1 passes; docs reviewed by reading.
 - [ ] S7.CP checkpoint and owner deploy of web, then Nia tarball (action 7). Final handoff to `sdd-verify`.
 
 ---
