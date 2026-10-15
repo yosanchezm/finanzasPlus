@@ -104,8 +104,9 @@ describe('explain facts: restructure_whatif', () => {
     expect(result).toMatchObject({ status: 'not_applicable', numbers: {}, text: {} });
   });
 
-  it('is under review while the shipped copy is not reviewed', () => {
-    const result = explainFacts('restructure_whatif', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy: EXPLAIN_COPY });
+  it('is under review while its copy is not reviewed', () => {
+    const unreviewed = Object.fromEntries(Object.entries(EXPLAIN_COPY).map(([key, entry]) => [key, { ...entry, reviewedOn: null, reviewedHash: null }]));
+    const result = explainFacts('restructure_whatif', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy: unreviewed });
 
     expect(result.status).toBe('under_review');
     expect(result.numbers).toEqual({});

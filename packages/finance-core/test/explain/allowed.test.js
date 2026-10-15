@@ -20,7 +20,7 @@ describe('allowedTexts', () => {
 
   it('has no debt name for a generic answer and only the name while the topic is under review', () => {
     const generic = explainFacts('mora', null, [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy });
-    const review = explainFacts('mora', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE);
+    const review = explainFacts('mora', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy: {} }); // an empty copy is the unreviewed state
 
     expect(allowedTexts(generic)).toEqual([...generic.copy, ...generic.sources.map((source) => source.label)]);
     expect(review.status).toBe('under_review');

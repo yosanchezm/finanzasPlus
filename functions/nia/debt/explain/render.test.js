@@ -223,7 +223,7 @@ describe('renderExplain: charges', () => {
 
 describe('renderExplain: statuses without a template', () => {
   it('answers under review and not applicable without a footer or a figure', () => {
-    const review = renderExplain(explainFacts('mora', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE));
+    const review = renderExplain(explainFacts('mora', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy: {} })); // an empty copy is the unreviewed state
 
     expect(review.parts).toEqual(['Este tema está en revisión. Todavía no puedo explicarlo; lo haré cuando esté revisado.']);
     expect(review.followUps).toEqual([]);

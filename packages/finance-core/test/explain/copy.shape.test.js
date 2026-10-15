@@ -2,11 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COPY, copyStatus, releasedTopics, topicCopyKeys } from '../../src/explain/copy.js';
 import { explainFacts } from '../../src/explain/explain.js';
+import { EXPLAIN_TOPICS } from '../../src/explain/topics.js';
 import { reviewedCopy } from '../helpers/explainCopy.js';
 
 // The draft copy of the loan topics (S1): legal constants for the usury and IBC, mora and GMF explanations, plus one
 // sample per topic, the samples of the two card topics (S2), and the Ley 546 and Ley 1555 constants and the samples of the
-// restructure and prepayment topics (S3). Every entry waits for the owner review (gate G), so none carries a date or a hash.
+// restructure and prepayment topics (S3). The owner approved them on 2026-10-15 (gate G); copy.release.test.js checks the review.
 const S1_TOPICS = ['rate_conventions', 'usury_ibc', 'mora', 'payment_allocation', 'charges'];
 const S2_TOPICS = ['card_statement', 'card_interest_drop'];
 const S3_TOPICS = ['restructure_whatif', 'prepayment'];
@@ -21,8 +22,8 @@ const DRAFT_KEYS = [
   ...S3_TOPICS.map((topic) => `${topic}.sample`),
 ];
 
-describe('shipped explain copy (S1 to S3 draft)', () => {
-  it.each(DRAFT_KEYS)('has a draft entry for %s with text, sources and no review', (key) => {
+describe('shipped explain copy (S1 to S3)', () => {
+  it.each(DRAFT_KEYS)('has an entry for %s with text and well-formed sources', (key) => {
     const entry = EXPLAIN_COPY[key];
 
     expect(entry.text.length).toBeGreaterThan(80);
@@ -31,8 +32,6 @@ describe('shipped explain copy (S1 to S3 draft)', () => {
       expect(source.label.length).toBeGreaterThan(5);
       if (source.url !== undefined) expect(source.url).toMatch(/^https:\/\//);
     }
-    expect(entry.reviewedOn).toBeNull();
-    expect(entry.reviewedHash).toBeNull();
   });
 
   it('cites the Superintendencia Financiera for the IBC, the Estatuto Tributario for the GMF and the Codigo de Comercio for mora', () => {
@@ -66,13 +65,13 @@ describe('shipped explain copy (S1 to S3 draft)', () => {
     expect(ley1555).toMatch(/no está verificado/);
   });
 
-  it('releases no topic yet: every shipped entry is unreviewed and every key a topic needs exists', () => {
+  it('ships exactly the draft keys, reviewed, and every key a topic needs exists', () => {
     const status = copyStatus(EXPLAIN_COPY);
 
-    expect(status.reviewed).toEqual([]);
-    expect(status.unreviewed).toEqual(expect.arrayContaining(DRAFT_KEYS));
+    expect(status.unreviewed).toEqual([]);
+    expect([...status.reviewed].sort()).toEqual([...DRAFT_KEYS].sort());
     expect(Object.keys(EXPLAIN_COPY).sort()).toEqual([...DRAFT_KEYS].sort());
-    expect(releasedTopics()).toEqual([]);
+    expect(releasedTopics()).toEqual(EXPLAIN_TOPICS);
     for (const topic of [...S1_TOPICS, ...S2_TOPICS, ...S3_TOPICS]) {
       expect(topicCopyKeys(topic).filter((key) => !EXPLAIN_COPY[key]), topic).toEqual([]);
     }

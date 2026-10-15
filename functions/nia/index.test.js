@@ -6,6 +6,9 @@ import { serializeTerms } from '../../packages/finance-core/index.js';
 // (a fake `undici.fetch`). No network is ever touched.
 const net = vi.hoisted(() => ({ fetch: null }));
 vi.mock('undici', () => ({ default: { FormData: class FormData {}, fetch: (...args) => net.fetch(...args) } }));
+// The explain section of this file exercises the unreviewed state, where an empty copy releases no topic: the shipped copy was
+// approved on 2026-10-15 (gate G), so it is replaced here. The reviewed answers are covered by the handler and render tests.
+vi.mock('../../packages/finance-core/src/explain/copy.js', async (importOriginal) => ({ ...(await importOriginal()), EXPLAIN_COPY: {} }));
 
 const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-09-10', rate: { convention: 'EA', value: 24 }, system: 'french', periodicity: 'monthly', n: 36, firstDueOn: '2026-10-10' };
 const plain = (text) => text.replace(/ /g, ' ');

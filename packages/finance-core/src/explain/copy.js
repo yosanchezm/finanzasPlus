@@ -17,8 +17,8 @@ const CCO_884 = { label: 'Código de Comercio, art. 884 (tope: tasa de usura)' }
 const CC_1653 = { label: 'Código Civil, art. 1653 (imputación del pago)' };
 const CARD_CONTRACT = { label: 'Contrato y extracto de tu tarjeta de crédito' };
 
-// DRAFT for the owner review (gate G): neutral, informational Spanish. Every entry stays unreviewed (`reviewedOn: null`)
-// until the owner approves its exact text and sources. The Ley 546 and Ley 1555 texts claim only what the app does: they name
+// Neutral, informational Spanish. The owner approved the exact text and sources of every entry on 2026-10-15 (gate G.1),
+// and `reviewedHash` signs them: editing a text or a source un-reviews its entry until it is approved again. The Ley 546 and Ley 1555 texts claim only what the app does: they name
 // the law, say what it is about, and say that its scope for the user's debt is not verified here.
 export const EXPLAIN_COPY = {
   'legal.usury_ibc': {
@@ -28,8 +28,8 @@ export const EXPLAIN_COPY = {
       'Cobrar por encima de ese tope tiene consecuencias para el acreedor según la ley. ' +
       'El tope cambia con cada certificación y depende de la modalidad del crédito (por ejemplo, consumo y ordinario).',
     sources: [SUPERFINANCIERA, { label: 'Código de Comercio, art. 884 (Ley 510 de 1999, art. 111)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '040ea126',
   },
   'legal.mora': {
     text:
@@ -39,8 +39,8 @@ export const EXPLAIN_COPY = {
       'Al pagar, el valor se aplica primero a los intereses y después al capital (Código Civil, art. 1653). ' +
       'Si tu banco calcula la mora de otra forma, manda el extracto del banco.',
     sources: [CCO_884, { label: 'Código de Comercio, art. 886 (anatocismo)' }, CC_1653],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: 'ad6483e0',
   },
   'legal.gmf': {
     text:
@@ -48,8 +48,8 @@ export const EXPLAIN_COPY = {
       'Lo retiene tu entidad financiera, no esta app. Existen operaciones y cuentas exentas; confirma con tu banco si aplica en tu caso. ' +
       'El ejemplo de esta respuesta es ilustrativo.',
     sources: [{ label: 'Estatuto Tributario, arts. 870 a 881 (GMF)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: 'efad0356',
   },
   'rate_conventions.sample': {
     text:
@@ -57,56 +57,56 @@ export const EXPLAIN_COPY = {
       'La N.A.M.V. (nominal anual, mes vencido) se reparte en 12 meses para sacar la tasa mensual (M.V.); como ese interés se acumula mes a mes, la E.A. resultante es mayor que la nominal. ' +
       'Por eso una tasa nominal de 25 % y una efectiva de 25 % no cuestan lo mismo.',
     sources: [{ label: 'Matemática financiera: equivalencia de tasas de interés' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '6b3fbe7a',
   },
   'usury_ibc.sample': {
     text:
       'La usura es el tope que la ley pone a los intereses de un crédito. Si la tasa de tu deuda está por debajo del tope, cumple el límite; si lo supera, conviene revisar el contrato con la entidad o consultar a la Superintendencia Financiera. ' +
       'El tope se publica cada mes por modalidad, y esta guía solo muestra el que tiene registrado.',
     sources: [SUPERFINANCIERA, CCO_884],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '71876bfa',
   },
   'mora.sample': {
     text:
       'La mora es un interés adicional por pagar tarde. Empieza a contar después de la fecha de vencimiento de la cuota y crece por cada día de atraso, pero solo sobre el capital que quedó vencido. ' +
       'Pagar la cuota detiene la mora, y la mora no cambia el valor de las cuotas futuras.',
     sources: [CCO_884],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '357538a3',
   },
   'payment_allocation.sample': {
     text:
       'Cuando pagas, el dinero se reparte en un orden fijo: primero los cargos e impuestos de la cuota, luego la mora, después los intereses y al final el capital. ' +
       'Por eso un pago parcial puede no reducir el capital: primero cubre los conceptos anteriores. Si pagas más de lo que debe la cuota, el sobrante se aplica a las cuotas siguientes.',
     sources: [CC_1653],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '83f39b1b',
   },
   'charges.sample': {
     text:
       'Además de los intereses, una deuda puede traer cargos: seguros, comisiones o cuotas de manejo, e impuestos como el IVA. Los cargos se suman a la cuota y no reducen el capital. ' +
       'Un impuesto puede calcularse sobre otro cargo (por ejemplo, el IVA sobre una comisión); en la app queda ligado a ese cargo y se quita con él. Revisa en tu contrato cuáles aplican.',
     sources: [{ label: 'Contrato y extracto de tu entidad financiera' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '40ee2411',
   },
   'card_statement.sample': {
     text:
       'El extracto es el resumen que tu entidad genera en la fecha de corte: reúne las compras, las cuotas de las compras diferidas, los intereses, la cuota de manejo y los impuestos del periodo. Tienes hasta la fecha límite de pago para pagarlo. ' +
       'El pago mínimo es lo menos que debes pagar en esa fecha para no quedar en mora; cada entidad define cómo lo calcula. El pago total cubre todo el extracto.',
     sources: [CARD_CONTRACT],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: 'f37f76ba',
   },
   'card_interest_drop.sample': {
     text:
       'En una tarjeta, los intereses de las compras corrientes se cobran sobre el saldo que quedó sin pagar después de la fecha límite de pago. Si pagas el extracto completo hasta esa fecha, esa parte no genera intereses en el siguiente corte. ' +
       'Si solo pagas el mínimo, el resto sigue generando intereses y el siguiente extracto los cobra. Por eso los intereses pueden bajar de un extracto al siguiente aunque la tasa no haya cambiado: depende de cuánto pagaste y cuándo.',
     sources: [CARD_CONTRACT, { label: 'Método de cálculo de la app para tarjetas (aproximado)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '76b64279',
   },
   'legal.ley546': {
     text:
@@ -114,8 +114,8 @@ export const EXPLAIN_COPY = {
       'Por eso el tope de usura de vivienda se registra a mano en la app y las reglas de mora de vivienda no se aplican. ' +
       'Esta guía solo explica el marco general: no hace ningún cálculo con las reglas de esa ley. Para tu caso, revisa el contrato y confirma con tu entidad.',
     sources: [{ label: 'Ley 546 de 1999 (normas en materia de vivienda y su financiación)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '485c1226',
   },
   'legal.ley1555': {
     text:
@@ -123,8 +123,8 @@ export const EXPLAIN_COPY = {
       'Esta guía toma como referencia un tope de 880 salarios mínimos mensuales, pero el alcance exacto de la ley para tu crédito (tipo de crédito, monto y fecha de desembolso) no está verificado, así que no se debe dar por cierto. ' +
       'Los créditos de vivienda tienen además sus propias reglas (Ley 546 de 1999). Revisa tu contrato y confirma con tu entidad antes de abonar.',
     sources: [{ label: 'Ley 1555 de 2012 (prepago de créditos sin penalidad)' }, { label: 'Ley 546 de 1999 (normas en materia de vivienda y su financiación)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '7622032e',
   },
   'restructure_whatif.sample': {
     text:
@@ -132,8 +132,8 @@ export const EXPLAIN_COPY = {
       'Eso puede aliviar la cuota, pero los intereses se cobran sobre un saldo mayor y el costo total suele subir. Si la entidad perdona la mora, el saldo nuevo es menor. ' +
       'Lo que aplica en tu caso lo define el acuerdo con tu entidad; este cálculo es solo una simulación de la app.',
     sources: [{ label: 'Acuerdo de reestructuración con tu entidad financiera' }, { label: 'Método de cálculo de la app para saldos vencidos' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: '0a138083',
   },
   'prepayment.sample': {
     text:
@@ -141,8 +141,8 @@ export const EXPLAIN_COPY = {
       'Reducir el plazo suele ahorrar más intereses; reducir la cuota alivia el flujo mensual. ' +
       'Antes de abonar, pide a tu entidad la confirmación por escrito de cómo aplicará el abono y si cobra alguna penalización.',
     sources: [{ label: 'Contrato de tu crédito y condiciones de prepago de tu entidad' }, { label: 'Método de cálculo de la app para abonos extra (aproximado)' }],
-    reviewedOn: null,
-    reviewedHash: null,
+    reviewedOn: '2026-10-15',
+    reviewedHash: 'a8bc8a6e',
   },
 };
 

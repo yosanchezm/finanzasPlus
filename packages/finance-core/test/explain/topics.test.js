@@ -114,14 +114,16 @@ describe('copyStatus', () => {
     expect(status.unreviewed).toContain('extra.note');
   });
 
-  it('starts empty in the shipped skeleton: nothing is reviewed', () => {
-    expect(copyStatus(EXPLAIN_COPY).reviewed).toEqual([]);
+  it('reviews every key the shipped copy has: the owner approval of 2026-10-15', () => {
+    const status = copyStatus(EXPLAIN_COPY);
+
+    expect(status.unreviewed).toEqual([]);
+    expect(status.reviewed.length).toBeGreaterThan(0);
   });
 });
 
 describe('releasedTopics', () => {
   it('is empty for the empty skeleton', () => {
-    expect(releasedTopics()).toEqual([]);
     expect(releasedTopics({})).toEqual([]);
   });
 
@@ -159,9 +161,9 @@ describe('explainFacts', () => {
   });
 
   it('answers "under review" for a topic whose copy is not released', () => {
-    const facts = explainFacts('mora', loan, [], undefined, '2026-10-13');
+    const facts = explainFacts('mora', loan, [], undefined, '2026-10-13', { copy: {} });
     expect(facts).toMatchObject({ topic: 'mora', asOf: '2026-10-13', status: 'under_review', numbers: {}, text: {}, copy: [], reviewedOn: null });
-    expect(explainFacts('rate_conventions', null, [], undefined, '2026-10-13').status).toBe('under_review');
+    expect(explainFacts('rate_conventions', null, [], undefined, '2026-10-13', { copy: {} }).status).toBe('under_review');
   });
 
   it('does not report "under review" once every key of the topic is reviewed', () => {

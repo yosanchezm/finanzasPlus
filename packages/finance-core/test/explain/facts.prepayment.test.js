@@ -140,8 +140,9 @@ describe('explain facts: prepayment', () => {
     expect(facts(CARD, '2026-10-13', [], { amountMinor: 300_000 })).toMatchObject({ status: 'not_applicable', numbers: {} });
   });
 
-  it('is under review while the shipped copy is not reviewed', () => {
-    const result = explainFacts('prepayment', debt(french()), [], null, '2026-10-13', { copy: EXPLAIN_COPY, amountMinor: 1_000_000 });
+  it('is under review while its copy is not reviewed', () => {
+    const unreviewed = Object.fromEntries(Object.entries(EXPLAIN_COPY).map(([key, entry]) => [key, { ...entry, reviewedOn: null, reviewedHash: null }]));
+    const result = explainFacts('prepayment', debt(french()), [], null, '2026-10-13', { copy: unreviewed, amountMinor: 1_000_000 });
 
     expect(result.status).toBe('under_review');
   });

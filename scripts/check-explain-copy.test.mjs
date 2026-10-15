@@ -101,20 +101,13 @@ describe('printExplainCopy', () => {
   });
 });
 
-describe('check-explain-copy CLI (the shipped, empty copy)', () => {
-  it('exits non-zero and lists the missing keys on stderr', () => {
+describe('check-explain-copy CLI (the shipped copy, approved by the owner on 2026-10-15)', () => {
+  it('exits zero with no override and no warning', () => {
     const result = exec(script);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('legal.gmf');
-    expect(result.stderr).toContain('prepayment.sample');
-  });
-
-  it('exits zero with NIA_ALLOW_UNREVIEWED=1 and warns', () => {
-    const result = exec(script, [], { NIA_ALLOW_UNREVIEWED: '1' });
-
     expect(result.status).toBe(0);
-    expect(result.stderr + result.stdout).toMatch(/warning/i);
+    expect(result.stdout).toMatch(/Explain copy check passed: \d+ keys are reviewed/);
+    expect(result.stderr + result.stdout).not.toMatch(/warning/i);
   });
 
   it('--print lists every key and exits zero', () => {
@@ -126,18 +119,16 @@ describe('check-explain-copy CLI (the shipped, empty copy)', () => {
 });
 
 describe('package:nia runs the check before building the tarball', () => {
-  it('refuses to package while the copy is unreviewed, and writes no tarball', () => {
+  it('packages without NIA_ALLOW_UNREVIEWED now that the copy is reviewed, and writes the tarball', () => {
     const out = mkdtempSync(join(tmpdir(), 'package-nia-gate-'));
     try {
       const result = exec(packager, ['--out', out]);
 
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('NIA_ALLOW_UNREVIEWED');
-      expect(result.stderr).toContain('legal.gmf');
-      expect(existsSync(join(out, 'nia.tar.gz'))).toBe(false);
-      expect(existsSync(join(out, 'dist-nia'))).toBe(false);
+      expect(result.status).toBe(0);
+      expect(result.stderr + result.stdout).not.toMatch(/NIA_ALLOW_UNREVIEWED/);
+      expect(existsSync(join(out, 'nia.tar.gz'))).toBe(true);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });

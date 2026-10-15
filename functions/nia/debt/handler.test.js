@@ -24,6 +24,7 @@ function world({ debts = [debtRow('d1', 'Crédito Vehículo')], categories = [],
   const conflict = () => Object.assign(new Error('conflict'), { status: 409 });
   const deps = {
     config: { householdId: 'h1', timezone: 'America/Bogota', currency: 'COP', ...config },
+    explainCopy: {}, // the unreviewed state; the released-topics tests inject reviewedCopy() instead
     cashflowRows: async (window) => {
       windows.push(window);
       if (cashflow instanceof Error) throw cashflow;

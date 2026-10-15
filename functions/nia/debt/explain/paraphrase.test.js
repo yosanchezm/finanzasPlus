@@ -130,7 +130,7 @@ describe('paraphraseExplain', () => {
   it('does not call Gemini for a status that has no figures (generic, under review, not applicable)', async () => {
     const probe = calls();
     const generic = explainFacts('restructure_whatif', null, [], undefined, '2026-10-13', { copy });
-    const review = explainFacts('restructure_whatif', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE);
+    const review = explainFacts('restructure_whatif', goldenDebt(), [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy: {} }); // an empty copy is the unreviewed state
     const card = explainFacts('restructure_whatif', { ...goldenDebt(), terms: { ...GOLDEN_TERMS, kind: 'card', card: { statementDay: 20, dueDay: 10, minPayment: { rule: 'installments_due', pct: 0, floorMinor: 0 } } } }, [], GOLDEN_LEGAL, TEN_DAYS_LATE, { copy });
 
     for (const facts of [generic, review, card]) {

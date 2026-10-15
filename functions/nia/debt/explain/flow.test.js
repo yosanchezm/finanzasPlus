@@ -10,7 +10,8 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const cardTerms = JSON.parse(readFileSync(new URL('../../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8')).terms;
 const loan = { $id: 'd1', name: 'Crédito Vehículo', terms: loanTerms };
 const card = { $id: 'c1', name: 'Visa', terms: cardTerms };
-const facts = (topic, debt) => explainFacts(topic, debt, [], undefined, '2026-10-13');
+// An empty copy is the unreviewed state: the shipped copy was approved on 2026-10-15 (gate G), so these tests no longer rely on it.
+const facts = (topic, debt) => explainFacts(topic, debt, [], undefined, '2026-10-13', { copy: {} });
 const noDigits = (text) => expect(text).not.toMatch(/\d/);
 
 describe('TOPIC_LABELS', () => {
@@ -38,7 +39,7 @@ describe('menuReply', () => {
   });
 });
 
-describe('explainReply: nothing is released in S0', () => {
+describe('explainReply: nothing is released while the copy is unreviewed', () => {
   it.each(EXPLAIN_TOPICS)('answers «Este tema está en revisión» for %s', (topic) => {
     const { text, keyboard } = explainReply(facts(topic, null));
 
