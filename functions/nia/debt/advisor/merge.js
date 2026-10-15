@@ -74,6 +74,7 @@ export function mergeCase(stored, extracted) {
     presets: mergePresets(stored.presets, extracted.presets),
     charges: mergeCharges(stored.charges, extracted.charges),
     lateStated: pick(extracted.lateStated, stored.lateStated),
+    ...(stored.adjust ? { adjust: true, adjustKind: pick(extracted.adjustKind, stored.adjustKind), debtRef: text(extracted.debtRef, stored.debtRef), changeOn: pick(extracted.changeOn, stored.changeOn) } : {}),
     mentions: [...(stored.mentions || []), ...(extracted.mentions || []).filter((mention) => !(stored.mentions || []).includes(mention))],
     asked: stored.asked || [],
     unknown: mergeUnknown(stored, card),

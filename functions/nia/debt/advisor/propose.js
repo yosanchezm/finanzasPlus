@@ -3,7 +3,8 @@ import { MENTIONS, MIN_RULES } from '../extract.js';
 import { pesos } from '../format.js';
 import { CONVENTION_BUTTONS } from '../pending.js';
 import { PERIOD_LABELS, SYSTEM_LABELS, conventionQuestion, describeCoreError, usuryLines } from '../preview.js';
-import { DEFAULT_IVA_PCT, buildSetupTerms, lateFor, setupCharges } from './cardTerms.js';
+import { proposeAdjust } from './adjust.js';
+import { AMOUNT_ASK, DEFAULT_IVA_PCT, buildSetupTerms, lateFor, setupCharges } from './cardTerms.js';
 
 // proposeSetup (design G13): turns a described case into a draft, the assumptions Nia made, the questions it still has and a preview computed
 // by the core. It never writes and does no I/O. A draft is only offered when nothing blocks the creation. Pure and Node 16 safe.
@@ -13,11 +14,6 @@ const isDay = (value) => Number.isInteger(value) && value >= 1 && value <= 31;
 const NOT_YET = 'no soportado aún';
 
 const MIN_OPTIONS = [...MIN_RULES, 'unknown'];
-const AMOUNT_ASK = {
-  fee: '¿Cuánto es la cuota de manejo o comisión? Escríbela en pesos por cuota.',
-  life: '¿Cuánto es el seguro de vida? Escríbelo como porcentaje del saldo, por ejemplo 0,05.',
-  insurance: '¿Cuánto es el otro seguro? Escríbelo en pesos por cuota.',
-};
 const ASK = {
   name: '¿Cómo quieres llamar esta deuda? Por ejemplo: “Tarjeta Bancolombia”.',
   rate: '¿Cuál es la tasa de interés? Dime el valor y de qué tipo es, por ejemplo: 2,1 % mensual vencida.',
@@ -164,15 +160,16 @@ function previewOf(c, terms, legal) {
 
 /**
  * @param {object} setupCase The merged `SetupCase` (see `extract.js` and `merge.js`); `unknown` lists the fields declared unknown after one ask.
- * @param {object[]} debts The household's debts (used by the adjust mode of S6; create mode does not read them).
+ * @param {object[]} debts The household's debts, each with its `events` (read only by the adjust mode, when `setupCase.adjust` is true; create mode does not read them).
  * @param {{ usuryTable?: object[], status?: string }} legal The resolved legal tables.
  * @param {string} today `YYYY-MM-DD`
- * @returns {{ mode: 'create', draft: ({ setup: object } | null), steps: object[], assumptions: { code: string, text: string }[],
+ * @returns {{ mode: ('create' | 'adjust'), draft: ({ setup: object } | null), steps: object[], assumptions: { code: string, text: string }[],
  *   questions: { field: string, text: string, blocking: boolean, options?: string[], stuck?: boolean }[], unsupported: { code: string, text: string }[],
  *   invalid: { code: string, text: string }[], preview: (object | null) }}
  *   `draft` is null while a question is open or something is invalid.
  */
 export function proposeSetup(setupCase, debts, legal, today) {
+  if (setupCase.adjust) return proposeAdjust(setupCase, debts, today);
   const c = setupCase;
   const questions = questionsOf(c, c.unknown || []);
   const invalid = [];

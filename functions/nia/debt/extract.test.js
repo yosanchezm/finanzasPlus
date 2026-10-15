@@ -750,3 +750,25 @@ describe('normaliseDebtExtraction: terms_correction', () => {
     expect(norm(fix({ minPct: -3, minRule: 'inventada' })).missingFields).toEqual(['correction_field']);
   });
 });
+
+describe('normaliseDebtExtraction: setup that adjusts an existing debt', () => {
+  const adjusting = (setup = {}, extra = {}) => ({ action: 'setup', kind: 'card', debtRef: 'visa', setup: { adjust: true, adjustKind: 'fix', changeOn: null, card: { statementDay: 20 }, ...setup }, ...extra });
+
+  it('keeps the debt, the adjust flag, the kind the user gave and the date of a real change', () => {
+    expect(norm(adjusting()).setup).toMatchObject({ adjust: true, adjustKind: 'fix', debtRef: 'visa', changeOn: null, card: { statementDay: 20 } });
+    expect(norm(adjusting({ adjustKind: 'change', changeOn: '2026-09-13' })).setup).toMatchObject({ adjustKind: 'change', changeOn: '2026-09-13' });
+  });
+
+  it('leaves the kind open when the model did not say, drops a date that is not real, and adds no adjust fields to a new debt', () => {
+    expect(norm(adjusting({ adjustKind: 'quizás', changeOn: '2026-02-30' })).setup).toMatchObject({ adjustKind: null, changeOn: null });
+    expect(norm({ action: 'setup', kind: 'card', debtRef: 'visa', setup: { card: { statementDay: 20 } } }).setup).not.toHaveProperty('adjust');
+  });
+
+  it('teaches the model when a message adjusts a debt that is already registered', () => {
+    const prompt = debtPrompt('mi tarjeta Visa tiene el corte el 20', [], [], { today: TODAY });
+
+    expect(prompt).toContain('"adjust"');
+    expect(prompt).toContain('"adjustKind"');
+    expect(prompt).toMatch(/YA está en la lista de deudas registradas/);
+  });
+});

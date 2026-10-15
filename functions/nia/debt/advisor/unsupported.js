@@ -12,14 +12,16 @@ const TEXTS = {
   prepayment_penalty: `La penalización por abonos anticipados: ${NOT_YET}. No la guardo.`,
   allocation_order: `El orden en que se aplican los pagos: ${NOT_YET}. Sigo usando el orden que ya maneja la app.`,
   mora_base: `Cobrar la mora sobre toda la cuota: ${NOT_YET}. La mora se sigue calculando sobre el capital vencido.`,
+  mora_fixed: `Una tasa de mora propia dentro de este ajuste: ${NOT_YET}. Pídeme “configura la mora a …% E.A.” y lo hago aparte.`,
 };
+const ORDER = [...MENTIONS, 'mora_fixed'];
 
 /**
- * One line per unsupported field, in the order of the catalogue (`MENTIONS`); codes that are not in it are ignored.
+ * One line per unsupported field, in the order of the catalogue (`MENTIONS`, then `mora_fixed`); codes that are not in it are ignored.
  * @param {string[]} [codes]
  * @returns {string} Empty when there is nothing unsupported.
  */
 export function unsupportedText(codes) {
   const asked = Array.isArray(codes) ? codes : [];
-  return MENTIONS.filter((code) => asked.includes(code)).map((code) => TEXTS[code]).join('\n');
+  return ORDER.filter((code) => asked.includes(code)).map((code) => TEXTS[code]).join('\n');
 }

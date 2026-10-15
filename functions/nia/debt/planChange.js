@@ -278,18 +278,18 @@ function rebuildAdd(charges, add, card) {
     return addToSet(charges, add, card);
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
-    return { issue: ADD_ISSUES[error.code] || CANNOT_PREVIEW_CHARGES };
+    return { issue: ADD_ISSUES[error.code] || CANNOT_PREVIEW_CHARGES, code: error.code };
   }
 }
 
 /**
  * The charge set after the change, rebuilt from the charges in force (the pending stores only the charge id, the operation and
  * the value, or the preset and fields of an add): a removal takes with it every charge that references the removed one (IVA on a fee).
- * An add returns the new set and the charges it added, or an `issue` when the result is not valid.
+ * An add returns the new set and the charges it added, or an `issue` (with the core's `code`) when the result is not valid.
  * @param {object[]} charges The charges in force now.
  * @param {{ chargeId?: string, op: ('set' | 'remove' | 'add'), newValue?: (number | null), add?: object }} change
  * @param {{ card?: boolean }} [options] `card`: the ids and labels a card stores for its management fee and IVA.
- * @returns {{ gone: true } | { target: object, charges: object[], dependents: object[] } | { charges: object[], added: object[] } | { issue: string }}
+ * @returns {{ gone: true } | { target: object, charges: object[], dependents: object[] } | { charges: object[], added: object[] } | { issue: string, code: string }}
  */
 export function rebuildCharges(charges, { chargeId, op, newValue, add }, { card = false } = {}) {
   if (op === 'add') return rebuildAdd(charges, add, card);

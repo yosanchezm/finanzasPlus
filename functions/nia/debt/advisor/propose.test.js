@@ -1,6 +1,8 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_LEGAL, normalizeRate } from '../../../../packages/finance-core/index.js';
+import { DEFAULT_LEGAL, normalizeRate, serializeTerms } from '../../../../packages/finance-core/index.js';
+import { MENTIONS } from '../extract.js';
 import { proposeSetup } from './propose.js';
 
 const TODAY = '2026-10-13';
@@ -242,5 +244,122 @@ describe('the questions of a card, in order', () => {
   it('asks the name first, then the rate, then the cycle days and the rule, then the preset amounts', () => {
     const proposal = propose(card({ name: '', rate: null, rateValue: 2, presets: { fee: null, life: null } }));
     expect(fields(proposal)).toEqual(['name', 'convention', 'statementDay', 'dueDay', 'minRule', 'amount:fee', 'amount:life']);
+  });
+});
+
+// ---- adjust an existing debt (S6b, ADV6, ADV8) ----
+
+describe('proposeSetup: adjust an existing debt', () => {
+  const fixtureCard = JSON.parse(readFileSync(new URL('../../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+  // Visa: statement day 15, due day 30, 28 % EA, a 9,000 fee with its IVA, mora at the usury cap.
+  const visa = (extra = {}) => ({ $id: 'c1', name: 'Visa', kind: 'card', status: 'active', lender: 'Bancolombia', ownerScope: 'shared', termsJson: serializeTerms({ ...fixtureCard.terms, late: { mode: 'usury', graceDays: 0 } }), events: [], ...extra });
+  const vehicleTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-09-10', rate: { convention: 'EA', value: 24 }, system: 'french', periodicity: 'monthly', n: 36, firstDueOn: '2026-10-10' };
+  const vehicle = () => ({ $id: 'l1', name: 'Crédito Vehículo', kind: 'vehicle', status: 'active', lender: '', ownerScope: 'shared', termsJson: serializeTerms(vehicleTerms), events: [{ $id: 'e0', debtId: 'l1', householdId: 'h1', kind: 'disbursement', effectiveOn: '2026-09-10', amountMinor: 10000000, payloadJson: '{}', actorId: 'telegram:1', source: 'telegram', dedupeKey: 'seed:e0', $createdAt: '2026-09-10T12:00:00.000Z' }] });
+  const adjust = (patch = {}, cardPatch = {}) => card({ adjust: true, adjustKind: null, debtRef: 'visa', changeOn: null, rate: null, rateValue: null, presets: {}, ...patch }, cardPatch);
+  const EA = (value) => normalizeRate({ convention: 'EA', value });
+  const steps = (proposal) => proposal.steps.map((step) => step.action);
+
+  it('lists the stored statement day 15 against «siempre fue el 20» as a terms_correction, and offers no draft of a new debt', () => {
+    const proposal = propose(adjust({ adjustKind: 'fix' }, { statementDay: 20 }), [visa()]);
+
+    expect(proposal).toMatchObject({ mode: 'adjust', draft: null, questions: [], invalid: [], unsupported: [] });
+    expect(proposal.steps).toEqual([{ action: 'terms_correction', draft: { card: { statementDay: 20 } }, label: 'Corregir el día de corte a 20' }]);
+  });
+
+  it('corrects only what differs: a statement day equal to the stored one is not a step, and says so', () => {
+    const same = propose(adjust({ adjustKind: 'fix' }, { statementDay: 15 }), [visa()]);
+    const partly = propose(adjust({ adjustKind: 'fix' }, { statementDay: 15, dueDay: 25 }), [visa()]);
+
+    expect(same.steps).toEqual([]);
+    expect(codes(same.assumptions)).toContain('same_as_stored');
+    expect(partly.steps[0].draft).toEqual({ card: { dueDay: 25 } });
+  });
+
+  it('never asks fix or change for card days and minimum payment: a correction is the only way to record them', () => {
+    const proposal = propose(adjust({}, { statementDay: 20, minRule: 'pct_balance', minPct: 10 }), [visa()]);
+
+    expect(proposal.questions).toEqual([]);
+    expect(proposal.steps[0]).toMatchObject({ action: 'terms_correction', draft: { card: { statementDay: 20, minPayment: { rule: 'pct_balance', pct: 10 } } } });
+    expect(codes(proposal.assumptions)).not.toContain('card_days_as_correction');
+    expect(codes(propose(adjust({ adjustKind: 'change' }, { statementDay: 20 }), [visa()]).assumptions)).toContain('card_days_as_correction');
+  });
+
+  it('turns «bajó la tasa el mes pasado» into a rate_change dated by the user, and the same rate as a correction when it was wrong from the start', () => {
+    const change = propose(adjust({ adjustKind: 'change', rate: EA(22), rateValue: 22, changeOn: '2026-09-13' }), [vehicle()]);
+    const fix = propose(adjust({ adjustKind: 'fix', rate: EA(22), rateValue: 22, debtRef: 'vehiculo' }), [vehicle()]);
+
+    expect(change.steps).toEqual([{ action: 'rate_change', draft: { effectiveOn: '2026-09-13', rate: EA(22) }, label: expect.stringContaining('Cambiar la tasa') }]);
+    expect(fix.steps).toEqual([{ action: 'terms_correction', draft: { rate: EA(22) }, label: expect.stringContaining('Corregir la tasa') }]);
+  });
+
+  it('asks fix_or_change with the two buttons when the rate differs and it cannot tell, and does not ask when the rate is the stored one', () => {
+    const ambiguous = propose(adjust({ rate: EA(22), rateValue: 22, debtRef: 'vehiculo' }), [vehicle()]);
+    const same = propose(adjust({ rate: EA(24), rateValue: 24, debtRef: 'vehiculo' }), [vehicle()]);
+
+    expect(ambiguous.questions).toEqual([{ field: 'fix_or_change', text: expect.stringContaining('Crédito Vehículo'), options: ['fix', 'change'], blocking: true }]);
+    expect(ambiguous.steps).toEqual([]);
+    expect(same.questions).toEqual([]);
+    expect(codes(same.assumptions)).toContain('same_as_stored');
+  });
+
+  it('asks the convention of a stated rate before anything else', () => {
+    const proposal = propose(adjust({ adjustKind: 'change', rate: null, rateValue: 22, debtRef: 'vehiculo' }), [vehicle()]);
+
+    expect(fields(proposal)).toEqual(['convention']);
+    expect(proposal.questions[0].options).toEqual(['EA', 'NAMV', 'MV', 'NATV', 'NATA']);
+  });
+
+  it('puts the corrections first and then the rest in the order of the description: rate, charges, mora', () => {
+    const proposal = propose(adjust({ adjustKind: 'change', rate: EA(22), rateValue: 22, presets: { gmf: true }, lateStated: 'none' }, { dueDay: 25 }), [visa()]);
+
+    expect(steps(proposal)).toEqual(['terms_correction', 'rate_change', 'charge_change', 'late_policy']);
+    expect(proposal.steps[2].draft).toEqual({ effectiveOn: TODAY, op: 'add', add: { presets: { gmf: true }, charge: null } });
+    expect(proposal.steps[3].draft).toEqual({ effectiveOn: TODAY, late: { mode: 'none', graceDays: 0 } });
+  });
+
+  it('skips a charge the debt already has, and a mora policy that is already in force, saying why', () => {
+    const proposal = propose(adjust({ presets: { fee: 45000, iva: 19 }, lateStated: 'usury' }), [visa()]);
+
+    expect(proposal.steps).toEqual([]);
+    expect(codes(proposal.assumptions)).toEqual(expect.arrayContaining(['charge_exists', 'late_same']));
+  });
+
+  it('asks the amount of a preset that came without one, and reports a charge it cannot build', () => {
+    const missing = propose(adjust({ presets: { life: null } }), [visa()]);
+    const dangling = propose(adjust({ charges: [{ kind: 'tax', label: 'Extra', basis: 'pctOfCharge', value: 10, cadence: 'per_installment', refLabel: 'no existe' }] }), [visa()]);
+
+    expect(fields(missing)).toEqual(['amount:life']);
+    expect(dangling.steps).toEqual([]);
+    expect(codes(dangling.invalid)).toEqual(['charge_ref_unknown']);
+  });
+
+  it('answers «no soportado aún» for the card limit and the other fields it cannot save, with no step and no pretence of saving', () => {
+    const limit = propose(adjust({ mentions: ['card_limit'] }), [visa()]);
+
+    expect(limit.mode).toBe('adjust');
+    expect(limit.steps).toEqual([]);
+    expect(limit.unsupported).toEqual([{ code: 'card_limit', text: expect.stringContaining('no soportado aún') }]);
+    for (const code of MENTIONS) {
+      const proposal = propose(adjust({ mentions: [code] }), [visa()]);
+      expect(codes(proposal.unsupported)).toEqual([code]);
+      expect(proposal.unsupported[0].text).toContain('no soportado aún');
+      expect(proposal.steps).toEqual([]);
+    }
+    expect(codes(propose(adjust({ lateStated: 'whole_installment' }), [visa()]).unsupported)).toEqual(['mora_base']);
+  });
+
+  it('keeps the supported steps next to the unsupported ones', () => {
+    const proposal = propose(adjust({ adjustKind: 'fix', mentions: ['card_limit'] }, { statementDay: 20 }), [visa()]);
+
+    expect(steps(proposal)).toEqual(['terms_correction']);
+    expect(codes(proposal.unsupported)).toEqual(['card_limit']);
+  });
+
+  it('says which debt when it cannot find or choose one', () => {
+    const two = [visa(), visa({ $id: 'c2', name: 'Mastercard' })];
+
+    expect(codes(propose(adjust({ debtRef: 'hipoteca' }, { statementDay: 20 }), two).invalid)).toEqual(['debt_not_found']);
+    expect(codes(propose(adjust({ debtRef: 'tarjeta' }, { statementDay: 20 }), two).invalid)).toEqual(['debt_ambiguous']);
+    expect(propose(adjust({ debtRef: 'tarjeta' }, { statementDay: 20 }), two).invalid[0].text).toContain('Mastercard');
   });
 });

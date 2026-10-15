@@ -119,3 +119,17 @@ describe('mergeCase', () => {
     expect(full).toEqual(frozen);
   });
 });
+
+describe('mergeCase: adjusting an existing debt', () => {
+  const adjusting = (patch = {}) => stored({ adjust: true, adjustKind: null, debtRef: 'visa', changeOn: null, ...patch });
+
+  it('keeps the debt, the adjust flag and the kind the user chose across answers', () => {
+    const merged = mergeCase(adjusting(), blank({ adjust: false, adjustKind: 'fix', debtRef: '', changeOn: '2026-09-13' }));
+
+    expect(merged).toMatchObject({ adjust: true, adjustKind: 'fix', debtRef: 'visa', changeOn: '2026-09-13' });
+  });
+
+  it('does not let a later answer without a kind erase the one already chosen', () => {
+    expect(mergeCase(adjusting({ adjustKind: 'change' }), blank({ adjustKind: null })).adjustKind).toBe('change');
+  });
+});

@@ -9,6 +9,13 @@ import { buildTerms } from '../preview.js';
 export const DEFAULT_IVA_PCT = 19;
 const DEFAULT_MIN_PCT = 5;
 
+/** The question for a preset that was mentioned without an amount. */
+export const AMOUNT_ASK = {
+  fee: '¿Cuánto es la cuota de manejo o comisión? Escríbela en pesos por cuota.',
+  life: '¿Cuánto es el seguro de vida? Escríbelo como porcentaje del saldo, por ejemplo 0,05.',
+  insurance: '¿Cuánto es el otro seguro? Escríbelo en pesos por cuota.',
+};
+
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const incomplete = (what) => new ValidationError('setup_incomplete', `the described debt is missing ${what}`);
 
