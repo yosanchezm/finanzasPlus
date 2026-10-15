@@ -18,7 +18,8 @@ const CC_1653 = { label: 'Código Civil, art. 1653 (imputación del pago)' };
 const CARD_CONTRACT = { label: 'Contrato y extracto de tu tarjeta de crédito' };
 
 // DRAFT for the owner review (gate G): neutral, informational Spanish. Every entry stays unreviewed (`reviewedOn: null`)
-// until the owner approves its exact text and sources. The Ley 546 and Ley 1555 keys arrive with S3.
+// until the owner approves its exact text and sources. The Ley 546 and Ley 1555 texts claim only what the app does: they name
+// the law, say what it is about, and say that its scope for the user's debt is not verified here.
 export const EXPLAIN_COPY = {
   'legal.usury_ibc': {
     text:
@@ -104,6 +105,42 @@ export const EXPLAIN_COPY = {
       'En una tarjeta, los intereses de las compras corrientes se cobran sobre el saldo que quedó sin pagar después de la fecha límite de pago. Si pagas el extracto completo hasta esa fecha, esa parte no genera intereses en el siguiente corte. ' +
       'Si solo pagas el mínimo, el resto sigue generando intereses y el siguiente extracto los cobra. Por eso los intereses pueden bajar de un extracto al siguiente aunque la tasa no haya cambiado: depende de cuánto pagaste y cuándo.',
     sources: [CARD_CONTRACT, { label: 'Método de cálculo de la app para tarjetas (aproximado)' }],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'legal.ley546': {
+    text:
+      'La Ley 546 de 1999 es la ley marco de la financiación de vivienda en Colombia. Los créditos de vivienda tienen reglas propias, por ejemplo sobre las tasas de interés y la mora, que pueden ser distintas de las de un crédito de consumo. ' +
+      'Por eso el tope de usura de vivienda se registra a mano en la app y las reglas de mora de vivienda no se aplican. ' +
+      'Esta guía solo explica el marco general: no hace ningún cálculo con las reglas de esa ley. Para tu caso, revisa el contrato y confirma con tu entidad.',
+    sources: [{ label: 'Ley 546 de 1999 (normas en materia de vivienda y su financiación)' }],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'legal.ley1555': {
+    text:
+      'La Ley 1555 de 2012 trata del prepago de los créditos: abonar a la deuda por adelantado, total o parcialmente, sin penalidad, y escoger si el abono reduce el plazo (menos cuotas) o reduce el valor de la cuota. ' +
+      'Esta guía toma como referencia un tope de 880 salarios mínimos mensuales, pero el alcance exacto de la ley para tu crédito (tipo de crédito, monto y fecha de desembolso) no está verificado, así que no se debe dar por cierto. ' +
+      'Los créditos de vivienda tienen además sus propias reglas (Ley 546 de 1999). Revisa tu contrato y confirma con tu entidad antes de abonar.',
+    sources: [{ label: 'Ley 1555 de 2012 (prepago de créditos sin penalidad)' }, { label: 'Ley 546 de 1999 (normas en materia de vivienda y su financiación)' }],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'restructure_whatif.sample': {
+    text:
+      'Reestructurar o refinanciar una deuda es acordar con la entidad nuevas condiciones: plazo, tasa o cuota. Lo que está vencido (capital, intereses, cargos, impuestos y mora) normalmente se suma al saldo, y la deuda nueva arranca con ese valor. ' +
+      'Eso puede aliviar la cuota, pero los intereses se cobran sobre un saldo mayor y el costo total suele subir. Si la entidad perdona la mora, el saldo nuevo es menor. ' +
+      'Lo que aplica en tu caso lo define el acuerdo con tu entidad; este cálculo es solo una simulación de la app.',
+    sources: [{ label: 'Acuerdo de reestructuración con tu entidad financiera' }, { label: 'Método de cálculo de la app para saldos vencidos' }],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'prepayment.sample': {
+    text:
+      'Un abono extra es un pago adicional a la cuota que se aplica a la deuda por adelantado. Puedes usarlo para reducir el plazo (la cuota se mantiene y terminas antes) o para reducir la cuota (el plazo se mantiene y pagas menos cada mes). ' +
+      'Reducir el plazo suele ahorrar más intereses; reducir la cuota alivia el flujo mensual. ' +
+      'Antes de abonar, pide a tu entidad la confirmación por escrito de cómo aplicará el abono y si cobra alguna penalización.',
+    sources: [{ label: 'Contrato de tu crédito y condiciones de prepago de tu entidad' }, { label: 'Método de cálculo de la app para abonos extra (aproximado)' }],
     reviewedOn: null,
     reviewedHash: null,
   },

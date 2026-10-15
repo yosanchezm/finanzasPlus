@@ -5,13 +5,23 @@ import { explainFacts } from '../../src/explain/explain.js';
 import { reviewedCopy } from '../helpers/explainCopy.js';
 
 // The draft copy of the loan topics (S1): legal constants for the usury and IBC, mora and GMF explanations, plus one
-// sample per topic, and the samples of the two card topics (S2). Every entry waits for the owner review (gate G), so
-// none carries a date or a hash.
+// sample per topic, the samples of the two card topics (S2), and the Ley 546 and Ley 1555 constants and the samples of the
+// restructure and prepayment topics (S3). Every entry waits for the owner review (gate G), so none carries a date or a hash.
 const S1_TOPICS = ['rate_conventions', 'usury_ibc', 'mora', 'payment_allocation', 'charges'];
 const S2_TOPICS = ['card_statement', 'card_interest_drop'];
-const DRAFT_KEYS = ['legal.usury_ibc', 'legal.mora', 'legal.gmf', ...S1_TOPICS.map((topic) => `${topic}.sample`), ...S2_TOPICS.map((topic) => `${topic}.sample`)];
+const S3_TOPICS = ['restructure_whatif', 'prepayment'];
+const DRAFT_KEYS = [
+  'legal.usury_ibc',
+  'legal.mora',
+  'legal.gmf',
+  'legal.ley546',
+  'legal.ley1555',
+  ...S1_TOPICS.map((topic) => `${topic}.sample`),
+  ...S2_TOPICS.map((topic) => `${topic}.sample`),
+  ...S3_TOPICS.map((topic) => `${topic}.sample`),
+];
 
-describe('shipped explain copy (S1 and S2 draft)', () => {
+describe('shipped explain copy (S1 to S3 draft)', () => {
   it.each(DRAFT_KEYS)('has a draft entry for %s with text, sources and no review', (key) => {
     const entry = EXPLAIN_COPY[key];
 
@@ -41,13 +51,30 @@ describe('shipped explain copy (S1 and S2 draft)', () => {
     expect(EXPLAIN_COPY['legal.gmf'].text).toContain(facts.text.gmfRate);
   });
 
-  it('releases no topic yet: every shipped entry is unreviewed and the Ley 546 and Ley 1555 keys are still missing', () => {
+  it('cites Ley 546 de 1999 and Ley 1555 de 2012 by name, and never claims more than the app checks', () => {
+    const labels = (key) => EXPLAIN_COPY[key].sources.map((source) => source.label).join(' | ');
+    const ley546 = EXPLAIN_COPY['legal.ley546'].text;
+    const ley1555 = EXPLAIN_COPY['legal.ley1555'].text;
+
+    expect(labels('legal.ley546')).toMatch(/Ley 546 de 1999/);
+    expect(labels('legal.ley1555')).toMatch(/Ley 1555 de 2012/);
+    expect(ley546).toMatch(/no hace ningún cálculo/);
+    expect(ley546).toMatch(/no se aplican/);
+    expect(ley1555).toMatch(/sin penalidad/);
+    expect(ley1555).toMatch(/plazo/);
+    expect(ley1555).toMatch(/cuota/);
+    expect(ley1555).toMatch(/no está verificado/);
+  });
+
+  it('releases no topic yet: every shipped entry is unreviewed and every key a topic needs exists', () => {
     const status = copyStatus(EXPLAIN_COPY);
 
     expect(status.reviewed).toEqual([]);
     expect(status.unreviewed).toEqual(expect.arrayContaining(DRAFT_KEYS));
     expect(Object.keys(EXPLAIN_COPY).sort()).toEqual([...DRAFT_KEYS].sort());
     expect(releasedTopics()).toEqual([]);
-    expect(topicCopyKeys('usury_ibc').filter((key) => !EXPLAIN_COPY[key])).toEqual(['legal.ley546']);
+    for (const topic of [...S1_TOPICS, ...S2_TOPICS, ...S3_TOPICS]) {
+      expect(topicCopyKeys(topic).filter((key) => !EXPLAIN_COPY[key]), topic).toEqual([]);
+    }
   });
 });

@@ -6,7 +6,8 @@ import { rateOf } from './rates.js';
 
 // Facts of `usury_ibc` (spec: Usury and IBC topic): the cap in force for the debt's modality with its month and origin,
 // the IBC behind it, and a stale or unverified warning that is shown and never blocks. No cap known is reported as such.
-// The Ley 546 explanation for mortgages arrives with S3. Pure and read-only.
+// A mortgage also carries the Ley 546 notice: the law is explained from the reviewed copy and no figure is computed with it.
+// Pure and read-only.
 
 const IBC_MULTIPLE = 1.5; // usury = 1.5 x IBC (Codigo de Comercio, art. 884)
 
@@ -39,6 +40,7 @@ export function usuryFacts(ctx) {
   } else {
     notices.push({ code: 'cap_unknown' });
   }
+  if (modality === 'mortgage') notices.push({ code: 'ley546_no_computation' });
   if (!found) return { status: 'generic', numbers, text, approximate, notices };
   numbers.rateEA = round4(toEffectiveAnnual(found.rate));
   text.rateEA = percentText(numbers.rateEA);

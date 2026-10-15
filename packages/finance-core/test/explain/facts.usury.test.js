@@ -45,8 +45,19 @@ describe('explain facts: usury_ibc', () => {
     expect(result.status).toBe('ok');
     expect(result.numbers.capEA).toBeUndefined();
     expect(result.numbers.rateEA).toBe(24);
-    expect(codes(result)).toEqual(['cap_unknown']);
+    expect(codes(result)).toEqual(['cap_unknown', 'ley546_no_computation']);
     expect(result.text.modality).toBe('mortgage');
+  });
+
+  it('explains Ley 546 for a mortgage without computing anything, whether or not a cap is registered', () => {
+    const table = resolveLegal([{ kind: 'usury', modality: 'mortgage', value: 2400, validFrom: '2026-10-01', validTo: '2026-10-31', source: 'Manual', verified: true }]);
+    const withCap = facts(debt(french({ kind: 'mortgage' })), '2026-10-13', {}, table);
+    const consumer = facts(debt(french()), '2026-10-13');
+
+    expect(withCap.numbers.capEA).toBe(24);
+    expect(codes(withCap)).toEqual(['ley546_no_computation']);
+    expect(withCap.copyKeys).toEqual(['legal.usury_ibc', 'legal.ley546', 'usury_ibc.sample']);
+    expect(codes(consumer)).not.toContain('ley546_no_computation');
   });
 
   it('warns when the stated rate is above the cap and not when it is below', () => {

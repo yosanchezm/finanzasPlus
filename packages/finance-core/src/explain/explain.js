@@ -5,14 +5,16 @@ import { allocationFacts } from './facts/allocation.js';
 import { cardInterestDropFacts, cardStatementFacts } from './facts/card.js';
 import { chargesFacts } from './facts/charges.js';
 import { moraFacts } from './facts/mora.js';
+import { prepaymentFacts } from './facts/prepayment.js';
 import { ratesFacts } from './facts/rates.js';
+import { restructureFacts } from './facts/restructure.js';
 import { usuryFacts } from './facts/usury.js';
 import { TOPIC_KINDS } from './topics.js';
 
 // Facts of an explanation (design G1). Pure and read-only. An unknown topic is rejected, a topic that does not fit
 // the debt kind is "not_applicable", and a topic whose copy is not released is "under_review". Otherwise the topic's
-// builder adds the figures (`numbers`, and `text` with the same figures pre-formatted). A topic with no builder yet
-// (the restructure and prepayment topics of S3) keeps the generic answer.
+// builder adds the figures (`numbers`, and `text` with the same figures pre-formatted). A topic with no builder keeps the
+// generic answer.
 const BUILDERS = {
   rate_conventions: ratesFacts,
   usury_ibc: usuryFacts,
@@ -21,6 +23,8 @@ const BUILDERS = {
   charges: chargesFacts,
   card_statement: cardStatementFacts,
   card_interest_drop: cardInterestDropFacts,
+  restructure_whatif: restructureFacts,
+  prepayment: prepaymentFacts,
 };
 
 const sameSource = (a, b) => a.label === b.label && a.url === b.url;
