@@ -1,4 +1,4 @@
-import { LATE_MODES, PERIODICITIES, ValidationError, isIsoDate, normalizeLate, normalizeRate } from '../../../packages/finance-core/index.js';
+import { EXPLAIN_TOPICS, LATE_MODES, PERIODICITIES, ValidationError, isIsoDate, normalizeLate, normalizeRate } from '../../../packages/finance-core/index.js';
 import { readLegalRate } from './legal.js';
 import { SYSTEMS, readChargeChange, readPlanChange, readRestructure } from './planChange.js';
 
@@ -6,7 +6,7 @@ import { SYSTEMS, readChargeChange, readPlanChange, readRestructure } from './pl
 // user said. Validation, arithmetic and every decision happen in code (NDA-1).
 // Pure and Node 16 safe.
 
-export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list', 'legal_rate', 'rate_change', 'charge_change', 'restructure', 'late_policy'];
+export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list', 'legal_rate', 'rate_change', 'charge_change', 'restructure', 'late_policy', 'explain'];
 export const STRATEGIES = ['reduce_term', 'reduce_installment', 'advance_installments'];
 export const MAX_CHARGES = 6;
 
@@ -16,7 +16,7 @@ const CHARGE_BASES = ['fixed', 'pctOutstanding', 'pctOriginal', 'pctOfSubtotal']
 const INTEREST_FREE_KINDS = ['family', 'informal'];
 const ZERO_RATE = { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' };
 
-const SCHEMA = '{"action":"create|pay|simulate|advise|list|legal_rate|rate_change|charge_change|restructure|late_policy","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"legal":{"kind":"usury|ibc|smmlv|null","modality":"string|null","month":"string|number|null","year":number|null,"value":number|null}|null,"planChange":{"effectiveOn":"YYYY-MM-DD|null","mode":"keep_term|keep_installment|null","chargeRef":"string|null","op":"set|remove|add|null","newValue":number|null,"n":number|null,"system":"french|german|bullet|interest_only|null","periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","firstDueOn":"YYYY-MM-DD|null","waiveLate":boolean|null}|null,"late":{"mode":"none|usury|fixed|contract_multiple|null","rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"multiple":number|null,"graceDays":number|null,"effectiveOn":"YYYY-MM-DD|null"}|null,"missingFields":["string"]}';
+const SCHEMA = '{"action":"create|pay|simulate|advise|list|legal_rate|rate_change|charge_change|restructure|late_policy|explain","topic":"' + EXPLAIN_TOPICS.join('|') + '|null","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"legal":{"kind":"usury|ibc|smmlv|null","modality":"string|null","month":"string|number|null","year":number|null,"value":number|null}|null,"planChange":{"effectiveOn":"YYYY-MM-DD|null","mode":"keep_term|keep_installment|null","chargeRef":"string|null","op":"set|remove|add|null","newValue":number|null,"n":number|null,"system":"french|german|bullet|interest_only|null","periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","firstDueOn":"YYYY-MM-DD|null","waiveLate":boolean|null}|null,"late":{"mode":"none|usury|fixed|contract_multiple|null","rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"multiple":number|null,"graceDays":number|null,"effectiveOn":"YYYY-MM-DD|null"}|null,"missingFields":["string"]}';
 
 const conversationLines = (history) => (history || [])
   .map((item) => `${item.role === 'assistant' ? 'Nia' : 'Usuario'}: ${item.content}`)
@@ -36,6 +36,7 @@ export function debtPrompt(text, debts, history, { today, timezone = 'America/Bo
     'Eres Nia. Extrae los datos de una solicitud sobre deudas (préstamos y tarjetas) de un hogar. Solo extraes: no calcules cuotas, saldos, intereses ni equivalencias de tasa; el sistema lo hace.',
     `La fecha de hoy en ${timezone} es ${today}. La moneda es ${currency}; los montos son enteros en pesos, no centavos.`,
     'action: create para registrar una deuda nueva, pay para un pago o abono, simulate para simular un abono extra, advise para pedir una recomendación y list para ver las deudas. legal_rate registra una tasa legal: la usura, el IBC o el salario mínimo (SMMLV) de un mes o año, por ejemplo “la usura de noviembre es 28.2”. rate_change cambia la tasa de una deuda que ya existe, por ejemplo “bajó la tasa del crédito a 22% EA desde hoy”. charge_change cambia el valor de un seguro o cargo que una deuda ya tiene, o lo quita, por ejemplo “quita el seguro de vida del crédito”; también se usa cuando piden agregar uno nuevo. restructure reestructura una deuda que ya existe: rehace el plan de cuotas con el saldo actual y lo vencido, por ejemplo “reestructura el crédito a 48 cuotas, primera cuota el 2026-12-05”.',
+    'explain responde una pregunta o pide explicar un concepto de deudas (tasas y sus convenciones, usura o IBC, mora, abonos, cargos, GMF, corte de la tarjeta, reestructuración, abonos extra); no escribe nada. Con explain, topic es uno de: ' + EXPLAIN_TOPICS.join(', ') + '; usa null si no es claro cuál. Si el usuario da una tasa o un monto para el ejemplo, cópialos en rate y amountMinor tal como los dijo. Si pide registrar, pagar o cambiar algo, no es explain.',
     'late_policy configura la mora (intereses por cuotas vencidas) de una deuda que ya existe, por ejemplo “activa mora a la usura en el crédito del banco” o “quita la mora del préstamo a mi hermano”. En late: mode es usury si la mora va a la tasa máxima legal (usura), fixed si da una tasa fija propia (esa tasa va en late.rate, igual que rate al crear), contract_multiple si es un múltiplo de la tasa del contrato (late.multiple, por ejemplo 1.5 veces), none si no quiere mora; graceDays son los días de gracia que dijo (null si no dijo) y effectiveOn la fecha desde la que rige, tal como la dijo, o null si no la dijo. Si no es una política de mora, late es null.',
     'debtRef es el nombre, entidad o tipo de la deuda tal como lo dijo el usuario; usa null si no menciona ninguna.',
     'En rate copia lo que dijo el usuario: value, period (de cuánto es la tasa), compounding (effective si es efectiva o periódica como “2,1% mensual”, nominal si dice nominal) y timing (arrears si es vencida, advance si es anticipada). Si no lo dijo, usa null; nunca lo supongas.',
@@ -188,6 +189,17 @@ function readLatePolicy(raw, { today }, missingFields, problems) {
   return { needsConvention, latePolicy: { effectiveOn, late, ...(rateValue === undefined ? {} : { rateValue }) } };
 }
 
+// The explain request (S0): the closed topic (an unknown or missing one means no topic, so Nia shows the menu and never
+// guesses), the rate the user stated for the example, and an optional amount. The debt selector is the common `debtRef`.
+// A stated rate without its convention is kept as a bare `rateValue`; nothing is ever defaulted.
+function readExplain(input, problems) {
+  const topic = EXPLAIN_TOPICS.includes(input.topic) ? input.topic : null;
+  const stated = Boolean(input.rate) && typeof input.rate.value === 'number' && Number.isFinite(input.rate.value);
+  const { rate, rateValue } = stated ? readRate(input.rate, 'other', problems) : {};
+  const amountMinor = readAmount(input.amountMinor, problems);
+  return { topic, stated: rate ?? null, rateValue: rateValue ?? null, amountMinor: amountMinor ?? null };
+}
+
 /**
  * Turns the model's JSON into a validated request. Nothing here trusts the model:
  * `missingFields` lists what the user did not say, `problems` what is invalid
@@ -212,6 +224,7 @@ export function normaliseDebtExtraction(raw, { today }) {
     legalRate: null,
     planChange: null,
     latePolicy: null,
+    explain: null,
     missingFields,
     problems,
   };
@@ -243,6 +256,8 @@ export function normaliseDebtExtraction(raw, { today }) {
     result.planChange = planChange;
   } else if (action === 'late_policy') {
     Object.assign(result, readLatePolicy(input.late, { today }, missingFields, problems));
+  } else if (action === 'explain') {
+    result.explain = readExplain(input, problems);
   } else if (action === 'restructure') {
     const stated = Boolean(input.rate) && typeof input.rate.value === 'number' && Number.isFinite(input.rate.value);
     const { rate, rateValue, needsConvention } = stated ? readRate(input.rate, 'other', problems) : {};

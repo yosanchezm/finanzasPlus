@@ -66,14 +66,67 @@ describe('guardParaphrase', () => {
     expect(guardParaphrase('Tu crédito Libre 78 es el más caro.', facts(), ['Libre 77'])).toBeNull();
   });
 
-  it('rejects empty and non-text replies and anything over 4096 characters', () => {
+  it('rejects empty and non-text replies and anything over 1200 characters', () => {
     expect(guardParaphrase('', facts())).toBeNull();
     expect(guardParaphrase('   ', facts())).toBeNull();
     expect(guardParaphrase(undefined, facts())).toBeNull();
     expect(guardParaphrase({ reply: 'x' }, facts())).toBeNull();
-    expect(MAX_REPLY).toBe(4096);
-    expect(guardParaphrase('a'.repeat(MAX_REPLY), facts())).not.toBeNull();
-    expect(guardParaphrase('a'.repeat(MAX_REPLY + 1), facts())).toBeNull();
+    expect(MAX_REPLY).toBe(1200);
+    expect(guardParaphrase('a'.repeat(1200), facts())).not.toBeNull();
+    expect(guardParaphrase('a'.repeat(1201), facts())).toBeNull();
+  });
+
+  it('measures the cap on the trimmed text, so surrounding blanks do not count', () => {
+    expect(guardParaphrase(` ${'a'.repeat(1200)} `, facts())).toBe('a'.repeat(1200));
+  });
+
+  it('takes a different cap from the caller', () => {
+    expect(guardParaphrase('a'.repeat(100), facts(), [], { maxChars: 100 })).not.toBeNull();
+    expect(guardParaphrase('a'.repeat(101), facts(), [], { maxChars: 100 })).toBeNull();
+    expect(guardParaphrase('a'.repeat(1201), facts(), [], { maxChars: 2000 })).not.toBeNull();
+  });
+
+  it('rejects a changed digit (28.32 to 28.23) and an invented percentage', () => {
+    const f = { asOf: '2026-10-13', numbers: { ea: 28.32 }, text: { ea: '28,32 %' }, notices: [] };
+    expect(guardParaphrase('Tu tasa es 28,32 % efectiva anual.', f)).not.toBeNull();
+    expect(guardParaphrase('Tu tasa es 28,23 % efectiva anual.', f)).toBeNull();
+    expect(guardParaphrase('Tu tasa es 42 % efectiva anual.', f)).toBeNull();
+  });
+
+  it.each([
+    'Pagas cuatro por mil de GMF.',
+    'Tu tasa es veintiocho por ciento.',
+    'Te quedan un millón de pesos.',
+    'Pagarías el doble de intereses.',
+    'Es la mitad de la cuota.',
+    'Te cobran cien pesos.',
+    'Son dos mil pesos.',
+    'Quedan tres cuotas.',
+    'Debes quinientos mil pesos.',
+    'Tu tasa es veinticinco por ciento.',
+    'Son treinta días.',
+    'Pagas el triple.',
+    'Sumas doscientos pesos.',
+    'CUATRO por MIL',
+    'Cuántos millones son',
+  ])('rejects a spelled-out number: %s', (reply) => {
+    expect(guardParaphrase(reply, { asOf: '2026-10-13', numbers: {}, text: {}, notices: [] })).toBeNull();
+  });
+
+  it.each([
+    'Tienes un crédito y una tarjeta.',
+    'Uno de los créditos tiene mora.',
+    'Sin números escritos en palabras, solo la tasa efectiva anual.',
+    'Las dosis y los sentimientos no son números.',
+    'Camila revisa la mora de la tarjeta.',
+  ])('keeps accepting words that are not numbers, including the articles un, una and uno: %s', (reply) => {
+    expect(guardParaphrase(reply, { asOf: '2026-10-13', numbers: {}, text: {}, notices: [] })).toBe(reply);
+  });
+
+  it('rejects a spelled-out number even when its digits would be allowed', () => {
+    const f = { asOf: '2026-10-13', numbers: { n: 28 }, text: {}, notices: [] };
+    expect(guardParaphrase('Son 28 días.', f)).not.toBeNull();
+    expect(guardParaphrase('Son veintiocho días.', f)).toBeNull();
   });
 
   it('rejects everything with digits when the facts are unusable', () => {

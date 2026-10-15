@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { debtPrompt, normaliseDebtExtraction } from './extract.js';
+import { EXPLAIN_TOPICS } from '../../../packages/finance-core/index.js';
+import { ACTIONS, debtPrompt, normaliseDebtExtraction } from './extract.js';
 
 const TODAY = '2026-10-13';
 const norm = (raw) => normaliseDebtExtraction(raw, { today: TODAY });
@@ -448,5 +449,69 @@ describe('normaliseDebtExtraction: late_policy (F2)', () => {
     expect(prompt).toContain('contract_multiple');
     expect(prompt).toContain('graceDays');
     expect(prompt).toMatch(/mora/i);
+  });
+});
+
+describe('normaliseDebtExtraction: explain', () => {
+  it('lists the explain action, its closed topic enum and the optional debt selector in the prompt', () => {
+    const prompt = debtPrompt('¿qué es la mora?', [], [], { today: TODAY });
+    expect(prompt).toContain('explain');
+    expect(prompt).toContain('"topic"');
+    for (const topic of EXPLAIN_TOPICS) expect(prompt).toContain(topic);
+    expect(ACTIONS).toContain('explain');
+    expect(ACTIONS).not.toContain('setup');
+    expect(ACTIONS).not.toContain('terms_correction');
+  });
+
+  it('keeps a topic of the closed catalogue, the debt selector, the stated rate and the amount', () => {
+    const result = norm({
+      action: 'explain',
+      topic: 'rate_conventions',
+      debtRef: 'el crédito del banco',
+      rate: { value: 25.2, period: 'annual', compounding: 'nominal', timing: 'arrears', rawText: '25.2% NAMV' },
+      amountMinor: 100000,
+    });
+    expect(result.action).toBe('explain');
+    expect(result.debtRef).toBe('el crédito del banco');
+    expect(result.explain).toMatchObject({ topic: 'rate_conventions', amountMinor: 100000 });
+    expect(result.explain.stated).toMatchObject({ value: 25.2, basis: 'nominal' });
+    expect(result.missingFields).toEqual([]);
+    expect(result.problems).toEqual([]);
+  });
+
+  it.each(EXPLAIN_TOPICS)('accepts the catalogue topic %s', (topic) => {
+    expect(norm({ action: 'explain', topic }).explain.topic).toBe(topic);
+  });
+
+  it.each([['tax_returns'], [''], [null], [undefined], [42], ['MORA'], ['mora '], [['mora']]])('normalizes the unknown or missing topic %j to no topic', (topic) => {
+    const result = norm({ action: 'explain', topic });
+    expect(result.action).toBe('explain');
+    expect(result.explain.topic).toBeNull();
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it('carries no stated rate and no amount when the user gave none, and does not create anything', () => {
+    const result = norm({ action: 'explain', topic: 'mora' });
+    expect(result.explain).toEqual({ topic: 'mora', stated: null, rateValue: null, amountMinor: null });
+    expect(result.create).toBeNull();
+    expect(result.planChange).toBeNull();
+    expect(result.amountMinor).toBeNull();
+  });
+
+  it('keeps a stated rate with no convention as a bare value, never as a rate', () => {
+    const result = norm({ action: 'explain', topic: 'rate_conventions', rate: { value: 2.1, period: 'monthly', compounding: null, timing: null, rawText: '2,1% mensual' } });
+    expect(result.explain.stated).toBeNull();
+    expect(result.explain.rateValue).toBe(2.1);
+  });
+
+  it('records an invalid amount as a problem instead of carrying it', () => {
+    const result = norm({ action: 'explain', topic: 'payment_allocation', amountMinor: -5 });
+    expect(result.explain.amountMinor).toBeNull();
+    expect(result.problems).toContain('negative_amount');
+  });
+
+  it('does not add an explain payload to the other actions', () => {
+    expect(norm({ action: 'list' }).explain).toBeNull();
+    expect(norm({ action: 'pay', amountMinor: 1000 }).explain).toBeNull();
   });
 });

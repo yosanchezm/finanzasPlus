@@ -482,7 +482,9 @@ describe('advise', () => {
     ['Gemini answers no JSON', null],
     ['the reply is not text', { reply: 12345 }],
     ['the reply is empty', { reply: '   ' }],
-    ['the reply is over 4096 characters', { reply: 'a'.repeat(4097) }],
+    ['the reply is over 1200 characters', { reply: 'a'.repeat(1201) }],
+    ['the reply is far over the cap', { reply: 'a'.repeat(4097) }],
+    ['the reply spells a number out', { reply: 'Pagas cuatro por mil de GMF y te quedan veintiocho cuotas.' }],
   ])('falls back to the template and still completes when %s', async (_name, answer) => {
     const w = adviseWorld([answer]);
     await handleDebt(w.deps, ctx());

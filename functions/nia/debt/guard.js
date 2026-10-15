@@ -3,7 +3,25 @@
 // in the facts rejects the reply and the caller sends the deterministic template instead.
 // Pure and Node 16 safe.
 
-export const MAX_REPLY = 4096;
+/** Default cap of every paraphrase: the spec caps any message at 1,200 characters. */
+export const MAX_REPLY = 1200;
+
+// Spelled-out Spanish numbers (dos to noventa, cien, hundreds, mil, millon, billon) and number-like words
+// (doble, triple, mitad), matched on text folded to lowercase ASCII. «un», «una» and «uno» are articles and are
+// not listed. A false rejection only sends the deterministic template, so the cost is safe.
+export const NUMBER_WORDS = new RegExp(
+  '\\b(?:' +
+    [
+      'dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince',
+      'dieciseis|diecisiete|dieciocho|diecinueve|veinte|veinti[a-z]*',
+      'treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa',
+      'cien|ciento|(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s',
+      'mil|millon|millones|billon|billones|doble|triple|mitad',
+    ].join('|') +
+    ')\\b',
+);
+
+const fold = (text) => text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 const TOKEN = /\d+(?:[.,]\d+)*/g;
 
@@ -62,17 +80,19 @@ function allowedNumbers(facts, extra) {
 }
 
 /**
- * Accepts a paraphrase only when it is text of at most 4096 characters and every number in it
- * appears in `facts` (its figures, dates and notices). Words are not checked: the guard is about figures.
+ * Accepts a paraphrase only when it is text of at most `maxChars` characters (1,200 by default), spells no
+ * number out in Spanish and every digit number in it appears in `facts` (its figures, dates and notices).
  * @param {unknown} reply The model's text.
  * @param {object} facts `advise(...).facts`.
  * @param {string[]} [extra] Texts whose numbers are also allowed (for example the debt's own name).
+ * @param {{ maxChars?: number }} [options]
  * @returns {(string | null)} The trimmed reply, or `null` when the caller must use the template.
  */
-export function guardParaphrase(reply, facts, extra = []) {
+export function guardParaphrase(reply, facts, extra = [], { maxChars = MAX_REPLY } = {}) {
   if (typeof reply !== 'string') return null;
   const text = reply.trim();
-  if (text === '' || text.length > MAX_REPLY) return null;
+  if (text === '' || text.length > maxChars) return null;
+  if (NUMBER_WORDS.test(fold(text))) return null;
   const allowed = allowedNumbers(facts, extra);
   return numbersIn(text).every((number) => allowed.has(number)) ? text : null;
 }
