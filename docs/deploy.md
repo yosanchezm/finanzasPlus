@@ -133,6 +133,28 @@ La tabla `legal_rates` (tasas legales del hogar) se crea con la migración. El o
 
 Para volver atrás, redespliega la versión anterior; la tabla puede quedar sin uso y no hace falta borrarla.
 
+### Guía de deudas de Nia: compuerta de revisión y orden de despliegue
+
+Las explicaciones de deudas (`nia:exp`, «¿qué es la mora?») usan textos legales que el dueño debe revisar antes de publicarlos. `npm run package:nia` ejecuta primero `scripts/check-explain-copy.mjs` y **falla mientras haya textos sin revisar o ausentes**. Un tema sin texto revisado responde «Este tema está en revisión» y no muestra cifras.
+
+- **S0 (solo plomería, ningún tema publicado).** Se empaqueta con el override explícito `NIA_ALLOW_UNREVIEWED=1`, que imprime una advertencia visible:
+  - PowerShell: `$env:NIA_ALLOW_UNREVIEWED='1'; npm run package:nia`
+  - Bash: `NIA_ALLOW_UNREVIEWED=1 npm run package:nia`
+- Sin el override, el paquete se rechaza con la lista de claves faltantes: es lo esperado hasta la revisión.
+- **Revisión del dueño (G.1).** `node scripts/check-explain-copy.mjs --print` lista cada clave con su texto y sus fuentes. Con la aprobación, un commit fija `reviewedOn` y `reviewedHash` de cada clave (G.2); un texto editado después de revisarse vuelve a quedar sin revisar. Con G.2 hecho, `npm run package:nia` pasa sin override y el override ya no se usa (G.3).
+- Los cortes S1 a S3 y S4 a S6 se empaquetan con el override hasta que G.2 esté en el repositorio.
+
+| Corte | Qué se despliega | Notas |
+| --- | --- | --- |
+| S0 | Solo el `tar.gz` de Nia | Con `NIA_ALLOW_UNREVIEWED=1`. Sin cambios de esquema |
+| S1 a S3 | Solo el `tar.gz` de Nia | Después de G.2, sin override |
+| S4 | Web y Nia **juntos** | Un Nia anterior ignora `terms_correction` y lee los datos sin corregir |
+| S5 | Nia y web | El refactor de presets no cambia el comportamiento de la web |
+| S6 | Nia | Escribe correcciones: la web de S4 debe estar publicada |
+| S7 | Web (necesita G.2 o el override, porque `build` ejecuta la comprobación) y luego Nia otra vez para `/ayuda` | |
+
+No hay migración de Appwrite en ningún corte: **no ejecutes `npm run migrate:appwrite` por esta funcionalidad**. Antes de revertir S4, anula las correcciones cuyos valores anteriores no deban reaparecer.
+
 ## Verificación local
 
 ```bash

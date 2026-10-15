@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { scanForbiddenApis } from './package-nia.mjs';
+import { scanForbiddenApis, scanSourceDirs } from './package-nia.mjs';
 
 const root = process.cwd();
 const script = resolve(root, 'scripts/package-nia.mjs');
@@ -52,7 +52,8 @@ const importSpecifiers = (source) => {
   return [...found];
 };
 
-const run = (args) => execFileSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+// The shipped explain copy is not reviewed yet (gate G), so packaging needs the explicit override; the gate itself is tested in check-explain-copy.test.mjs.
+const run = (args) => execFileSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NIA_ALLOW_UNREVIEWED: '1' } });
 
 describe('scanForbiddenApis', () => {
   it('reports each Node 16 incompatible API found in the source', () => {
@@ -66,6 +67,25 @@ describe('scanForbiddenApis', () => {
   it('returns nothing for Node 16 safe code and does not match look-alikes', () => {
     expect(scanForbiddenApis('const a = [3, 1].sort(); const b = [...a].reverse(); a.flat(); name.replaceAll("-", "");')).toEqual([]);
     expect(scanForbiddenApis('// findLast and toSorted are mentioned only in a comment\nconst myfindLastThing = 1;')).toEqual([]);
+  });
+});
+
+describe('scanSourceDirs', () => {
+  it('flags array .at(, Object.hasOwn and the Node 17+ APIs in the explain and advisor sources, and skips tests and missing folders', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scan-sources-'));
+    try {
+      writeFileSync(join(dir, 'bad.js'), 'const last = rows.at(-1);\nif (Object.hasOwn(a, b)) rows.toSorted();\n');
+      writeFileSync(join(dir, 'good.js'), 'const last = rows[rows.length - 1];\n');
+      writeFileSync(join(dir, 'bad.test.js'), 'rows.at(-1);\n');
+
+      expect(scanSourceDirs([dir, join(dir, 'missing')])).toEqual([{ file: join(dir, 'bad.js'), found: ['toSorted', '.at()', 'Object.hasOwn'] }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds nothing in the real explain and advisor sources', () => {
+    expect(scanSourceDirs()).toEqual([]);
   });
 });
 
