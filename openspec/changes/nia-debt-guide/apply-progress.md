@@ -359,7 +359,7 @@ None. Packaging does not check that the explain copy matches what the owner read
 
 G.3 (owner: `npm run package:nia` without the override, upload the tarball, confirm in Telegram), S4.CP, and S5 to S7.
 
-## Batch S5 (advisor create): PARTIAL (10/14 tasks: S5a and S5b done; S5c and the checkpoint open)
+## Batch S5 (advisor create): S5a and S5b done here (10/14 tasks); S5c is the next batch below, the S5.CP checkpoint is the owner deploy
 
 Branch: `feat/ndg-s5-advisor-create` (from master 5c31939). The size-review trigger was reached: the slice stood at 1,566 changed lines before S5c (the last group), so the batch stops at the pre-agreed split S5a+S5b | S5c (tasks.md, "Size rule"). S5c is about 550 lines and would take the slice past the 2,000 work-unit limit.
 
@@ -370,7 +370,7 @@ Branch: `feat/ndg-s5-advisor-create` (from master 5c31939). The size-review trig
 - [x] S5a.5 to S5a.6 (`extract.js`: `ACTIONS += setup`, `SetupCase` normalization, card `create` goes to `request.setup`, the `card_in_web` problem is gone)
 - [x] S5b.1 to S5b.2 (`advisor/cardTerms.js`, `advisor/merge.js`)
 - [x] S5b.3 to S5b.4 (`advisor/propose.js`, create mode)
-- [ ] S5c.1 to S5c.4 (handler `startSetup`/answers/`commitSetup`, `pending.js` `nia:min`, `index.js` wiring): NOT started
+- [x] S5c.1 to S5c.4 (handler `startSetup`/answers/`commitSetup`, `pending.js` `nia:min`, `index.js` wiring): done in the S5c batch below
 - [ ] S5.CP checkpoint: tests, build and package are green for S5a+S5b (below); the owner deploy of Nia and web (action 5) waits for S5c, because until then a card or `setup` request is answered with the old «las tarjetas se crean desde la web» reply.
 
 ### Commits
@@ -424,4 +424,64 @@ Triangulation: preset keys in any order, `true` default versus a missing amount,
 
 ### Remaining
 
-S5c (handler `startSetup`, answers, `commitSetup`, `pending.js` `nia:min` and the `awaiting: 'minimum'` stage, `CONVENTION_NEXT.setup`, `index.js` routing, replies built from `proposeSetup`), S5.CP, then S6, S7.
+S5c: see the next batch. Then S5.CP (owner deploy), S6, S7.
+
+## Batch S5c (advisor handler and wiring): COMPLETE (4/4 tasks; the S5.CP deploy checkpoint stays open for the owner)
+
+Branch: `feat/ndg-s5c-advisor-handler` (from master a4aed88, which already holds S5a and S5b). S5c is its own work unit: it is the pre-agreed split S5a+S5b | S5c.
+
+### Tasks
+
+- [x] S5c.1 to S5c.2 (`startSetup`, answers merged into the stored case, `asked` set from the non-stuck questions, `nia:min:` buttons and the `minimum` stage, `CONVENTION_NEXT.setup`, `commitSetup` exactly once, the interim `request.setup` guard and the `card_in_web` reply removed)
+- [x] S5c.3 to S5c.4 (`index.js`: the `nia:min:` callback is routed, a short answer to an open setup reaches the advisor, the classifier is told about it; the extraction prompt names the described debt that is waiting)
+- [ ] S5.CP checkpoint: tests, build and plain package are green (below). The owner deploys Nia and web together (action 5). Not done here.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| a6e10c1 `feat(nia): create a described card or loan at Confirm, once, rebuilding its terms from the stored case` | S5c (1/3) | 3 files, 176 insertions, 10 deletions |
+| 49ca6e0 `feat(nia): propose a described debt in the chat, merge the answers and offer Confirm only when nothing is open` | S5c (2/3) | 5 files, 397 insertions, 15 deletions |
+| 1b93e21 `feat(nia): route setup answers and the nia:min buttons to the advisor and tell the model which described debt is waiting` | S5c (3/3) | 7 files, 184 insertions, 7 deletions |
+
+Code total vs master before the bookkeeping commit: 10 files, 757 insertions, 32 deletions = 789 changed lines (budget 2,000; each commit at most 412; the estimate was about 550). The whole S5 slice (S5a to S5c) comes to 1,566 + 789 = 2,355 lines, over the 2,000 slice figure, which is why S5c is a separate work unit.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S5c.1/2 (commit) | `commit a described setup` in `handler.test.js` (8 cases): 7 failed (no `commitSetup`: the Confirm fell into the payment commit); the 8th, a Confirm while a question is open, is a characterization that passes on arrival. A ninth expectation (the «Faltan datos» message) failed alone, then passed with `setup_incomplete` in `preview.js` | 8/8; `functions/nia` 818/818 | `commitCreate` and `commitSetup` share `writeNewDebt` (a card skips the disbursement) |
+| S5c.1/2 (pending) | `pending.test.js` `minimumKeyboard` and `parseCallback('nia:min:...')`: 2 of 3 failed (`minimumKeyboard is not a function`); the third (the Bancolombia pending under 1,500 bytes) is a characterization of `buildPending` | 34/34 | None needed |
+| S5c.1/2 (proposal) | `setup: the proposal (read-only)` in `handler.test.js` (15 cases): 14 failed, the interim guard answered every setup with the web reply; the invalid-day case is a characterization that passed on arrival | 14/15 on the first run; the last had a wrong expectation of mine (the core adds `deferred: []` to the card), fixed in the test. `functions/nia` 836/836 | `setupText` placed in `preview.js` as the task says; `TOO_MANY_CHARGES` shared with `finishCreate` |
+| S5c.3/4 | `debtPrompt` open-setup line (1), `isOpenSetup`/`answersOpenSetup` and the prompt in `handler.test.js` (2) and four `index.test.js` flows: 7 failed; the other two index cases (the proposal reaches the advisor, a glossary question keeps the pending) passed on arrival because the handler wiring of the previous commit already served them | after `extract.js`, `handler.js`, `index.js`: `functions/nia` 845/845. One regex fix on the way: `\b` after `é` never matches, so «no sé» needed a lookahead | None needed |
+
+Triangulation: proposal (card with and without convention, loan ready, loan missing data, card sent as `create`, stated card limit, pending too large, invalid day), answers (some answered, none answered, a late answer unblocks the stuck fields, the button path), buttons (`nia:min` to confirm, `nia:min:unknown` to stuck, stale with no pending, at the confirm stage and on another action; `nia:conv` for setup valid and stale), commit (card once, loan once, half-saved loan in both directions, race, rebuilt terms with the IVA included, row found before the terms are rebuilt, a case that cannot be built), entry point (answers, classifier says conversation, thanks stays chat, glossary question keeps the pending, full golden through Telegram updates with a repeated update id).
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions/nia` exit 0: 21 files, 845 tests passed (new: 8 commit, 15 proposal, 3 pending, 2 setup-context in the handler, 1 prompt, 6 index) |
+| Runtime harness | the real Function entry point against the in-memory Appwrite, Telegram and Gemini of `index.test.js`: «tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 + IVA» gives EA 28.32 %, IVA $ 8.550, questions and the four `nia:min:` buttons; the answers and the button lead to Confirm; a repeated Telegram update and a second tap leave one `debts` row `db{id}`, no event, no cost row (`nia:conv:MV` path included). `npm run build` exit 0; plain `npm run package:nia` exit 0 (`functions/nia.tar.gz` written, not committed) |
+| Full suite | `npm test -- --maxWorkers=4`: 152 files, 2,668 tests passed |
+| Rollback boundary | `functions/nia/debt/handler.js` (`startSetup`, `continueSetup`, `commitSetup`, `writeNewDebt`, the `setup` entries of `CONVENTION_NEXT`, `COMMIT`, `ALREADY` and the `minimum` stage), `pending.js` (`minimumKeyboard`, `nia:min`), `preview.js` (`setupText`, `setup_incomplete`), `extract.js` (the open-setup prompt line), `index.js` (`min:` route, the short-answer backstop, one classifier sentence), the README row. Reverting restores the old reply «las tarjetas se crean desde la web» only if the interim guard is put back |
+
+### Deviations from design
+
+- The reply builder `setupText` lives in `preview.js` (the file map says `preview.js`), and the stage logic (`setupStage`, `continueSetup`) in `handler.js`; no new file.
+- Stages of a setup pending: `convention` (a lone convention question and its buttons, with no preview and `asked` empty, because the cycle questions are not shown yet), `minimum` (the rule question is open with its buttons), `answers` (text questions only, or a stuck question), `confirm`. Only the `minimum` stage is new in `pending.js`, as designed; `answers` is a handler stage that no button belongs to.
+- `nia:min:unknown` sets the rule to `unknown`, which `proposeSetup` reports as a stuck question (no default, no Confirm). A button never goes through `mergeCase`, so tapping it does not mark the other asked fields unknown.
+- The extraction prompt gains one line when a setup is open (`debtPrompt(..., { setup })`), and `index.js` gains a backstop (`answersOpenSetup`: at most 160 characters, with a digit or a «no sé», classified as conversation or analysis, no attachment, not a glossary question) next to the classifier sentence. The classifier is a model; the backstop is what makes «el corte es el 15» reach the advisor deterministically.
+- `/confirmar` or a Confirm tap on a setup that still has open questions answers «Antes de confirmar necesito que respondas las preguntas pendientes...» (the generic text talked only about buttons).
+- `setup_incomplete` has a message in `describeCoreError` («Faltan datos para crear la deuda...») for a Confirm whose case cannot be built any more.
+- A Confirm checks the stored row (and, for a loan, the dedupe key) before rebuilding the terms, so a repeated Confirm never depends on terms that may no longer be buildable. A loan with only its row or only its event is completed, not repeated.
+- `functions/nia/README.md` row `create` no longer says that cards are created only on the web (S7b still owes the full docs).
+
+### Issues found
+
+- A new, unrelated debt description sent while a setup is open is merged into the open case (the kind and the pending id stay): `mergeCase` has no way to tell an answer from a new case, because an answer's `kind` is indistinguishable from the extraction's default. `/cancelar` clears it (the Confirm keyboard also has Cancelar). Not fixed here; worth an owner decision.
+- A message that answers only a non-cycle question (for example the name) while the cycle fields are asked marks them unknown (the S5b rule: none of the asked fields answered). The user can still state them later; they unblock as soon as they are answered.
+
+### Remaining
+
+S5.CP (owner deploys Nia and web together, action 5), then S6 and S7.
