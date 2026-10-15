@@ -986,6 +986,11 @@ Branch `fix/dpc-card-rate-in-force` (from master 84a6a52). Verify warning W6: th
 |---|---|---|
 | Card rate in force | `rateChangeModel.test.js` and `RateChangeDialog.test.jsx` failed: `rateInForce` missing, `initialRateForm` of a card with a 28% to 24% EA `rate_change` started at 28, the dialog said "Tasa actual: 28 % E.A." | active change shows 24% EA and pre-fills 24; voided change and future change fall back to 28%; loan unchanged (a loan `rate_change` is already in `terms.rate`) |
 
-### Not changed (same stale read, outside W6)
+### Extension: the three other stale reads (coordinator request)
 
-`DebtDetail.jsx:61`, `debtViewModel.js:18` and `functions/nia/debt/handler.js:143` (`eaPercent` in the summaries) also read `projection.terms.rate` and show the original rate of a card after a `rate_change`. `rateInForce` can be reused there in a separate follow-up.
+- `rateInForce(projection)` moved into the core (`packages/finance-core/src/ledger/rateInForce.js`, exported from the barrel; the node16 exact-keys test lists it) so Nia can use it. `rateChangeModel.js` imports it from `@finance-core` and re-exports it, so the dialog behaves identically.
+- `DebtDetail.jsx` (rate fact), `debtViewModel.js` (`eaPercent` of the list) and `functions/nia/debt/handler.js` (`eaPercent` of `summaries`, behind the analysis snapshot) now read `rateInForce(projection)` instead of `projection.terms.rate`.
+
+| Task | RED | GREEN |
+|---|---|---|
+| Shared card rate in force | `rateInForce.test.js` could not import the module; the node16 exact-keys test failed; `debtViewModel`, `DebtDetail.card` and Nia `debtSummaries` tests received 28 for a card with an active 28% to 24% EA change | 24% EA for an active change, 28% when it is voided or future, loans unchanged; full suite 125 files, 2016 tests; `npm run build` and `npm run package:nia` ok |
