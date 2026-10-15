@@ -51,6 +51,7 @@ export { simulateExtra } from './src/prepay/simulate.js';
 export { compareStrategies } from './src/prepay/compare.js';
 export { ADVICE_DEFAULTS, advise } from './src/advice/advice.js';
 export { buildFacts, renderSummary } from './src/advice/facts.js';
+export { allowedTexts } from './src/explain/allowed.js';
 export { EXPLAIN_COPY, copyStatus, releasedTopics } from './src/explain/copy.js';
 export { explainFacts } from './src/explain/explain.js';
 export { EXPLAIN_TOPICS } from './src/explain/topics.js';
