@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Blob } from 'node:buffer';
 import undici from 'undici';
 import { parseThresholds } from './debt/cashflow.js';
+import { paraphraseEnabled } from './debt/explain/paraphrase.js';
 import { glossaryTopic } from './debt/explain/router.js';
 import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
@@ -24,6 +25,7 @@ const config = {
   model: env.AI_MODEL || 'gemini-3.5-flash-lite',
   webUrl: (env.NIA_WEB_URL || '').trim().replace(/\/$/, ''),
   adviceThresholds: parseThresholds(env.DEBT_ADVICE_THRESHOLDS),
+  explainParaphrase: paraphraseEnabled(env.NIA_EXPLAIN_PARAPHRASE), // off unless explicitly on: it adds a Gemini call to every explanation
 };
 
 const TABLES = {
@@ -266,7 +268,7 @@ function debtCreateRow(table, { id, data }) {
 
 function debtDeps() {
   return {
-    config: { householdId: config.householdId, timezone: config.timezone, currency: config.currency, webUrl: config.webUrl, adviceThresholds: config.adviceThresholds },
+    config: { householdId: config.householdId, timezone: config.timezone, currency: config.currency, webUrl: config.webUrl, adviceThresholds: config.adviceThresholds, explainParaphrase: config.explainParaphrase },
     cashflowRows,
     now: () => new Date(),
     ids: { pending: () => randomId().slice(0, 24) },

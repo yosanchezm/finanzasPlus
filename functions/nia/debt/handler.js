@@ -1,6 +1,6 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
-import { applicableDebts, cardOnly, explainReply, menuReply, pickReply, recoveryReply } from './explain/flow.js';
+import { applicableDebts, cardOnly, explainReplyParaphrased, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
@@ -395,7 +395,7 @@ async function sendExplain(deps, ctx, { topic, debt, asked, legal, page = 1 }) {
     if (!(error instanceof ValidationError)) throw error;
     return inform(deps, ctx, describeCoreError(error));
   }
-  const { text, keyboard } = explainReply(facts, { debtId: debt ? debt.$id : null, page });
+  const { text, keyboard } = await explainReplyParaphrased(deps, facts, { debtId: debt ? debt.$id : null, page });
   // The marker keeps what the user stated, so «Ver más» (which carries only the topic, the debt and the page) continues the same explanation.
   const stated = asked.stated ? { stated: asked.stated } : {};
   const amount = asked.amountMinor ? { amountMinor: asked.amountMinor } : {};

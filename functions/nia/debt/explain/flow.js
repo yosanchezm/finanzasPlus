@@ -1,5 +1,6 @@
 import { EXPLAIN_TOPICS } from '../../../../packages/finance-core/index.js';
 import { MAX_PICK_BUTTONS, explainButton } from '../pending.js';
+import { paraphraseExplain } from './paraphrase.js';
 import { TOPIC_LABELS, renderExplain } from './render.js';
 
 // The replies of the explain flow (design G2 to G6): the topic menu, the debt pick, the stale-button texts and the
@@ -58,4 +59,18 @@ export function explainReply(facts, { debtId = null, page = 1 } = {}) {
   if (index + 1 < parts.length) rows.push([explainButton(facts.topic, debtId, index + 2, MORE_LABEL)]);
   for (const topic of followUps) rows.push([explainButton(topic, debtId, 1, TOPIC_LABELS[topic])]);
   return rows.length > 0 ? { text: parts[index], keyboard: rows } : { text: parts[index] };
+}
+
+/**
+ * The explanation as `explainReply` builds it, with the text reworded only when `config.explainParaphrase` is on and the paraphrase passes the
+ * guard (design G7). Anything else sends the template, with the same buttons. Off by default: then Gemini is not called.
+ * @param {{ config?: object, gemini: Function }} deps
+ * @param {object} facts `explainFacts(...)`.
+ * @param {{ debtId?: (string | null), page?: number }} [options] As for `explainReply`.
+ * @returns {Promise<{ text: string, keyboard?: object[][] }>}
+ */
+export async function explainReplyParaphrased(deps, facts, options = {}) {
+  const reply = explainReply(facts, options);
+  const text = await paraphraseExplain(deps, facts, reply.text);
+  return text === null ? reply : { ...reply, text };
 }

@@ -577,6 +577,18 @@ describe('explain in the Nia entry point', () => {
     expect(fake.prompts).toHaveLength(2);
   });
 
+  it('adds no Gemini call to an under-review topic when NIA_EXPLAIN_PARAPHRASE is on, and keeps the review answer', async () => {
+    vi.stubEnv('NIA_EXPLAIN_PARAPHRASE', 'true');
+    await boot();
+    fake = makeNet([{ intent: 'conversation', action: 'none', reply: 'La mora es un cargo.' }, { action: 'explain', topic: 'mora' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('qué es la mora'));
+
+    expect(sent()[0].text).toContain(REVIEW);
+    expect(fake.prompts).toHaveLength(2);
+  });
+
   it('keeps «pagué la mora» as a payment when it is classified as debt, and as a conversation when it is not', async () => {
     fake = makeNet([{ intent: 'debt', action: 'pay' }, { action: 'pay', debtRef: 'vehiculo', amountMinor: 380381 }]);
     seed([debtRow('d1', 'Crédito Vehículo')]);

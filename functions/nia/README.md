@@ -48,6 +48,7 @@ Todas se configuran en la Function de Appwrite, no en el repositorio:
 | `GEMINI_API_KEY`, `AI_MODEL` | Gemini y modelo (`gemini-3.5-flash-lite` por defecto) |
 | `NIA_WEB_URL` | Opcional. URL pública de la app web (por ejemplo `https://finanzas.personal.muxiistudio.com`). Si está definida, las simulaciones largas incluyen el enlace al plan completo; si no, solo indican que está en la web, en Deudas |
 | `DEBT_ADVICE_THRESHOLDS` | Opcional. JSON con los umbrales de la recomendación de abonos (ver [Deudas](#deudas)). Un JSON inválido o un valor fuera de rango se ignora y se usan los valores por defecto |
+| `NIA_EXPLAIN_PARAPHRASE` | Opcional, apagada por defecto. Con `true`, `1`, `on` o `yes`, Nia le pide a Gemini que reescriba con otras palabras cada explicación de deudas (una llamada más por explicación) y la envía solo si no cambia ninguna cifra, no escribe números con letras y cabe en 1.200 caracteres; si no, envía la plantilla. La fuente y el aviso siempre salen tal cual |
 
 El módulo lee estas variables una sola vez, al cargarse; después de cambiarlas, vuelve a desplegar la Function.
 
