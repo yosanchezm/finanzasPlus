@@ -65,11 +65,14 @@ describe('explainReply: nothing is released in S0', () => {
     }
   });
 
-  it('falls back to the under review text for a status it has no template for', () => {
-    const released = { ...facts('restructure_whatif', null), status: 'ok' };
+  it('answers with the under review text while the copy of the topic is not reviewed, for every topic', () => {
+    for (const topic of EXPLAIN_TOPICS.filter((item) => !['card_statement', 'card_interest_drop'].includes(item))) {
+      const unreleased = facts(topic, loan);
 
-    expect(explainReply(released).text).toBe(UNDER_REVIEW_TEXT);
-    expect(renderExplain(released)).toEqual({ parts: [UNDER_REVIEW_TEXT], followUps: [] });
+      expect(unreleased.status, topic).toBe('under_review');
+      expect(explainReply(unreleased).text, topic).toBe(UNDER_REVIEW_TEXT);
+      expect(renderExplain(unreleased), topic).toEqual({ parts: [UNDER_REVIEW_TEXT], followUps: [] });
+    }
   });
 });
 

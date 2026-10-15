@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COPY, explainFacts, resolveLegal } from '../../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../../packages/finance-core/test/helpers/explainCopy.js';
 import { DUE_ON, GOLDEN_LEGAL, GOLDEN_TERMS, TEN_DAYS_LATE, goldenDebt } from '../../../../packages/finance-core/test/helpers/lateGolden.js';
-import { EA, debt, french, interestFree } from '../../../../packages/finance-core/test/helpers/loans.js';
+import { EA, debt, french, interestFree, onTime } from '../../../../packages/finance-core/test/helpers/loans.js';
 import { renderExplain } from './render.js';
 
 // Goldens per topic, rendered from real core results over a reviewed copy (the shipped draft texts, signed for the test).
@@ -16,6 +16,7 @@ const IVA = { id: 'iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId:
 const facts = (topic, row, today, opts = {}, legal = IBC, events = []) => explainFacts(topic, row, events, legal, today, { copy, ...opts });
 const first = (result) => result.parts[0];
 const hasNoMoney = (text) => expect(text).not.toMatch(/\$/);
+const onTime12 = (terms = french(), count = 12) => onTime(terms, count);
 
 describe('renderExplain: footer', () => {
   it('ends every explanation with the exact source line and disclaimer', () => {
@@ -98,6 +99,16 @@ describe('renderExplain: usury_ibc', () => {
 
     expect(text).toContain('No tengo registrado un tope de usura para esta modalidad, así que no puedo decirte cuál es.');
     expect(text).not.toContain('28,59');
+  });
+
+  it('explains Ley 546 for a mortgage and states that nothing is computed with it', () => {
+    const text = renderExplain(facts('usury_ibc', debt(french({ kind: 'mortgage' })), '2026-10-13')).parts.join('\n');
+    const consumer = renderExplain(facts('usury_ibc', debt(french()), '2026-10-13')).parts.join('\n');
+
+    expect(text).toContain(EXPLAIN_COPY['legal.ley546'].text);
+    expect(text).toContain('Para este crédito de vivienda no calculo nada con las reglas de esa ley.');
+    expect(text).toContain('Ley 546 de 1999 (normas en materia de vivienda y su financiación)');
+    expect(consumer).not.toContain('Ley 546');
   });
 
   it('is generic with the public cap and an invitation, with no debt figures', () => {
@@ -401,5 +412,137 @@ describe('renderExplain: card mora, allocation and charges', () => {
     expect(text).toContain('Suma aproximada de cargos e impuestos de 12 extractos como el último: $ 128.520 (aproximado).');
     expect(early).toContain('Esta tarjeta todavía no tiene un extracto, así que aún no hay cargos que mostrar.');
     expect(early).toContain('Ejemplo del GMF: 0,4 % sobre $ 400.000 son $ 1.600.');
+  });
+});
+
+describe('renderExplain: restructure_whatif', () => {
+  const text = (row, today, events = [], legal = GOLDEN_LEGAL) => renderExplain(facts('restructure_whatif', row, today, {}, legal, events)).parts.join('\n');
+
+  it('golden: shows 391,756 refinanced, or 390,381 waiving the mora, and the new balance', () => {
+    const result = text(goldenDebt(), TEN_DAYS_LATE);
+
+    expect(result).toContain('Si reestructuras hoy (25 de febrero de 2026), lo que se refinancia de lo vencido es $ 391.756: el capital de las cuotas vencidas más $ 180.876 de intereses, $ 10.000 de cargos y $ 1.375 de mora.');
+    expect(result).toContain('La deuda nueva arrancaría con un saldo de $ 10.192.251: el saldo actual de $ 10.000.000 más los intereses, cargos, impuestos y mora vencidos.');
+    expect(result).toContain('Si la entidad perdona la mora ($ 1.375), lo que se refinancia es $ 390.381 y la deuda nueva arrancaría con $ 10.190.876.');
+    expect(result).toContain('Fuente: Credito · cálculo de reestructuración · Acuerdo de reestructuración con tu entidad financiera · Método de cálculo de la app para saldos vencidos');
+    expect(result.endsWith(DISCLAIMER)).toBe(true);
+  });
+
+  it('adds the taxes to the breakdown when there are any', () => {
+    const taxed = debt({ ...GOLDEN_TERMS, charges: [...GOLDEN_TERMS.charges, { id: 'iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'fee', value: 19 }] });
+    const result = text(taxed, TEN_DAYS_LATE);
+
+    expect(result).toMatch(/de intereses, \$ 10\.000 de cargos, \$ 1\.900 de impuestos y \$ 1\.375 de mora\./);
+  });
+
+  it('says there is no mora to forgive when the debt has none', () => {
+    const result = text(debt({ ...GOLDEN_TERMS, late: { mode: 'none' } }), TEN_DAYS_LATE);
+
+    expect(result).toContain('Esta deuda no tiene mora acumulada, así que no hay mora que perdonar.');
+    expect(result).not.toContain('Si la entidad perdona la mora (');
+  });
+
+  it('says nothing is overdue and keeps the current balance as the new principal', () => {
+    const result = text(goldenDebt(), '2026-02-10');
+
+    expect(result).toContain('Hoy (10 de febrero de 2026) esta deuda no tiene cuotas vencidas, así que no hay nada vencido que sumar: la deuda nueva arrancaría con el saldo actual de $ 10.000.000.');
+    expect(result).not.toContain('Si la entidad perdona la mora (');
+  });
+
+  it('warns that housing credit has its own mora rules', () => {
+    const result = text(debt({ ...GOLDEN_TERMS, kind: 'mortgage' }), TEN_DAYS_LATE);
+
+    expect(result).toContain('Además, los créditos de vivienda tienen reglas propias que esta guía no aplica; confirma la mora con tu banco.');
+  });
+
+  it('is generic with an invitation and no figure, and does not apply to a card', () => {
+    const generic = renderExplain(facts('restructure_whatif', null, TEN_DAYS_LATE, {}, GOLDEN_LEGAL));
+    const cardRow = { $id: 'c1', householdId: 'h1', name: 'Visa', ownerScope: 'shared', terms: { ...GOLDEN_TERMS, kind: 'card', card: { statementDay: 20, dueDay: 10, minPayment: { rule: 'installments_due', pct: 0, floorMinor: 0 } } } };
+    const card = renderExplain(facts('restructure_whatif', cardRow, TEN_DAYS_LATE, {}, GOLDEN_LEGAL));
+
+    expect(generic.parts[0]).toContain('Si me dices de cuál deuda hablas, te muestro con tus números cuánto se refinancia y con qué saldo arrancaría la deuda nueva.');
+    hasNoMoney(generic.parts[0]);
+    expect(generic.parts[0]).toContain('Fuente: explicación general · cálculo de reestructuración');
+    expect(generic.followUps).toEqual(['prepayment', 'mora']);
+    expect(card.parts).toEqual(['Ese tema aplica solo a préstamos, y esa deuda es una tarjeta de crédito.']);
+  });
+});
+
+describe('renderExplain: prepayment', () => {
+  const family = () => debt(interestFree());
+  const paidOne = [{ $id: 'p1', debtId: 'd1', kind: 'payment', effectiveOn: '2026-02-15', amountMinor: 100_000, payloadJson: '{}', $createdAt: '2026-01-01T00:00:00.000Z' }];
+  const text = (row, today, opts = {}, events = [], legal = IBC) => renderExplain(facts('prepayment', row, today, opts, legal, events)).parts.join('\n');
+
+  it('golden: 1,200,000 at 0 %, 1 paid, extra 300,000 leaves 8 installments reducing the term and 11 reducing the installment', () => {
+    const result = text(family(), '2026-03-01', { amountMinor: 300_000 }, paidOne);
+
+    expect(result).toContain('Con un abono extra de $ 300.000 el 1 de marzo de 2026, hoy te quedan 11 cuotas de $ 100.000.');
+    expect(result).toContain('• Reduciendo el plazo: la cuota sigue en $ 100.000 y te quedarían 8 cuotas. Intereses que te ahorras: $ 0.');
+    expect(result).toContain('• Reduciendo la cuota: el plazo sigue en 11 cuotas y la cuota bajaría a $ 72.727 (aproximado). Intereses que te ahorras: $ 0.');
+    expect(result).toContain('Fuente: Credito · simulación de abonos extra · ');
+    expect(result).toContain('Ley 1555 de 2012 (prepago de créditos sin penalidad)');
+    expect(result.endsWith(DISCLAIMER)).toBe(true);
+  });
+
+  it('shows the Ley 1555 notice with the 880 minimum wages threshold and the unverified-scope caveat', () => {
+    const result = text(family(), '2026-03-01', { amountMinor: 300_000 }, paidOne);
+
+    expect(result).toContain(EXPLAIN_COPY['legal.ley1555'].text);
+    expect(result).toContain('Como referencia, 880 salarios mínimos equivalen a $ 1.540.796.400 (salario mínimo de $ 1.750.905), y el valor inicial de esta deuda está por debajo de ese tope. El alcance de la ley para tu crédito no está verificado: confírmalo con tu entidad.');
+  });
+
+  it('says the law may not apply above the threshold, and when no minimum wage is known or it may be stale', () => {
+    const above = text(debt(french({ principalMinor: 2_000_000_000 })), '2026-10-13', { amountMinor: 1_000_000 });
+    const unknown = text(debt(french()), '2024-10-13', { amountMinor: 1_000_000 }, [], resolveLegal([], { smmlvTable: [] }));
+    const stale = text(debt(french()), '2027-02-01', { amountMinor: 1_000_000 }, onTime12());
+
+    expect(above).toContain('y el valor inicial de esta deuda supera ese tope, así que la ley podría no aplicarte.');
+    expect(unknown).toContain('No tengo registrado el salario mínimo de este año, así que no puedo compararlo con el tope de referencia.');
+    expect(unknown).not.toContain('880 salarios mínimos equivalen');
+    expect(stale).toContain('El salario mínimo que uso es el último que tengo registrado y puede haber cambiado.');
+  });
+
+  it('labels the interest saved approximate', () => {
+    const result = text(debt(french()), '2027-01-20', { amountMinor: 2_000_000 }, onTime12());
+
+    expect(result).toMatch(/• Reduciendo el plazo: la cuota sigue en \$ 380\.381 y te quedarían \d+ cuotas\. Intereses que te ahorras: \$ [\d.]+ \(aproximado\)\./);
+    expect(result).toMatch(/• Reduciendo la cuota: el plazo sigue en \d+ cuotas y la cuota bajaría a \$ [\d.]+ \(aproximado\)\. Intereses que te ahorras: \$ [\d.]+ \(aproximado\)\./);
+  });
+
+  it('shows one option when the amortization system gives the same result for both', () => {
+    const german = french({ system: 'german', n: 24 });
+    const result = text(debt(german), '2026-08-01', { amountMinor: 1_000_000 }, onTime12(german, 6));
+
+    expect(result).toContain('En este sistema de amortización, reducir el plazo y reducir la cuota dan el mismo resultado.');
+    expect(result).not.toContain('• Reduciendo el plazo');
+  });
+
+  it('says the debt would be paid off, and that a registered penalty is not in the figures', () => {
+    const paid = text(family(), '2026-03-01', { amountMinor: 5_000_000 }, paidOne);
+    const penalized = text(debt(french({ prepaymentPenaltyPct: 2 })), '2027-01-20', { amountMinor: 2_000_000 }, onTime12());
+
+    expect(paid).toContain('Con ese abono la deuda quedaría totalmente pagada, así que no hay plazo ni cuota que elegir.');
+    expect(penalized).toContain('Tu deuda tiene registrada una penalización por prepago de 2 %; esa penalización no está incluida en estas cifras.');
+  });
+
+  it('asks for the amount, says a paid-off debt has nothing to prepay and warns about a mortgage', () => {
+    const noAmount = text(debt(french()), '2026-10-13');
+    const twoPaid = [...paidOne, { ...paidOne[0], $id: 'p2', effectiveOn: '2026-03-15' }];
+    const owed = text(debt(interestFree({ n: 2, principalMinor: 200_000 })), '2026-04-01', { amountMinor: 50_000 }, twoPaid);
+    const mortgage = text(debt(french({ kind: 'mortgage', principalMinor: 300_000_000 })), '2026-10-13', { amountMinor: 5_000_000 });
+
+    expect(noAmount).toContain('Dime de cuánto sería el abono y te muestro cómo cambian el plazo y la cuota con tus números.');
+    expect(noAmount).not.toContain('Reduciendo');
+    expect(owed).toContain('Esta deuda ya no tiene saldo por pagar, así que no hay nada que abonar.');
+    expect(mortgage).toContain('Este es un crédito de vivienda: sus reglas de prepago pueden ser distintas y esta guía no las calcula.');
+  });
+
+  it('is generic with an invitation and no figure', () => {
+    const { parts, followUps } = renderExplain(facts('prepayment', null, '2026-10-13', { amountMinor: 300_000 }));
+
+    expect(parts[0]).toContain('Si me dices de cuál deuda hablas y de cuánto sería el abono, te muestro con tus números cómo cambian el plazo y la cuota.');
+    expect(parts[0]).toContain('Fuente: explicación general · simulación de abonos extra');
+    hasNoMoney(parts[0]);
+    expect(followUps).toEqual(['restructure_whatif', 'payment_allocation']);
   });
 });

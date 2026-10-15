@@ -34,6 +34,8 @@ const FAMILY = {
   charges: 'cargos e impuestos',
   card_statement: 'extractos de tarjeta',
   card_interest_drop: 'intereses de tarjeta',
+  restructure_whatif: 'cálculo de reestructuración',
+  prepayment: 'simulación de abonos extra',
 };
 
 // Related topics offered after an explanation (at most two).
@@ -45,6 +47,8 @@ const FOLLOW_UPS = {
   charges: ['payment_allocation', 'usury_ibc'],
   card_statement: ['card_interest_drop', 'mora'],
   card_interest_drop: ['card_statement', 'payment_allocation'],
+  restructure_whatif: ['prepayment', 'mora'],
+  prepayment: ['restructure_whatif', 'payment_allocation'],
 };
 
 const CONVENTION = {
@@ -89,7 +93,9 @@ const whose = (facts) => (facts.dataSource === 'stated' ? 'La tasa que me diste'
 
 function sourceLine(facts) {
   const who = facts.dataSource === 'debt' && facts.debt ? facts.debt.name : facts.dataSource === 'stated' ? 'tasa que me diste' : 'explicación general';
-  const labels = facts.sources.map((source) => source.label);
+  // The Ley 546 source is listed only when the answer explains that law (a mortgage); the key is part of the usury topic for every debt.
+  const printsLey546 = facts.topic !== 'usury_ibc' || hasNotice(facts, 'ley546_no_computation');
+  const labels = facts.sources.map((source) => source.label).filter((label) => printsLey546 || !label.startsWith('Ley 546'));
   return `Fuente: ${[who, FAMILY[facts.topic], ...labels].join(' · ')}\n${DISCLAIMER}`;
 }
 
@@ -123,6 +129,7 @@ function usuryIbc(facts) {
     paragraphs.push(INVITE);
   }
   paragraphs.push(copyOf(facts, 'legal.usury_ibc'));
+  if (hasNotice(facts, 'ley546_no_computation')) paragraphs.push(copyOf(facts, 'legal.ley546'), 'Para este crédito de vivienda no calculo nada con las reglas de esa ley.');
   return paragraphs;
 }
 
@@ -281,7 +288,83 @@ function cardInterestDrop(facts) {
   return paragraphs;
 }
 
-const TEMPLATES = { rate_conventions: rateConventions, usury_ibc: usuryIbc, mora, payment_allocation: paymentAllocation, charges, card_statement: cardStatement, card_interest_drop: cardInterestDrop };
+// What a restructure effective today would refinance: the overdue installments with their interest, charges, taxes and mora, the
+// balance the new debt starts from, and the same with the mora waived. Every figure is read from the facts.
+function restructureWhatIf(facts) {
+  const { text, numbers } = facts;
+  const paragraphs = [copyOf(facts, 'restructure_whatif.sample')];
+  if (facts.status === 'generic') return [...paragraphs, 'Si me dices de cuál deuda hablas, te muestro con tus números cuánto se refinancia y con qué saldo arrancaría la deuda nueva.'];
+  if (hasNotice(facts, 'nothing_overdue')) {
+    return [...paragraphs, `Hoy (${text.asOf}) esta deuda no tiene cuotas vencidas, así que no hay nada vencido que sumar: la deuda nueva arrancaría con el saldo actual de ${text.balance}.`];
+  }
+  const parts = [`${text.interest} de intereses`, `${text.charges} de cargos`];
+  if (numbers.taxes > 0) parts.push(`${text.taxes} de impuestos`);
+  parts.push(`${text.late} de mora`);
+  const breakdown = `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+  paragraphs.push(`Si reestructuras hoy (${text.asOf}), lo que se refinancia de lo vencido es ${text.refinanced}: el capital de las cuotas vencidas más ${breakdown}.`);
+  paragraphs.push(`La deuda nueva arrancaría con un saldo de ${text.newBalance}: el saldo actual de ${text.balance} más los intereses, cargos, impuestos y mora vencidos.`);
+  if (hasNotice(facts, 'no_late')) paragraphs.push('Esta deuda no tiene mora acumulada, así que no hay mora que perdonar.');
+  else paragraphs.push(`Si la entidad perdona la mora (${text.late}), lo que se refinancia es ${text.refinancedWaived} y la deuda nueva arrancaría con ${text.newBalanceWaived}.`);
+  if (hasNotice(facts, 'late_mortgage_unverified')) paragraphs.push('Además, los créditos de vivienda tienen reglas propias que esta guía no aplica; confirma la mora con tu banco.');
+  return paragraphs;
+}
+
+const installments = (count) => `${count} ${count === 1 ? 'cuota' : 'cuotas'}`;
+
+// The Ley 1555 reference: the 880 minimum wages threshold and whether the original principal is within it. The scope itself stays unverified.
+function ley1555Scope(facts) {
+  const { text } = facts;
+  const lines = [];
+  if (text.scope === 'unknown') {
+    lines.push('No tengo registrado el salario mínimo de este año, así que no puedo compararlo con el tope de referencia.');
+  } else {
+    const verdict = text.scope === 'within' ? 'está por debajo de ese tope.' : 'supera ese tope, así que la ley podría no aplicarte.';
+    lines.push(`Como referencia, ${text.smmlvCount} salarios mínimos equivalen a ${text.threshold} (salario mínimo de ${text.smmlv}), y el valor inicial de esta deuda ${verdict}`);
+  }
+  lines.push('El alcance de la ley para tu crédito no está verificado: confírmalo con tu entidad.');
+  if (hasNotice(facts, 'smmlv_stale')) lines.push('El salario mínimo que uso es el último que tengo registrado y puede haber cambiado.');
+  return lines.join(' ');
+}
+
+// The same extra payment reducing the term or reducing the installment, from the core comparison, with the Ley 1555 reference.
+function prepayment(facts) {
+  const { text } = facts;
+  const paragraphs = [copyOf(facts, 'prepayment.sample')];
+  if (facts.status === 'generic') return [...paragraphs, 'Si me dices de cuál deuda hablas y de cuánto sería el abono, te muestro con tus números cómo cambian el plazo y la cuota.'];
+  if (hasNotice(facts, 'nothing_owed')) return [...paragraphs, 'Esta deuda ya no tiene saldo por pagar, así que no hay nada que abonar.'];
+  if (hasNotice(facts, 'no_amount')) {
+    paragraphs.push('Dime de cuánto sería el abono y te muestro cómo cambian el plazo y la cuota con tus números.');
+  } else if (hasNotice(facts, 'paid_off')) {
+    paragraphs.push('Con ese abono la deuda quedaría totalmente pagada, así que no hay plazo ni cuota que elegir.');
+  } else {
+    const { numbers } = facts;
+    paragraphs.push(`Con un abono extra de ${text.amount} el ${text.onDate}, hoy te quedan ${installments(numbers.periodsBefore)} de ${text.installmentBefore}.`);
+    if (hasNotice(facts, 'strategies_identical')) {
+      paragraphs.push(`En este sistema de amortización, reducir el plazo y reducir la cuota dan el mismo resultado.\n• Con cualquiera de las opciones: la cuota queda en ${text.termInstallment} y te quedarían ${installments(numbers.termPeriods)}. Intereses que te ahorras: ${approx(facts, 'termSaved')}.`);
+    } else {
+      paragraphs.push(
+        `• Reduciendo el plazo: la cuota sigue en ${text.termInstallment} y te quedarían ${installments(numbers.termPeriods)}. Intereses que te ahorras: ${approx(facts, 'termSaved')}.\n` +
+          `• Reduciendo la cuota: el plazo sigue en ${installments(numbers.installPeriods)} y la cuota bajaría a ${approx(facts, 'installInstallment')}. Intereses que te ahorras: ${approx(facts, 'installSaved')}.`,
+      );
+    }
+    if (hasNotice(facts, 'penalty_registered')) paragraphs.push(`Tu deuda tiene registrada una penalización por prepago de ${text.penaltyPct}; esa penalización no está incluida en estas cifras.`);
+  }
+  paragraphs.push(copyOf(facts, 'legal.ley1555'), ley1555Scope(facts));
+  if (hasNotice(facts, 'mortgage')) paragraphs.push('Este es un crédito de vivienda: sus reglas de prepago pueden ser distintas y esta guía no las calcula.');
+  return paragraphs;
+}
+
+const TEMPLATES = {
+  rate_conventions: rateConventions,
+  usury_ibc: usuryIbc,
+  mora,
+  payment_allocation: paymentAllocation,
+  charges,
+  card_statement: cardStatement,
+  card_interest_drop: cardInterestDrop,
+  restructure_whatif: restructureWhatIf,
+  prepayment,
+};
 
 // -- splitter --------------------------------------------------------------------------------------------------------
 

@@ -14,7 +14,7 @@ import { renderExplain } from './render.js';
 // out, every part fits in a message, and the hardened paraphrase guard accepts the template itself.
 
 const copy = reviewedCopy();
-const TOPICS = ['rate_conventions', 'usury_ibc', 'mora', 'payment_allocation', 'charges', 'card_statement', 'card_interest_drop'];
+const TOPICS = ['rate_conventions', 'usury_ibc', 'mora', 'payment_allocation', 'charges', 'card_statement', 'card_interest_drop', 'restructure_whatif', 'prepayment'];
 const FEE = { id: 'fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 45000 };
 const IVA = { id: 'iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'fee', value: 19 };
 const GMF = { id: 'gmf', kind: 'tax', label: 'GMF', basis: 'pctOfSubtotal', value: 0.4 };
@@ -93,5 +93,7 @@ describe('renderExplain: property over topics, debts, dates and stated figures',
     }
     expect(statuses.has('card_statement:not_applicable')).toBe(true);
     expect(statuses.has('card_interest_drop:not_applicable')).toBe(true);
+    expect(statuses.has('restructure_whatif:not_applicable')).toBe(true);
+    expect(statuses.has('prepayment:not_applicable')).toBe(true);
   });
 });
