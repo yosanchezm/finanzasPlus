@@ -485,3 +485,72 @@ Triangulation: proposal (card with and without convention, loan ready, loan miss
 ### Remaining
 
 S5.CP (owner deploys Nia and web together, action 5), then S6 and S7.
+
+## Batch S6 (advisor adjust: charge add, Nia correction, checklist, chain, unsupported): COMPLETE (8/8 tasks; the S6.CP deploy checkpoint stays open for the owner)
+
+Branch: `feat/ndg-s6-advisor-adjust` (from master 8725e0e, which already holds S0 to S5c). All of S6 fits one work unit: it came to 1,941 changed lines against master (budget 2,000), and the size-review trigger of 1,500 was crossed only by the last group (S6b.3/4), so the pre-named split S6a | S6b was not needed.
+
+### Tasks
+
+- [x] S6a.1 to S6a.2 (`planChange.js`: a charge add through `addPresetCharge` and `addExplicitCharge`, validated against the resulting set; `ADD_IN_WEB` is gone; `extract.js` reads the presets and the explicit fields of an add)
+- [x] S6a.3 to S6a.4 (`correction.js`: preview with the core's `buildCorrection` and `previewChange`, rebuilt at Confirm, dedupe pre-check, backdated note; `extract.js` `ACTIONS += terms_correction`; `handler.js` `COMMIT.terms_correction`; `advisor/unsupported.js`)
+- [x] S6b.1 to S6b.2 (`advisor/adjust.js` behind `proposeSetup`: the adjust checklist, `fix_or_change`, corrections first; unsupported fields answered «no soportado aún»)
+- [x] S6b.3 to S6b.4 (`advisor/chain.js`, `handler.js` `runStep`/`startChain`/`continueAdjust`/`cancelDebtChain`, `pending.js` `confirmKeyboard(id)`/`adjustKeyboard`/`withChain`, `index.js` `nia:confirm:<id>`, `nia:adj:` and `cancelPending` delegating chains)
+- [ ] S6.CP checkpoint: tests, build and plain package are green (below). The owner deploys Nia; the S4 web must already be live (action 6). Not done here.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 3ce110f `feat(nia): add a preset or an explicit charge from the chat, validated against the resulting set` | S6a (1/2) | 8 files, 399 insertions, 50 deletions |
+| 55efacc `feat(nia): correct a card or loan term that was wrong from the start, with the core preview and the backdated note` | S6a (2/2) | 10 files, 561 insertions, 8 deletions |
+| 4815607 `feat(nia): compare a described case with a stored debt and list the differences as ordered steps, asking fix or change when unclear` | S6b (1/2) | 10 files, 329 insertions, 15 deletions |
+| 12276ed `feat(nia): run an adjustment as a chain of steps, one Confirm per step bound to its id, stopping and reporting on a failure or a cancel` | S6b (2/2) | 9 files, 566 insertions, 27 deletions |
+
+Code total vs master before the bookkeeping commit: 24 files, 1,848 insertions, 93 deletions = 1,941 changed lines (budget 2,000; each commit at most 593; the estimate was 1,300, so the slice came to 1.49x).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S6a.1/2 | 14 new `planChange.test.js` cases (read, preview, rebuild, describe of an add), 2 `extract.test.js` cases and 5 handler plus 1 index cases written first: 14 failed in `planChange` (the add helpers did not exist), 2 in `extract`, 7 in the handler and the index | `functions/nia` 866/866; the card preview needed a card with a statement still ahead, so its test uses a fresher fixture (the old one had no future statement and the figures did not move) | None needed |
+| S6a.3/4 | `correction.test.js` (11), `unsupported.test.js` (3), 6 `extract.test.js` cases and 9 handler cases: module-missing failures, 6 extract failures and 11 handler failures (the action fell to the list reply) | `correction.js`, `unsupported.js`, `extract.js`, `handler.js`: `functions/nia` 896/896. After the first run 4 tests of mine were fixed (the E.A. echo is already inside `rateLabel`, a payment also changes cost when only the due day changes, the old S0 test that asserted `terms_correction` was not an action, a case-sensitive regex) | The extra «equivale a» echo was dropped because `rateLabel` already carries it |
+| S6b.1/2 | 12 `propose.test.js` adjust cases and 2 `merge.test.js` cases: 13 failed (the one that passed is the unsupported loop, which now also asserts `mode: 'adjust'`) | `adjust.js`, the `merge.js`/`extract.js` adjust fields, `AMOUNT_ASK` moved to `cardTerms.js`: `functions/nia` 913/913. The 3 `extract.test.js` cases for the new `setup.adjust` fields passed on arrival (the fields were written together with the merge) | None needed |
+| S6b.3/4 | `chain.test.js` (module missing), 10 handler cases (checklist, fresh ids, double tap, failed preview, failed Confirm, cancel, fix or change, mode inside a chain) and 2 index cases: 10 handler and 2 index failed | `chain.js`, `pending.js`, `handler.js`, `index.js`: `functions/nia` 937/937. Two fixes on the way: the first step must reuse the id the setup already holds, and the evidence that step 2 is previewed on the corrected debt needed a card whose next minimum moves with the correction | None needed |
+
+Triangulation: add (preset only, explicit fields, both, IVA included in the amount, IVA linked to a fee whatever its id, card ids versus loan ids, preset exists, IVA without a fee, dangling `refLabel`, fractional fixed value, backdated or not, a charge added on the web in between, a preset that exists by Confirm), correction (statement day, due day, minimum rule, percentage and floor, rate NAMV versus E.A., modality, statements warning, unchanged, card field on a loan, impacted or not, convention buttons, two debts, a correction saved in between), adjust (fix, change, ambiguous, convention, card never asks, corrections first, charge exists, mora same, amount question, unsupported loop over the five fields, ambiguous or unknown debt), chain (two steps, three steps, plan too large, double tap, plain `nia:confirm` kept, failed preview, failed Confirm, cancel, mode question inside a chain, stale `nia:adj`, the entry point with `nia:confirm:<id>`).
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions/nia` exit 0: 24 files, 937 tests passed (845 before S6: 92 new) |
+| Runtime harness | the real Function entry point against the in-memory Appwrite, Telegram and Gemini of `index.test.js`: «la tasa del carro siempre fue 22 y agrega el 4x1000» gives the checklist, a correction preview with `nia:confirm:<id>`, then (after that Confirm) the GMF preview with another id; the first button tapped again answers «Ese paso ya quedó registrado»; a repeated Telegram update leaves one event per step; `nia:cancel` on step 2 reports step 1 done and step 2 not run, and a late Confirm writes nothing. `npm run build` exit 0; plain `npm run package:nia` exit 0 (`functions/nia.tar.gz` written, not committed; the bundle holds `proposeAdjust`, `commitTermsCorrection` and the chain text) |
+| Full suite | `npm test -- --maxWorkers=4`: 155 files, 2,760 tests passed (first run) |
+| Rollback boundary | `functions/nia/debt/{correction,advisor/adjust,advisor/chain,advisor/unsupported}.js` and their tests; the add branch of `planChange.js` (`rebuildCharges`, `previewAdd`, `describeChargeAdd`); `extract.js` (`terms_correction`, `correction`, the add fields, the `setup.adjust` fields); `handler.js` (`continueCorrection`/`startTermsCorrection`/`commitTermsCorrection`, `continueAdjust`/`runStep`/`startChain`, the chain in `say`/`inform`/`confirmDebt`/`handleDebtCallback`, `cancelDebtChain`); `pending.js` (`confirmKeyboard(id)`, `adjustKeyboard`, `withChain`, `nia:adj`); `index.js` (`nia:confirm:<id>`, `adj:` route, `cancelPending` for chains); `merge.js` adjust fields; two README rows. Reverting restores the «agrega uno nuevo desde la web» reply only if `ADD_IN_WEB` is put back |
+
+### Deviations from design
+
+- `advisor/adjust.js` is a new file (the file map puts the adjust checklist in `propose.js`): `proposeSetup` delegates to it when `setupCase.adjust` is true, so `propose.js` stays the create mode. `advisor/unsupported.js` was created with the correction (S6a), not in S6b, because the correction action already needs it.
+- «The order the user stated» cannot be read from the extraction (the case has no order), so after the corrections the steps follow a fixed order: rate, charges, mora. The description order is therefore the order of the fields of the case.
+- An adjust is a `setup` with `setup.adjust: true`, the existing `debtRef`, `setup.adjustKind` (`fix`, `change` or null) and `setup.changeOn` (the date of a real change). The extraction prompt teaches the model when to use it. Without the flag a described case is a new debt, as before.
+- Card days and the minimum payment never ask fix or change: a `terms_correction` is the only way to record them (there is no dated change). With `adjustKind: change` the plan adds the assumption `card_days_as_correction`.
+- A chain step that cannot be built (a charge that cannot be added, an unreadable debt, an unknown or ambiguous debt) leaves no steps and says why; there is no button to pick among several debts in an adjust (Nia asks for the name).
+- A charge the debt already has is not a step: it becomes the assumption `charge_exists` («si cambió su valor, pídeme “cambia el cargo a …”»). A mora policy already in force is `late_same`. Only an add, never a value change, is derived from a description.
+- The first step of a chain reuses the pending id the setup already holds (no id is wasted); the next steps use `deps.ids.pending()`.
+- `chain` rides in the pending of every step (`{ debtId, now, done, rest }`, at most 700 bytes, checked by `planChain`; `withChain` asserts the 1.5 KB of the whole pending). A plan that does not fit is refused with a message asking for fewer changes.
+- Every step of a chain gets the id button `nia:confirm:<id>`, the first one too, so a double tap can never confirm the wrong step. A `nia:confirm:<id>` tap for a step that is over, and also one with no debt pending, answers «Ese paso ya quedó registrado». The plain `nia:confirm` is unchanged for every other flow.
+- The rate of a `terms_correction` uses the common `rate` of the extraction (as `rate_change` does) and keeps the bare value in the draft until the convention buttons answer (`CONVENTION_NEXT.terms_correction`).
+- `legal.js` now exports `modalityFrom` and `MODALITY_LABELS` (the correction reads and prints modalities with them); `AMOUNT_ASK` moved from `propose.js` to `cardTerms.js` so the adjust mode shares it.
+- A correction preview says «Se aplica desde el inicio de la deuda» and also warns «Tienes N extractos registrados; revisa que coincidan» only when the core reports drifted statements, as the design says.
+
+### Issues found
+
+- The adjust mode depends on the model setting `setup.adjust` and `debtRef` correctly. A description of a registered debt that the model reads as a new `setup` creates a duplicate proposal (not a write: it still needs its own Confirm). The classifier and the extractor prompts teach the difference, but there is no code check; worth watching in the owner test.
+- A text answer to an open adjust question («0,05» for the amount of a life insurance) goes through the same open-setup path as a new described debt (S5c), so it relies on the model keeping `setup` for it; `mergeCase` keeps `adjust`, `debtRef` and `adjustKind` from the stored case.
+- The S5c issue stays: a new, unrelated debt description sent while a setup (or an adjust question) is open is merged into the open case.
+- Nia does not reconcile after a correction: the backdated note tells the user the web repairs the cost rows when the debt is opened (the S4 web must be live first).
+
+### Remaining
+
+S6.CP (owner deploys Nia, action 6, after the S4 web), then S7 (popovers, build check and docs).
