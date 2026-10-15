@@ -237,6 +237,10 @@ function closeCycle(state, cycle) {
   const late = settleLate(state, daysBetween(previous, cycle.statementOn));
   const base = state.interestBase ?? state.billed;
   const lines = { interest: roundUnit(Math.max(base - Math.min(late.excludedBase, base), 0) * monthly(state.rate), unit), deferred: 0, late: late.billedMinor };
+  // What the interest above ran on, for the explanations: the part of the previous statement paid by its due date accrued
+  // nothing, and the average unmet capital of the mora days is taken out of the base (whole units, so the fields add up).
+  const lateExcludedBase = Math.round(Math.min(late.excludedBase, base));
+  const bases = { revolving: Math.max(base - lateExcludedBase, 0), excluded: Math.max(state.closedBilled - base, 0), lateExcluded: lateExcludedBase };
   for (const tranche of state.tranches) {
     if (tranche.type === 'advance' && tranche.balanceMinor > 0) {
       const share = compareIso(tranche.openedOn, previous) > 0 ? daysBetween(tranche.openedOn, cycle.statementOn) / daysBetween(previous, cycle.statementOn) : 1;
@@ -264,6 +268,7 @@ function closeCycle(state, cycle) {
   state.interestBase = null;
   state.billed += state.pending;
   state.pending = 0;
+  state.closedBilled = state.billed;
   const total = lines.interest + lines.deferred + fees.chargesMinor + fees.taxesMinor + lines.late;
   const payInFull = payInFullOf(state);
   const minimum = minimumPayment(state.card.minPayment, {
@@ -275,6 +280,7 @@ function closeCycle(state, cycle) {
   state.cycles.push({
     ...cycle,
     interest: lines.interest,
+    bases,
     deferred: lines.deferred,
     charges: fees.chargesMinor,
     taxes: fees.taxesMinor,
@@ -328,6 +334,7 @@ export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }
     charges: terms.charges,
     principalMinor: terms.principalMinor,
     billed: terms.principalMinor,
+    closedBilled: terms.principalMinor, // the revolving balance at the last close; the opening balance counts as already billed
     pending: 0,
     interestBase: null,
     accrued: { charges: 0, taxes: 0, interest: 0, lateInterest: 0 },
@@ -383,6 +390,9 @@ export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }
       statementOn: cycle.statementOn,
       dueOn: cycle.dueOn,
       interestMinor: cycle.interest,
+      revolvingBaseMinor: cycle.bases.revolving,
+      excludedBaseMinor: cycle.bases.excluded,
+      lateExcludedBaseMinor: cycle.bases.lateExcluded,
       principalMinor: cycle.deferred,
       installmentMinor: cycle.interest + cycle.deferred,
       charges: cycle.chargeLines,
