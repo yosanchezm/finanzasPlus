@@ -45,4 +45,12 @@ describe('@finance-core alias (AD3)', () => {
     expect(lines.length).toBeGreaterThan(5);
     expect(lines.filter((line) => /(^|\/)packages(\/|$)/.test(line))).toEqual([]);
   });
+
+  it('keeps scripts/ inside the Docker build context (npm run build runs the explain copy check)', () => {
+    const lines = readFileSync(resolve(root, '.dockerignore'), 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    expect(lines.filter((line) => /(^|\/)scripts(\/|$)/.test(line))).toEqual([]);
+  });
 });

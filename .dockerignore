@@ -15,9 +15,8 @@ dist-nia
 *.log
 **/*.log
 
-# Not needed to build the web app.
+# Not needed to build the web app. scripts/ stays: npm run build runs scripts/check-explain-copy.mjs.
 functions
 docs
-scripts
 Dockerfile
 .dockerignore
