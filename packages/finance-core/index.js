@@ -44,6 +44,7 @@ export { allocate } from './src/ledger/allocate.js';
 export { cycleDates, minimumPayment } from './src/card/card.js';
 export { project, registerProjector } from './src/ledger/project.js';
 export { buildCostRow, commitPlan, planCommit } from './src/ledger/commit.js';
+export { rateInForce } from './src/ledger/rateInForce.js';
 export { previewChange } from './src/ledger/preview.js';
 export { buildRestructureTerms, restructureCarry } from './src/ledger/restructure.js';
 export { simulateExtra } from './src/prepay/simulate.js';

@@ -574,6 +574,22 @@ describe('debtSummaries (the code-computed figures behind the analysis snapshot)
   });
 });
 
+describe('debtSummaries for a card', () => {
+  const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+  const rateChange = (id, value) => ({ $id: id, debtId: 'c1', householdId: 'h1', kind: 'rate_change', effectiveOn: '2026-05-01', amountMinor: 0, payloadJson: JSON.stringify({ rate: { value, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }), actorId: ACTOR, source: 'telegram', dedupeKey: `seed:${id}`, $createdAt: '2026-05-01T12:00:00.000Z' });
+  const voidOf = (id, targetEventId) => ({ $id: id, debtId: 'c1', householdId: 'h1', kind: 'void', effectiveOn: '2026-05-02', amountMinor: 0, payloadJson: JSON.stringify({ targetEventId, reason: 'x' }), actorId: ACTOR, source: 'telegram', dedupeKey: `seed:${id}`, $createdAt: '2026-05-02T12:00:00.000Z' });
+  const summary = async (extraEvents) => {
+    const w = world({ debts: [debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(cardTerms) })] });
+    w.tables.debt_events.push(...extraEvents);
+    return (await debtSummaries(w.deps))[0];
+  };
+
+  it('reports the rate in force after an active rate change, and the original one once it is voided', async () => {
+    expect((await summary([rateChange('r1', 24)])).eaPercent).toBeCloseTo(24, 6);
+    expect((await summary([rateChange('r1', 24), voidOf('v1', 'r1')])).eaPercent).toBeCloseTo(28, 6);
+  });
+});
+
 describe('household legal rates (A2)', () => {
   const USURY = { $id: 'lr1', householdId: 'h1', kind: 'usury', modality: 'consumer', validFrom: '2026-10-01', validTo: '2026-10-31', value: 2900, source: 'Resolución', verified: true };
   const missingTable = () => Object.assign(new Error('GET /tables/legal_rates/rows → 404: Table not found'), { status: 404 });

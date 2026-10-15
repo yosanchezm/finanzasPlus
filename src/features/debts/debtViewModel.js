@@ -1,4 +1,4 @@
-import { project, toEffectiveAnnual } from '@finance-core';
+import { project, rateInForce, toEffectiveAnnual } from '@finance-core';
 
 const isListed = (debt) => debt.status !== 'archived';
 
@@ -15,7 +15,7 @@ function describeDebt(debt, events, asOf) {
       remainingPeriods: projection.remainingPeriods,
       nextDue: nextDue ? { dueOn: nextDue.dueOn, amountMinor: nextDue.outstandingMinor, status: nextDue.status } : null,
       progressPercent: principal > 0 ? Math.max(0, Math.min(100, ((principal - projection.balanceMinor) / principal) * 100)) : 0,
-      eaPercent: toEffectiveAnnual(projection.terms.rate),
+      eaPercent: toEffectiveAnnual(rateInForce(projection)),
     };
   } catch {
     // Corrupt or unsupported terms: keep the debt visible, but never count it in the totals.

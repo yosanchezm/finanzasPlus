@@ -1,4 +1,4 @@
-import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, normalizeRate, planCommit, previewChange, project, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
@@ -140,7 +140,7 @@ async function summaries(deps, debts, asOf) {
         pastDueMinor: projection.pastDueMinor,
         lateInterestMinor: projection.lateInterestMinor ?? 0,
         nextDue: nextDue ? { dueOn: nextDue.dueOn, amountMinor: nextDue.outstandingMinor } : null,
-        eaPercent: toEffectiveAnnual(projection.terms.rate),
+        eaPercent: toEffectiveAnnual(rateInForce(projection)),
       };
     } catch {
       return { id: debt.$id, name: debt.name, ownerScope: debt.ownerScope, unreadable: true };

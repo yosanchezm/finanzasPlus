@@ -1,9 +1,12 @@
-import { ValidationError, isIsoDate, previewChange } from '@finance-core';
+import { ValidationError, isIsoDate, previewChange, rateInForce } from '@finance-core';
 import { formatDueDate } from './debtLabels';
 import { rateEcho, toRate, usuryModality } from './wizard/wizardModel';
 
 // Pure model of the "Cambiar tasa" dialog. The form holds strings, like the inputs; the preview is the core's
 // `previewChange`, so what the dialog shows equals the projection once the event is saved.
+
+// The rate in force (a card's projection keeps its original terms) lives in the core; re-exported for the dialog's callers.
+export { rateInForce };
 
 export const INSTALLMENT_TOO_LOW = 'Con la nueva tasa, la cuota actual ya no cubre los intereses o el plan pasaría de 2000 cuotas. Elegimos «Mantener el plazo» para recalcular la cuota.';
 export const KEEP_TERM_ONLY = 'Este sistema mantiene el plazo.';
@@ -19,18 +22,6 @@ const IMPACT_LABELS = { payment: 'Pago', extra_payment: 'Abono extra' };
 export function modesFor(projection) {
   if (projection.card) return [];
   return projection.terms.system === 'french' ? [KEEP_TERM, KEEP_INSTALLMENT] : [KEEP_TERM];
-}
-
-/**
- * The rate in force on the projection's date. A loan's projection already applies its stored changes, so its terms are the
- * answer. A card's projection keeps the original terms, but its revolving tranche carries the rate after the active
- * (non-voided, already effective) `rate_change` events the core replayed, so that is read instead of re-folding the events.
- * @param {object} projection `project(debt, events, today)`.
- * @returns {object} The rate in force.
- */
-export function rateInForce(projection) {
-  if (!projection.card) return projection.terms.rate;
-  return projection.tranches.find((tranche) => tranche.type === 'revolving')?.rate ?? projection.terms.rate;
 }
 
 /** The form a fresh dialog starts with: the rate in force, effective today, keeping the term. */

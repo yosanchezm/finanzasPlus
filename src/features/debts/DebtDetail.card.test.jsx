@@ -35,6 +35,16 @@ describe('DebtDetail for a credit card', () => {
     expect(screen.queryByRole('button', { name: 'Simular abono' })).not.toBeInTheDocument();
   });
 
+  it('shows the rate in force after an active rate change, and the original one once it is voided', () => {
+    const to24 = makeEvent('r1', 'rate_change', '2026-04-20', 0, { rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' });
+    const { unmount } = renderCard([to24], '2026-05-20');
+    expect(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByText('24 % E.A.')).toBeInTheDocument();
+    unmount();
+
+    renderCard([to24, makeEvent('v1', 'void', '2026-04-21', 0, { targetEventId: 'r1', reason: 'x' })], '2026-05-20');
+    expect(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByText('28 % E.A.')).toBeInTheDocument();
+  });
+
   it('flags a minimum that was not paid by the due date, and clears the flag once it is paid', () => {
     const { unmount } = renderCard([], '2026-05-02');
     expect(screen.getByRole('alert')).toHaveTextContent('Tienes $ 146.102 vencidos');

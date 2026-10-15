@@ -47,6 +47,15 @@ describe('buildDebtList', () => {
     expect(items[1].eaPercent).toBeCloseTo(28.32, 1);
   });
 
+  it('exposes the rate a card has in force after an active rate change, not its original rate', () => {
+    const card = { ...debt('Visa', { kind: 'card', principalMinor: 500000 }, { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', n: undefined, firstDueOn: undefined, rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } }) };
+    const change = (id, effectiveOn, payload = {}, kind = 'rate_change') => ({ $id: id, $createdAt: `${effectiveOn}T12:00:00.000Z`, debtId: 'Visa', kind, effectiveOn, amountMinor: 0, payloadJson: JSON.stringify(payload) });
+    const to24 = change('r1', '2026-05-01', { rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' });
+
+    expect(buildDebtList({ debts: [card], events: [to24], asOf: TODAY }).items[0].eaPercent).toBeCloseTo(24, 6);
+    expect(buildDebtList({ debts: [card], events: [to24, change('v1', '2026-05-02', { targetEventId: 'r1', reason: 'x' }, 'void')], asOf: TODAY }).items[0].eaPercent).toBeCloseTo(28, 6);
+  });
+
   it('hides debts outside the scope filter and archived debts, and does not month-scope events', () => {
     const partner = debt('Tarjeta pareja', { ownerScope: 'partner' });
     const archived = debt('Vieja', { status: 'archived' });

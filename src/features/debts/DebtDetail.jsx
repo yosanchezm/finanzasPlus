@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { toEffectiveAnnual } from '@finance-core';
+import { rateInForce, toEffectiveAnnual } from '@finance-core';
 import { ArrowLeft, Calculator, Wallet } from 'lucide-react';
 import { formatMoney, formatPercent } from '../../shared/lib/format';
 import { Button } from '../../shared/ui/Button';
@@ -58,7 +58,7 @@ export default function DebtDetail({ debt, detail, currentOwnerScope, notice, le
   const hasUnknownEvents = projection.notices.some((item) => item.code === 'unknown_event_kind');
   const open = projection.balanceMinor > 0;
   const lateMinor = projection.lateInterestMinor ?? 0;
-  const rate = formatEa(toEffectiveAnnual(projection.terms.rate));
+  const rate = formatEa(toEffectiveAnnual(rateInForce(projection)));
   const progress = debt.principalMinor > 0 ? Math.max(0, Math.min(100, ((debt.principalMinor - projection.balanceMinor) / debt.principalMinor) * 100)) : 0;
   const planChanges = { onRateChange, onChargeChange, onLatePolicy, onRestructure };
   const hasPlanChanges = Object.values(planChanges).some(Boolean);

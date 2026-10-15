@@ -203,6 +203,7 @@ describe('public barrel (index.js)', () => {
         'planCommit',
         'previewChange',
         'project',
+        'rateInForce',
         'rateLabel',
         'registerProjector',
         'removeCharge',
