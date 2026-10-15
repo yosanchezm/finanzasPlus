@@ -12,9 +12,11 @@ export const MAX_PICK_BUTTONS = 6;
 export const PENDING_ID_MAX = 24;
 
 export const CONVENTION_BUTTONS = ['EA', 'NAMV', 'MV', 'NATV', 'NATA'];
+const ADJUST_KINDS = ['fix', 'change'];
 const CONVENTION_LABELS = { EA: 'E.A.', NAMV: 'N.A.M.V.', MV: 'M.V.', NATV: 'N.A.T.V.', NATA: 'N.A.T.A.' };
 const MODE_LABELS = { keep_term: 'Mantener el plazo', keep_installment: 'Mantener la cuota' };
 const MINIMUM_LABELS = { interest_fees_plus_pct: 'Intereses, cuota de manejo y % del saldo', installments_due: 'Intereses, cuota de manejo y cuotas del mes', pct_balance: '% del total del extracto', unknown: 'No sé' };
+const ADJUST_LABELS = { fix: 'Estaba mal desde el inicio', change: 'Cambió de verdad' };
 const STRATEGY_LABELS = { reduce_term: 'Reducir plazo', reduce_installment: 'Reducir cuota', advance_installments: 'Adelantar cuotas' };
 
 function fail(code, message) {
@@ -23,7 +25,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'setup'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'answers',
+ * @param {{ id: string, action: 'create'|'setup'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy'|'terms_correction', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'answers'|'adjust_kind',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -51,9 +53,28 @@ export function pickKeyboard(debts) {
   return debts.slice(0, MAX_PICK_BUTTONS).map((debt) => [button(String(debt.name).slice(0, 40), `nia:pick:${debt.$id}`)]);
 }
 
-/** Same buttons and callbacks as the other Nia confirmations. */
-export function confirmKeyboard() {
-  return [[button('Confirmar', 'nia:confirm'), button('Editar', 'nia:edit'), button('Cancelar', 'nia:cancel')]];
+/**
+ * Same buttons and callbacks as the other Nia confirmations. A step of an adjustment chain passes its pending id, so a Confirm tapped
+ * for an earlier step cannot confirm a later one (`nia:confirm:<id>`, at most 36 bytes).
+ */
+export function confirmKeyboard(id) {
+  return [[button('Confirmar', id ? `nia:confirm:${id}` : 'nia:confirm'), button('Editar', 'nia:edit'), button('Cancelar', 'nia:cancel')]];
+}
+
+/** Whether a rate or a term of an existing debt was wrong from the start (a correction) or really changed (the `nia:adj:` stage). */
+export function adjustKeyboard() {
+  return ADJUST_KINDS.map((kind) => [button(ADJUST_LABELS[kind], `nia:adj:${kind}`)]);
+}
+
+/**
+ * The pending of a chain step: the chain rides in it. Asserts it still fits in 1.5 KB.
+ * @throws {Error} with code `pending_too_large`
+ */
+export function withChain(pending, chain) {
+  const chained = { ...pending, chain };
+  const size = Buffer.byteLength(JSON.stringify(chained), 'utf8');
+  if (size > PENDING_MAX_BYTES) throw fail('pending_too_large', `the pending payload takes ${size} bytes; the limit is ${PENDING_MAX_BYTES}`);
+  return chained;
 }
 
 export function strategyKeyboard() {
@@ -91,15 +112,16 @@ export function chargeKeyboard(charges) {
   return charges.slice(0, MAX_PICK_BUTTONS).map((charge, index) => [button(String(charge.label).slice(0, 40), `nia:chg:${index}`)]);
 }
 
-/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum', value: (string|number|null) } | null} */
+/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'adjust', value: (string|number|null) } | null} */
 export function parseCallback(data) {
   if (data === 'nia:simpay') return { type: 'simpay', value: null };
-  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg|min):(.+)$/) : null;
+  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg|min|adj):(.+)$/) : null;
   if (!match) return null;
   const [, kind, value] = match;
   if (kind === 'pick') return { type: 'pick', value };
   if (kind === 'strat') return STRATEGIES.includes(value) ? { type: 'strategy', value } : null;
   if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
+  if (kind === 'adj') return ADJUST_KINDS.includes(value) ? { type: 'adjust', value } : null;
   if (kind === 'min') return MIN_RULES.includes(value) || value === 'unknown' ? { type: 'minimum', value } : null;
   if (kind === 'chg') return /^\d$/.test(value) ? { type: 'charge', value: Number(value) } : null;
   return CONVENTION_BUTTONS.includes(value) ? { type: 'convention', value } : null;

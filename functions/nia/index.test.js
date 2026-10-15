@@ -824,3 +824,74 @@ describe('advisor setup in the Nia entry point', () => {
     expect(fake.tables.debts).toHaveLength(0);
   });
 });
+
+describe('advisor adjust in the Nia entry point (chain of steps)', () => {
+  const adjustAnswers = (setup = {}) => [
+    { intent: 'debt', action: 'create' },
+    { action: 'setup', kind: 'vehicle', debtRef: 'vehiculo', rate: { value: 22, period: 'annual' }, setup: { adjust: true, adjustKind: 'fix', presets: { gmf: true }, ...setup } },
+  ];
+  const events = (kind) => fake.tables.debt_events.filter((event) => event.kind === kind);
+  const confirmId = (call) => buttons(call)[0].replace('nia:confirm:', '');
+
+  it('tells the classifier and the extractor that a message can adjust a registered debt', async () => {
+    fake = makeNet(adjustAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('la tasa del carro siempre fue 22 y agrega el 4x1000'));
+
+    expect(fake.prompts[1]).toContain('"adjust"');
+    expect(fake.prompts[1]).toContain('terms_correction');
+  });
+
+  it('runs two steps, each with its own Confirm: the second is previewed after the first is written, and the old button writes nothing', async () => {
+    fake = makeNet(adjustAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('la tasa del carro siempre fue 22 y agrega el 4x1000'));
+    expect(sent()[0].text).toContain('Esto es lo que veo para Crédito Vehículo:');
+    expect(sent()[1].text).toContain('Corrección de datos en Crédito Vehículo');
+    const first = confirmId(sent()[1]);
+    expect(buttons(sent()[1])).toEqual([`nia:confirm:${first}`, 'nia:edit', 'nia:cancel']);
+    expect(events('terms_correction')).toHaveLength(0);
+
+    await run(press(`nia:confirm:${first}`));
+    expect(events('terms_correction')).toHaveLength(1);
+    expect(sent()[3].text).toContain('Se agrega: GMF (4 x 1000)');
+    const second = confirmId(sent()[3]);
+    expect(second).not.toBe(first);
+    expect(events('charge_change')).toHaveLength(0);
+
+    await run(press(`nia:confirm:${first}`)); // the first button again
+    expect(sent()[4].text).toBe('Ese paso ya quedó registrado.');
+    expect(events('charge_change')).toHaveLength(0);
+
+    const confirm = press(`nia:confirm:${second}`);
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    expect(events('charge_change')).toHaveLength(1);
+    expect(events('terms_correction')).toHaveLength(1);
+    expect(sent()[5].text).toContain('agregué GMF (4 x 1000)');
+    expect(sent()[6].text).toContain('ya estaba registrado');
+  });
+
+  it('reports what was done and what was not run when the user cancels the second step, and a late Confirm writes nothing', async () => {
+    fake = makeNet(adjustAnswers());
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('la tasa del carro siempre fue 22 y agrega el 4x1000'));
+    const first = confirmId(sent()[1]);
+    await run(press(`nia:confirm:${first}`));
+    const second = confirmId(sent()[3]);
+    await run(press('nia:cancel'));
+
+    expect(sent()[4].text).toContain('Cancelado');
+    expect(sent()[4].text).toMatch(/Hecho:\n1\. Corregir la tasa/);
+    expect(sent()[4].text).toMatch(/No se ejecutó:\n1\. Agregar GMF/);
+    expect(fake.tables.bot_sessions[0].status).toBe('cancelled');
+
+    await run(press(`nia:confirm:${second}`));
+    expect(sent()[5].text).toBe('Ese paso ya quedó registrado.');
+    expect(events('charge_change')).toHaveLength(0);
+    expect(events('terms_correction')).toHaveLength(1);
+  });
+});

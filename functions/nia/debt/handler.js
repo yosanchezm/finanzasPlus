@@ -1,6 +1,7 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { buildSetupTerms } from './advisor/cardTerms.js';
 import { mergeCase } from './advisor/merge.js';
+import { STEP_RECORDED, advanceChain, chainReport, checklistText, planChain } from './advisor/chain.js';
 import { proposeSetup } from './advisor/propose.js';
 import { unsupportedText } from './advisor/unsupported.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
@@ -12,7 +13,7 @@ import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
+import { adjustKeyboard, buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard, withChain } from './pending.js';
 import { CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeAdd, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, setupText, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
@@ -28,11 +29,12 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification', adjust_kind: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';
 
 const CARDS_WEB = 'Simular y recomendar abonos aplica a préstamos con plan de cuotas; todavía no está disponible para tarjetas (ni en la web).';
+const TOO_MANY_STEPS = 'Son demasiados cambios para hacerlos de una vez. Pídeme primero los más importantes y luego seguimos con el resto; no guardé nada.';
 const TOO_MANY_CHARGES = 'Esa deuda tiene demasiados cargos para registrarla por Telegram. Créala desde la web, en la sección Deudas.';
 const ASK_EXTRA = '¿Cuánto quieres abonar? Escríbeme el monto en pesos.';
 const PROBLEMS = {
@@ -97,14 +99,18 @@ export function lastExplain(history) {
   return { topic: marker.topic, debtId: marker.debtId ?? null, ...stated, ...amount };
 }
 
-// Saves the session (and the turn) and then answers.
+// Saves the session (and the turn) and then answers. In a chain (`ctx.chain`, S6b) the chain rides in the pending and the Confirm button carries its id.
 async function say(deps, ctx, { text, keyboard, status, pending, explain }) {
-  await deps.saveSession(ctx.chatId, ctx.actorId, status, pending, turn(ctx.history, ctx.text, text, explain));
-  await deps.sendMessage(ctx.chatId, clampTelegram(text), keyboard);
+  const chained = ctx.chain && pending && !pending.done ? withChain(pending, ctx.chain) : pending;
+  const buttons = chained && chained.chain && chained.awaiting === 'confirm' ? confirmKeyboard(chained.id) : keyboard;
+  await deps.saveSession(ctx.chatId, ctx.actorId, status, chained, turn(ctx.history, ctx.text, text, explain));
+  await deps.sendMessage(ctx.chatId, clampTelegram(text), buttons);
 }
 
-// Answers without touching the session: the pending request, if any, stays as it was.
-const inform = (deps, ctx, text) => say(deps, ctx, { text, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+// Answers without touching the session: the pending request, if any, stays as it was. Inside a chain an answer that is a problem stops the chain and says so.
+const inform = (deps, ctx, text) => (ctx.chain
+  ? say(deps, ctx, { text: chainReport(ctx.chain, { issue: text }), status: 'completed', pending: null })
+  : say(deps, ctx, { text, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null }));
 const notify = (deps, ctx, text) => deps.sendMessage(ctx.chatId, clampTelegram(text));
 
 /**
@@ -510,7 +516,52 @@ function setupStage(proposal) {
   return proposal.questions.some((question) => question.field === 'minRule' && question.options) ? 'minimum' : 'answers';
 }
 
+// A described case about a debt that already exists (S6b, design G13 and G14): the advisor compares it with the stored debt and lists the differences
+// as steps. A question (the rate convention, fix or change, a preset amount) waits for its answer; otherwise the steps run as a chain.
+const ADJUST_STAGE = { convention: 'convention', fix_or_change: 'adjust_kind' };
+const ADJUST_KEYBOARDS = { convention: conventionKeyboard, adjust_kind: adjustKeyboard };
+const STEP_RUNNERS = { terms_correction: continueCorrection, rate_change: continueRate, charge_change: continueCharge, late_policy: continueLate };
+
+// One step: previewed against the live debt with its own pending id (a fresh one unless the caller passes the id it already holds); the chain rides in its pending.
+async function runStep(deps, ctx, chain, step, id = deps.ids.pending()) {
+  const stepCtx = { ...ctx, previous: null, chain };
+  const debt = (await loadDebts(deps)).find((item) => item.$id === chain.debtId);
+  if (!debt) return inform(deps, stepCtx, 'No encontré esa deuda.');
+  return STEP_RUNNERS[step.a](deps, stepCtx, id, debt, step.d);
+}
+
+async function startChain(deps, ctx, debt, proposal, id) {
+  const planned = planChain(debt.$id, proposal.steps);
+  if (!planned) return inform(deps, ctx, TOO_MANY_STEPS);
+  await notify(deps, ctx, checklistText(debt.name, proposal));
+  return runStep(deps, ctx, planned.chain, planned.step, id);
+}
+
+async function continueAdjust(deps, ctx, id, setupCase, legal) {
+  const tables = legal || (await loadLegal(deps));
+  const visible = (await loadDebts(deps, tables)).filter(inScopeFor(ctx.profile.ownerScope));
+  const target = findDebt(visible, setupCase.debtRef).match || null;
+  const proposal = proposeSetup(setupCase, target ? [{ ...target, events: await loadEvents(deps, target.$id) }] : visible, tables, today(deps));
+  if (proposal.invalid.length > 0) return inform(deps, ctx, proposal.invalid.map((item) => item.text).join('\n'));
+  const unsupported = proposal.unsupported.map((item) => item.text);
+  const [question] = proposal.questions;
+  if (question) {
+    const stage = ADJUST_STAGE[question.field] || 'answers';
+    let pending;
+    try {
+      pending = buildPending({ id, action: 'setup', awaiting: stage, debtId: target.$id, draft: { setup: setupCase } });
+    } catch (error) {
+      if (error.code !== 'pending_too_large') throw error;
+      return inform(deps, ctx, TOO_MANY_STEPS);
+    }
+    return say(deps, ctx, { text: [question.text, ...unsupported].join('\n\n'), keyboard: ADJUST_KEYBOARDS[stage] && ADJUST_KEYBOARDS[stage](), status: STATUS[stage], pending });
+  }
+  if (proposal.steps.length === 0) return inform(deps, ctx, [...proposal.assumptions.map((item) => item.text), ...unsupported].join('\n'));
+  return startChain(deps, ctx, target, proposal, id);
+}
+
 async function continueSetup(deps, ctx, id, setupCase, legal) {
+  if (setupCase.adjust) return continueAdjust(deps, ctx, id, setupCase, legal);
   const proposal = proposeSetup(setupCase, [], legal || (await loadLegal(deps)), today(deps));
   const stage = setupStage(proposal);
   // `asked` are the cycle fields this reply really asks (a stuck question is not asked again; a lone convention question asks none):
@@ -608,13 +659,16 @@ const CONVENTION_NEXT = {
  * @param {{ chatId: string, actorId: string, profile: object, history: object[], pending: (object | null) }} ctx `pending` is the session's pending payload.
  * @param {string} data The callback data.
  */
-export async function handleDebtCallback(deps, ctx, data) {
+export async function handleDebtCallback(deps, rawCtx, data) {
   const action = parseCallback(data);
   if (!action) return undefined;
-  const { pending } = ctx;
+  const { pending } = rawCtx;
+  // The buttons of a step of an adjustment chain keep the chain: whatever the step saves next carries it.
+  const ctx = pending && pending.chain ? { ...rawCtx, previous: null, chain: pending.chain } : rawCtx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge', minimum: 'minimum' }[action.type];
-  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change') || (action.type === 'minimum' && pending.action !== 'setup')) return notify(deps, ctx, STALE_BUTTON);
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge', minimum: 'minimum', adjust: 'adjust_kind' }[action.type];
+  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change') || (['minimum', 'adjust'].includes(action.type) && pending.action !== 'setup')) return notify(deps, ctx, STALE_BUTTON);
+  if (action.type === 'adjust') return continueSetup(deps, ctx, pending.id, { ...pending.draft.setup, adjustKind: action.value });
   if (action.type === 'convention') return CONVENTION_NEXT[pending.action] ? CONVENTION_NEXT[pending.action](deps, ctx, pending, action.value) : notify(deps, ctx, STALE_BUTTON);
   if (action.type === 'minimum') {
     const { setup } = pending.draft;
@@ -814,7 +868,8 @@ const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create
  * `dedupeKey` (`debt:{pendingId}`), the cost row has a deterministic id, and a 409 means "already
  * done", so a double tap, a race or a Telegram retry writes one event and at most one cost row.
  */
-export async function confirmDebt(deps, ctx, pending) {
+export async function confirmDebt(deps, ctx, pending, expectedId = null) {
+  if (expectedId && pending.id !== expectedId) return notify(deps, ctx, STEP_RECORDED);
   if (pending.done) return notify(deps, ctx, ALREADY[pending.action]);
   if (pending.awaiting !== 'confirm') return notify(deps, ctx, pending.action === 'setup' ? 'Antes de confirmar necesito que respondas las preguntas pendientes, con un mensaje o con los botones.' : 'Antes de confirmar necesito que elijas una de las opciones de los botones anteriores.');
   let outcome;
@@ -822,9 +877,25 @@ export async function confirmDebt(deps, ctx, pending) {
     outcome = COMMIT[pending.action] ? await COMMIT[pending.action](deps, ctx, pending) : await commitPay(deps, ctx, pending, today(deps));
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
-    return notify(deps, ctx, describeCoreError(error));
+    outcome = { text: describeCoreError(error), failed: true };
   }
-  if (outcome.failed) return notify(deps, ctx, outcome.text);
+  // A step of a chain that fails stops the chain: nothing more is written and the reply says what was done and what was not run.
+  if (outcome.failed) return pending.chain ? say(deps, { ...ctx, text: '' }, { text: chainReport(pending.chain, { issue: outcome.text }), status: 'completed', pending: null }) : notify(deps, ctx, outcome.text);
+  const next = pending.chain ? advanceChain(pending.chain) : null;
+  if (next) {
+    await notify(deps, ctx, outcome.duplicate ? ALREADY[pending.action] : outcome.text);
+    return runStep(deps, { ...ctx, text: '' }, next.chain, next.step);
+  }
   const done = { kind: 'debt', v: 1, id: pending.id, action: pending.action, done: true };
   return say(deps, { ...ctx, text: '' }, { text: outcome.duplicate ? ALREADY[pending.action] : outcome.text, status: 'completed', pending: done });
+}
+
+/**
+ * `nia:cancel` (or /cancelar) on a step of an adjustment chain: the step and the ones after it are not run, and the reply says what was done.
+ * @param {object} deps
+ * @param {{ chatId: string, actorId: string, history: object[] }} ctx
+ * @param {object} pending The session's pending, with its `chain`.
+ */
+export async function cancelDebtChain(deps, ctx, pending) {
+  return say(deps, { ...ctx, text: '' }, { text: chainReport(pending.chain, { cancelled: true }), status: 'cancelled', pending: null });
 }

@@ -4,7 +4,8 @@ import undici from 'undici';
 import { parseThresholds } from './debt/cashflow.js';
 import { paraphraseEnabled } from './debt/explain/paraphrase.js';
 import { glossaryTopic } from './debt/explain/router.js';
-import { answersOpenSetup, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
+import { STEP_RECORDED } from './debt/advisor/chain.js';
+import { answersOpenSetup, cancelDebtChain, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
 
@@ -967,12 +968,17 @@ async function confirmOperation(chatId, actorId, operation) {
   await sendMessage(chatId, `✅ Listo. ${operationTitle(operation)} quedó aplicado.`);
 }
 
-async function confirmPending(chatId, actorId, profile, updateId) {
+// `expectedId` is the pending id in `nia:confirm:<id>`, the Confirm of a step of an adjustment chain: a tap for a step that is over confirms nothing.
+async function confirmPending(chatId, actorId, profile, updateId, expectedId = null) {
   const session = await getSession(chatId);
   const pending = pendingFromSession(session);
   if (pending?.kind === 'debt') {
     // Before the status check: the second tap of a finished debt flow must answer "ya registrado".
-    await confirmDebt(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session) }, pending);
+    await confirmDebt(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session) }, pending, expectedId);
+    return;
+  }
+  if (expectedId) {
+    await sendMessage(chatId, STEP_RECORDED);
     return;
   }
   if (!pending || !['awaiting_confirmation', 'awaiting_clarification'].includes(session.status)) {
@@ -1027,6 +1033,13 @@ async function confirmPending(chatId, actorId, profile, updateId) {
 }
 
 async function cancelPending(chatId, actorId) {
+  const session = await getSession(chatId);
+  const pending = pendingFromSession(session);
+  if (pending?.kind === 'debt' && pending.chain && !pending.done) {
+    // A step of an adjustment chain: the steps after it are not run, and the reply says what was done.
+    await cancelDebtChain(debtDeps(), { chatId, actorId, history: historyFromSession(session) }, pending);
+    return;
+  }
   await saveSession(chatId, actorId, 'cancelled', null);
   await sendMessage(chatId, 'Cancelado. No guardé ningún movimiento.');
 }
@@ -1174,13 +1187,14 @@ async function handleUpdate(update) {
     if (!profile) return;
     const chatId = chatFromMessage(message);
     const actorId = String(callback.from.id);
-    if (callback.data === 'nia:confirm') await confirmPending(chatId, actorId, profile, update.update_id);
+    const confirmTap = String(callback.data || '').match(/^nia:confirm(?::([A-Za-z0-9_.-]{1,36}))?$/);
+    if (confirmTap) await confirmPending(chatId, actorId, profile, update.update_id, confirmTap[1] || null);
     else if (callback.data === 'nia:cancel') await cancelPending(chatId, actorId);
     else if (/^nia:exp:/.test(callback.data || '')) {
       // Stateless and read-only: routed before the stage check, so it needs no pending and leaves the waiting one as it is.
       const session = await getSession(chatId);
       await handleExplainCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), previous: pendingFromSession(session), sessionStatus: session?.status }, callback.data);
-    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|min:|simpay$)/.test(callback.data || '')) {
+    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|min:|adj:|simpay$)/.test(callback.data || '')) {
       const session = await getSession(chatId);
       await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
     } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');

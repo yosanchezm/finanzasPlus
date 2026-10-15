@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPLAIN_TOPICS } from '../../../packages/finance-core/index.js';
 import {
   CALLBACK_MAX_BYTES,
+  adjustKeyboard,
   PENDING_MAX_BYTES,
   buildPending,
   chargeKeyboard,
@@ -298,5 +299,22 @@ describe('minimum payment rule callbacks (S5c)', () => {
 
     expect(pending).toMatchObject({ kind: 'debt', action: 'setup', awaiting: 'minimum' });
     expect(bytes(JSON.stringify(pending))).toBeLessThan(PENDING_MAX_BYTES);
+  });
+});
+
+describe('the buttons of an adjustment (S6b)', () => {
+  it('offers «estaba mal desde el inicio» and «cambió de verdad» as nia:adj:fix and nia:adj:change', () => {
+    const keyboard = adjustKeyboard();
+
+    expect(keyboard.map((row) => row[0].callback_data)).toEqual(['nia:adj:fix', 'nia:adj:change']);
+    expect(keyboard.map((row) => row[0].text)).toEqual(['Estaba mal desde el inicio', 'Cambió de verdad']);
+    expect(parseCallback('nia:adj:fix')).toEqual({ type: 'adjust', value: 'fix' });
+    expect(parseCallback('nia:adj:change')).toEqual({ type: 'adjust', value: 'change' });
+  });
+
+  it('refuses a kind that is not one of the two, and does not confuse the id Confirm with a debt button', () => {
+    expect(parseCallback('nia:adj:other')).toBeNull();
+    expect(parseCallback('nia:adj:')).toBeNull();
+    expect(parseCallback('nia:confirm:p1')).toBeNull();
   });
 });

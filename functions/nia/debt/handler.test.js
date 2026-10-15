@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { EXPLAIN_TOPICS, normalizeRate, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../packages/finance-core/test/helpers/explainCopy.js';
 import { pesos } from './format.js';
-import { answersOpenSetup, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, isOpenSetup, lastExplain, loadDebts, loadLegal } from './handler.js';
+import { answersOpenSetup, cancelDebtChain, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, isOpenSetup, lastExplain, loadDebts, loadLegal } from './handler.js';
 import { buildPending } from './pending.js';
+import { previewChargeChange } from './planChange.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
 const ACTOR = 'telegram:1';
@@ -2948,5 +2949,196 @@ describe('terms_correction (S6a)', () => {
     await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:c2');
     expect(w.sent[1].text).toContain('Corrección de datos en Mastercard');
     expect(w.lastPending()).toMatchObject({ action: 'terms_correction', awaiting: 'confirm', debtId: 'c2', draft: { card: { dueDay: 25 } } });
+  });
+});
+
+describe('advisor adjust: the chain of steps (S6b)', () => {
+  const fixtureCard = JSON.parse(readFileSync(new URL('../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+  const CARD = { ...fixtureCard.terms, late: { mode: 'usury', graceDays: 0 } };
+  const visa = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(CARD) });
+  // A card opened last month, so its next statement and minimum payment are still ahead and the figures of a preview move with the terms.
+  const freshVisa = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms({ ...CARD, openedOn: '2026-09-01', charges: [], card: { statementDay: 10, dueDay: 25, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } }) });
+  const adjustAnswer = (setup = {}, extra = {}) => ({ action: 'setup', kind: 'card', debtRef: 'visa', setup: { adjust: true, adjustKind: 'fix', card: { statementDay: 20 }, presets: { gmf: true }, ...setup }, ...extra });
+  const eventsOf = (w, kind) => w.tables.debt_events.filter((event) => event.kind === kind);
+  const chainWorld = (answers, debts = [visa()], { seeded = false } = {}) => {
+    const w = world({ debts, answers });
+    if (!seeded) w.tables.debt_events.splice(0); // the helper seeds a loan disbursement for every debt; a card has none
+    let n = 0;
+    w.deps.ids.pending = () => `p${++n}`; // one id per step: the chain depends on it
+    return w;
+  };
+  const gmfOnTheWeb = { $id: 'web1', debtId: 'c1', householdId: 'h1', kind: 'charge_change', effectiveOn: '2026-10-01', amountMinor: 0, payloadJson: JSON.stringify({ charges: [{ id: 'gmf', kind: 'tax', label: 'GMF (4 x 1000)', basis: 'pctOfSubtotal', value: 0.4, cadence: 'per_installment' }] }), actorId: ACTOR, source: 'web', dedupeKey: 'web:1', $createdAt: '2026-10-01T12:00:00.000Z' };
+  const bytes = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+  it('shows the checklist, then the first step with its own Confirm; the second step is previewed on the corrected debt with a fresh id, and writes once', async () => {
+    const w = chainWorld([adjustAnswer({ card: { minPct: 50 } })], [freshVisa()]);
+    await handleDebt(w.deps, ctx({ text: 'mi tarjeta Visa: el mínimo siempre fue el 50 %, y agrega el 4x1000' }));
+
+    expect(w.sent[0].text).toContain('Esto es lo que veo para Visa:');
+    expect(w.sent[0].text).toMatch(/1\. Corregir el porcentaje del pago mínimo a 50 %\n2\. Agregar GMF/);
+    expect(w.sent[1].text).toContain('Porcentaje del pago mínimo: 5 % → 50 %');
+    expect(buttons(w.sent[1].keyboard)).toEqual(['nia:confirm:p1', 'nia:edit', 'nia:cancel']);
+    const first = w.lastPending();
+    expect(first).toMatchObject({ id: 'p1', action: 'terms_correction', awaiting: 'confirm', debtId: 'c1', chain: { debtId: 'c1', now: 'Corregir el porcentaje del pago mínimo a 50 %', done: [], rest: [{ a: 'charge_change', l: 'Agregar GMF (4 x 1000)' }] } });
+    expect(bytes(first)).toBeLessThan(1500);
+    expect(eventsOf(w, 'terms_correction')).toHaveLength(0);
+
+    await confirmDebt(w.deps, ctx(), first, 'p1');
+
+    expect(eventsOf(w, 'terms_correction')).toHaveLength(1);
+    expect(eventsOf(w, 'terms_correction')[0]).toMatchObject({ dedupeKey: 'debt:p1', $id: 'dep1' });
+    expect(w.sent[2].text).toContain('registré la corrección de datos de Visa');
+    const second = w.lastPending();
+    expect(second).toMatchObject({ id: 'p2', action: 'charge_change', awaiting: 'confirm', chain: { done: ['Corregir el porcentaje del pago mínimo a 50 %'], now: 'Agregar GMF (4 x 1000)', rest: [] } });
+    expect(bytes(second)).toBeLessThan(1500);
+    expect(buttons(w.sent[3].keyboard)).toEqual(['nia:confirm:p2', 'nia:edit', 'nia:cancel']);
+    const draft = { effectiveOn: '2026-10-13', op: 'add', add: { presets: { gmf: true }, charge: null } };
+    const onCorrected = previewChargeChange({ debt: freshVisa(), events: w.tables.debt_events, today: '2026-10-13', draft });
+    const onOriginal = previewChargeChange({ debt: freshVisa(), events: [], today: '2026-10-13', draft });
+    expect(w.sent[3].text).toBe(plain(onCorrected.text));
+    expect(w.sent[3].text).not.toBe(plain(onOriginal.text));
+
+    await confirmDebt(w.deps, ctx(), second, 'p2');
+
+    expect(eventsOf(w, 'charge_change')).toHaveLength(1);
+    expect(eventsOf(w, 'charge_change')[0]).toMatchObject({ dedupeKey: 'debt:p2', $id: 'dep2' });
+    expect(w.sent[4].text).toContain('agregué GMF (4 x 1000)');
+    expect(w.lastPending()).toMatchObject({ done: true });
+  });
+
+  it('answers «Ese paso ya quedó registrado» to a double tap with the id of a step that is over, and writes nothing', async () => {
+    const w = chainWorld([adjustAnswer()]);
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending(), 'p1');
+    const second = w.lastPending();
+    const before = w.sessions.length;
+    await confirmDebt(w.deps, ctx(), second, 'p1'); // the first Confirm button again, now that the session holds step 2
+
+    expect(w.sent[w.sent.length - 1].text).toBe('Ese paso ya quedó registrado.');
+    expect(w.sessions).toHaveLength(before);
+    expect(eventsOf(w, 'terms_correction')).toHaveLength(1);
+    expect(eventsOf(w, 'charge_change')).toHaveLength(0);
+  });
+
+  it('still confirms with the plain nia:confirm of every other flow (no id)', async () => {
+    const w = chainWorld([payAnswer()], [debtRow('d1', 'Crédito Vehículo')], { seeded: true });
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.tables.debt_events.filter((event) => event.kind === 'payment')).toHaveLength(1);
+  });
+
+  it('stops the chain when the next step cannot be previewed, and reports what was done and what was not run', async () => {
+    const w = chainWorld([adjustAnswer()]);
+    await handleDebt(w.deps, ctx());
+    w.tables.debt_events.push(gmfOnTheWeb); // the GMF is saved on the web after the plan was made
+    await confirmDebt(w.deps, ctx(), w.lastPending(), 'p1');
+
+    const report = w.sent[w.sent.length - 1].text;
+    expect(report).toContain('Me detengo aquí');
+    expect(report).toContain('ya existe');
+    expect(report).toMatch(/Hecho:\n1\. Corregir el día de corte a 20/);
+    expect(report).toMatch(/No se ejecutó:\n1\. Agregar GMF \(4 x 1000\)/);
+    expect(w.sessions[w.sessions.length - 1]).toMatchObject({ status: 'completed', pending: null });
+    expect(eventsOf(w, 'charge_change')).toHaveLength(1); // only the one from the web
+  });
+
+  it('stops the chain when the Confirm of a step fails, writes nothing for it and reports the rest as not run', async () => {
+    const w = chainWorld([adjustAnswer({ presets: { gmf: true }, lateStated: 'none' })]);
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending(), 'p1');
+    w.tables.debt_events.push(gmfOnTheWeb); // saved between the preview of step 2 and its Confirm
+    await confirmDebt(w.deps, ctx(), w.lastPending(), 'p2');
+
+    const report = w.sent[w.sent.length - 1].text;
+    expect(report).toContain('ya existe');
+    expect(report).toMatch(/Hecho:\n1\. Corregir el día de corte a 20/);
+    expect(report).toMatch(/No se ejecutó:\n1\. Agregar GMF \(4 x 1000\)\n2\. Quitar la mora/);
+    expect(w.lastPending()).toBeNull();
+    expect(eventsOf(w, 'charge_change')).toHaveLength(1);
+    expect(eventsOf(w, 'late_policy')).toHaveLength(0);
+  });
+
+  it('cancelling step 2 of 3 skips step 3 and reports step 1 done and two not run', async () => {
+    const w = chainWorld([adjustAnswer({ presets: { gmf: true }, lateStated: 'none' })]);
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending(), 'p1');
+    const second = w.lastPending();
+    await cancelDebtChain(w.deps, ctx(), second);
+
+    const report = w.sent[w.sent.length - 1].text;
+    expect(report).toContain('Cancelado');
+    expect(report).toMatch(/Hecho:\n1\. Corregir el día de corte a 20/);
+    expect(report).toMatch(/No se ejecutó:\n1\. Agregar GMF \(4 x 1000\)\n2\. Quitar la mora/);
+    expect(w.sessions[w.sessions.length - 1]).toMatchObject({ status: 'cancelled', pending: null });
+    expect(eventsOf(w, 'terms_correction')).toHaveLength(1);
+    expect(eventsOf(w, 'charge_change')).toHaveLength(0);
+    expect(eventsOf(w, 'late_policy')).toHaveLength(0);
+  });
+
+  describe('fix or change', () => {
+    const rateAnswer = () => ({ action: 'setup', kind: 'vehicle', debtRef: 'vehiculo', rate: { value: 22, period: 'annual' }, setup: { adjust: true, adjustKind: null } });
+    const loanWorld = () => chainWorld([rateAnswer()], [debtRow('d1', 'Crédito Vehículo')], { seeded: true });
+
+    it('asks with nia:adj buttons when the rate differs and the model could not tell, and writes nothing', async () => {
+      const w = loanWorld();
+      await handleDebt(w.deps, ctx({ text: 'la tasa del carro es 22' }));
+
+      expect(w.sent[0].text).toContain('Crédito Vehículo');
+      expect(buttons(w.sent[0].keyboard)).toEqual(['nia:adj:fix', 'nia:adj:change']);
+      expect(w.lastPending()).toMatchObject({ action: 'setup', awaiting: 'adjust_kind', debtId: 'd1' });
+      expect(w.sessions[0].status).toBe('awaiting_clarification');
+      expect(w.tables.debt_events).toHaveLength(1);
+    });
+
+    it('«wrong from the start» runs a terms_correction of the rate, with its own Confirm', async () => {
+      const w = loanWorld();
+      await handleDebt(w.deps, ctx());
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:adj:fix');
+
+      expect(w.sent[w.sent.length - 1].text).toContain('Corrección de datos en Crédito Vehículo');
+      expect(buttons(w.sent[w.sent.length - 1].keyboard)[0]).toBe('nia:confirm:p1');
+      await confirmDebt(w.deps, ctx(), w.lastPending(), 'p1');
+      expect(eventsOf(w, 'terms_correction')).toHaveLength(1);
+      expect(eventsOf(w, 'rate_change')).toHaveLength(0);
+    });
+
+    it('«it really changed» runs a rate_change, and the mode question keeps the chain and the id until the Confirm', async () => {
+      const w = loanWorld();
+      await handleDebt(w.deps, ctx());
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:adj:change');
+
+      expect(buttons(w.sent[w.sent.length - 1].keyboard)).toEqual(['nia:mode:keep_term', 'nia:mode:keep_installment']);
+      expect(w.lastPending()).toMatchObject({ action: 'rate_change', awaiting: 'mode', chain: { now: expect.stringContaining('Cambiar la tasa') } });
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:mode:keep_term');
+      expect(buttons(w.sent[w.sent.length - 1].keyboard)[0]).toBe(`nia:confirm:${w.lastPending().id}`);
+      await confirmDebt(w.deps, ctx(), w.lastPending(), w.lastPending().id);
+
+      expect(eventsOf(w, 'rate_change')).toHaveLength(1);
+      expect(eventsOf(w, 'terms_correction')).toHaveLength(0);
+    });
+
+    it('ignores an nia:adj button when the pending is not waiting for that answer', async () => {
+      const w = loanWorld();
+      await handleDebt(w.deps, ctx());
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:adj:fix');
+      const sessions = w.sessions.length;
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:adj:change');
+
+      expect(w.sent[w.sent.length - 1].text).toContain('ya no aplica');
+      expect(w.sessions).toHaveLength(sessions);
+    });
+  });
+
+  it('says what is not supported and that nothing changes when the description only has a card limit', async () => {
+    const w = chainWorld([adjustAnswer({ card: {}, presets: {}, mentions: ['card_limit'] })]);
+    await handleDebt(w.deps, ctx({ text: 'mi cupo es 5 millones' }));
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('no soportado aún');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(w.tables.debt_events).toHaveLength(0);
   });
 });
