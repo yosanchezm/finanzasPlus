@@ -1,10 +1,19 @@
-import { debtKindOf } from '../ledger/project.js';
+import { debtKindOf, project } from '../ledger/project.js';
+import { legalOf } from '../legal.js';
 import { EXPLAIN_COPY, assertTopic, releasedTopics, topicCopyKeys } from './copy.js';
+import { ratesFacts } from './facts/rates.js';
+import { usuryFacts } from './facts/usury.js';
 import { TOPIC_KINDS } from './topics.js';
 
-// Facts of an explanation (design G1). Pure and read-only. S0 ships the skeleton only: an unknown topic is
-// rejected, a topic that does not fit the debt kind is "not_applicable", and a topic whose copy is not
-// released is "under_review". The per-topic builders arrive with S1 to S3.
+// Facts of an explanation (design G1). Pure and read-only. An unknown topic is rejected, a topic that does not fit
+// the debt kind is "not_applicable", and a topic whose copy is not released is "under_review". Otherwise the topic's
+// builder adds the figures (`numbers`, and `text` with the same figures pre-formatted). A topic with no builder yet
+// (the card, restructure and prepayment topics of S2 and S3) keeps the generic answer.
+const BUILDERS = { rate_conventions: ratesFacts, usury_ibc: usuryFacts };
+
+const sameSource = (a, b) => a.label === b.label && a.url === b.url;
+const uniqueSources = (entries) =>
+  entries.reduce((list, entry) => list.concat(entry.sources.filter((source) => !list.some((seen) => sameSource(seen, source)))), []);
 
 /**
  * @param {string} topic One of EXPLAIN_TOPICS.
@@ -16,7 +25,7 @@ import { TOPIC_KINDS } from './topics.js';
  * @returns {{ topic: string, asOf: string, status: 'ok'|'generic'|'not_applicable'|'under_review',
  *   debt: ({ id: string, name: string, kind: 'loan'|'card' }|null), dataSource: 'debt'|'stated'|'generic',
  *   numbers: object, text: object, approximate: string[], notices: object[], copy: string[],
- *   sources: object[], reviewedOn: (string|null) }}
+ *   sources: object[], reviewedOn: (string|null), copyKeys?: string[] }} `copy[i]` is the text of `copyKeys[i]`.
  */
 export function explainFacts(topic, debt, events, legal, today, opts = {}) {
   assertTopic(topic);
@@ -38,12 +47,28 @@ export function explainFacts(topic, debt, events, legal, today, opts = {}) {
   };
   if (kind && TOPIC_KINDS[topic] && TOPIC_KINDS[topic] !== kind) return { ...facts, status: 'not_applicable' };
   if (!releasedTopics(copy).includes(topic)) return { ...facts, status: 'under_review' };
-  const entries = topicCopyKeys(topic).map((key) => copy[key]);
+  const copyKeys = topicCopyKeys(topic);
+  const entries = copyKeys.map((key) => copy[key]);
   const dates = entries.map((entry) => entry.reviewedOn).sort();
-  return {
+  const released = {
     ...facts,
     copy: entries.map((entry) => entry.text),
-    sources: entries[0].sources,
+    copyKeys,
+    sources: uniqueSources(entries),
     reviewedOn: dates[dates.length - 1],
+  };
+  const build = BUILDERS[topic];
+  if (!build) return released;
+  const tables = legalOf(debt || undefined, { legal });
+  const projection = debt ? project(debt, events, today, { legal: tables }) : null;
+  const built = build({ debt, projection, events, legal: tables, today, opts });
+  return {
+    ...released,
+    status: built.status || 'ok',
+    dataSource: built.dataSource || released.dataSource,
+    numbers: built.numbers || {},
+    text: built.text || {},
+    approximate: built.approximate || [],
+    notices: built.notices || [],
   };
 }
