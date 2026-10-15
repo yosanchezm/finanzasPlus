@@ -444,14 +444,22 @@ describe('charge_change in the Nia entry point', () => {
     expect(sent().slice(2).map((call) => /ya estaba registrado|No tengo una solicitud/.test(call.text))).toEqual([false, true, true]);
   });
 
-  it('refuses to add a charge and points to the web', async () => {
-    fake = makeNet(chargeAnswers({ op: 'add', chargeRef: 'seguro de desempleo', newValue: 20000 }));
+  it('adds a charge from explicit fields end to end: one preview, one event for a repeated Confirm', async () => {
+    fake = makeNet(chargeAnswers({ op: 'add', chargeRef: null, kind: 'insurance', label: 'Seguro de desempleo', basis: 'fixed', newValue: 20000, cadence: 'per_installment' }));
     seedCharged();
 
-    await run(message('agrega un seguro de desempleo al carro'));
-
-    expect(sent()[0].text).toContain('web');
+    await run(message('agrega un seguro de desempleo de 20 mil mensual al carro'));
+    expect(sent()[0].text).toContain('Se agrega: Seguro de desempleo');
     expect(chargeEvents()).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+
+    expect(chargeEvents()).toHaveLength(1);
+    expect(JSON.parse(chargeEvents()[0].payloadJson).charges.map((charge) => charge.label)).toEqual(['Seguro de vida', 'Seguro todo riesgo', 'Cuota de manejo', 'Seguro de desempleo']);
+    expect(sent()[1].text).toContain('agregué Seguro de desempleo');
+    expect(sent()[2].text).toContain('ya estaba registrado');
   });
 });
 

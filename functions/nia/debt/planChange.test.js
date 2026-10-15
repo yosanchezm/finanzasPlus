@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { buildRestructureTerms, previewChange, project, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
+import { addExplicitCharge, addPresetCharge, buildRestructureTerms, previewChange, project, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
 import { PENDING_MAX_BYTES, buildPending } from './pending.js';
-import { BACKDATED_NOTE, TOO_LOW_NOTE, chargesInForce, describeChargeChange, describeRestructure, findCharge, modesFor, previewChargeChange, previewRateChange, previewRestructure, readChargeChange, readPlanChange, readRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
+import { BACKDATED_NOTE, TOO_LOW_NOTE, chargesInForce, describeChargeAdd, describeChargeChange, describeRestructure, findCharge, modesFor, previewChargeChange, previewRateChange, previewRestructure, readChargeChange, readPlanChange, readRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 
 const TODAY = '2026-10-13';
 const EA = (value) => ({ value, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
@@ -194,7 +194,7 @@ describe('readChargeChange', () => {
   it('reads a change of value, a removal and an addition, with the date defaulting to today', () => {
     expect(read({ chargeRef: ' seguro de vida ', op: 'set', newValue: 0.1 })).toEqual({ effectiveOn: TODAY, chargeRef: 'seguro de vida', op: 'set', newValue: 0.1, missing: [], problems: [] });
     expect(read({ chargeRef: 'seguro', op: 'remove', effectiveOn: '2026-11-01' })).toMatchObject({ effectiveOn: '2026-11-01', op: 'remove', newValue: null, missing: [] });
-    expect(read({ chargeRef: null, op: 'add', newValue: 50000 })).toMatchObject({ op: 'add', missing: [] });
+    expect(read({ chargeRef: null, op: 'add', label: 'Seguro', basis: 'fixed', newValue: 50000 })).toMatchObject({ op: 'add', missing: [] });
   });
 
   it('infers a change of value when only a value came, and asks for what is missing', () => {
@@ -356,6 +356,138 @@ describe('describeChargeChange', () => {
 
     expect(text).toContain('registré el cambio de cargos de Crédito Vehículo');
     expect(text).toContain('quité Seguro de vida');
+    expect(text).toContain(`Próxima cuota (con cargos): ${pesos(figures.before.nextTotalMinor)} → ${pesos(figures.after.nextTotalMinor)}`);
+  });
+});
+
+// ---- charge add (S6a, NA8) ----
+
+const LIFE_12K = { kind: 'insurance', label: 'Seguro de vida', basis: 'fixed', value: 12000, cadence: 'per_installment' };
+const cardRow = () => debtRow(cardTerms, { kind: 'card', name: 'Visa' });
+const runAdd = ({ debt = chargedLoan(), events = [disbursement], add, effectiveOn = TODAY } = {}) => previewChargeChange({ debt, events, today: TODAY, draft: { effectiveOn, op: 'add', add } });
+
+describe('readChargeChange: add', () => {
+  const read = (raw, presets = {}) => readChargeChange(raw, { today: TODAY, presets });
+
+  it('keeps the presets the user mentioned, or the explicit fields, in an add block', () => {
+    expect(read({ op: 'add' }, { fee: 45000, iva: 19 })).toMatchObject({ op: 'add', missing: [], problems: [], add: { presets: { fee: 45000, iva: 19 }, charge: null } });
+    expect(read({ op: 'add', kind: 'insurance', label: ' Seguro de vida ', basis: 'fixed', newValue: 12000 })).toMatchObject({ op: 'add', missing: [], add: { presets: {}, charge: LIFE_12K } });
+    expect(read({ op: 'add', kind: 'tax', label: 'Impuesto', basis: 'pctOfCharge', newValue: 10, cadence: 'annual', refLabel: 'cuota de manejo' }).add.charge)
+      .toEqual({ kind: 'tax', label: 'Impuesto', basis: 'pctOfCharge', value: 10, cadence: 'annual', refLabel: 'cuota de manejo' });
+  });
+
+  it('defaults an unknown kind to other and an unknown cadence to per_installment', () => {
+    expect(read({ op: 'add', kind: 'raro', label: 'Cargo X', basis: 'fixed', newValue: 500, cadence: 'weekly' }).add.charge).toEqual({ kind: 'other', label: 'Cargo X', basis: 'fixed', value: 500, cadence: 'per_installment' });
+  });
+
+  it('asks which charge it is and for the amounts that were not given', () => {
+    expect(read({ op: 'add', newValue: 50000 }).missing).toEqual(['charge_spec']);
+    expect(read({ op: 'add', label: 'Seguro', basis: 'fixed' }).missing).toEqual(['charge_value']);
+    expect(read({ op: 'add' }, { life: null }).missing).toEqual(['charge_value']);
+    expect(read({ op: 'add' }, { gmf: true }).missing).toEqual([]);
+  });
+
+  it('refuses a negative explicit value and leaves edit and remove without an add block', () => {
+    expect(read({ op: 'add', label: 'Seguro', basis: 'fixed', newValue: -1 })).toMatchObject({ problems: ['invalid_amount'], missing: [] });
+    expect(read({ op: 'remove', chargeRef: 'manejo' }).add).toBeUndefined();
+  });
+});
+
+describe('previewChargeChange: add', () => {
+  it('previews a life insurance of 12,000 a month on a card from the effective date', () => {
+    const debt = debtRow({ ...cardTerms, openedOn: '2026-09-01', card: { ...cardTerms.card, statementDay: 10, dueDay: 25 } }, { kind: 'card', name: 'Visa' });
+    const add = { presets: {}, charge: LIFE_12K };
+    const result = runAdd({ debt, events: [], add, effectiveOn: '2026-09-01' });
+    const expected = previewChange(debt, [], { kind: 'charge_change', effectiveOn: '2026-09-01', charges: addExplicitCharge([], LIFE_12K) }, { on: TODAY });
+    const text = plain(result.text);
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({ effectiveOn: '2026-09-01', op: 'add', add });
+    expect(text).toContain('Cambio de cargos en Visa');
+    expect(text).toContain('Desde: 2026-09-01');
+    expect(text).toContain(`Se agrega: Seguro de vida: ${pesos(12000)}`);
+    expect(text).toContain(`Próximo pago mínimo: ${pesos(expected.before.nextTotalMinor)} → ${pesos(expected.after.nextTotalMinor)}`);
+    expect(expected.after.nextTotalMinor).toBeGreaterThan(expected.before.nextTotalMinor);
+    expect(text).toContain('Aún no se guarda');
+  });
+
+  it('previews a fee of 45,000 with its IVA preset: IVA 8,550 linked to the fee', () => {
+    const loan = runAdd({ debt: debtRow(), add: { presets: { fee: 45000, iva: 19 }, charge: null } });
+    const card = runAdd({ debt: cardRow(), events: [], add: { presets: { fee: 45000, iva: 19 }, charge: null } });
+
+    expect(plain(loan.text)).toContain(`Comisión o cuota de manejo: ${pesos(45000)}`);
+    expect(plain(loan.text)).toContain(`IVA sobre la comisión: ${pesos(8550)}`);
+    expect(plain(card.text)).toContain(`Cuota de manejo: ${pesos(45000)}`);
+    expect(plain(card.text)).toContain(`IVA: ${pesos(8550)}`);
+    expect(plain(card.text)).toContain('Se agregan:');
+  });
+
+  it('adds an IVA preset to the single fee the debt already has, whatever its id', () => {
+    const debt = debtRow({ ...loanTerms, charges: [{ id: 'cuota', kind: 'fee', label: 'Admin', basis: 'fixed', value: 20000, cadence: 'per_installment' }] });
+    const result = runAdd({ debt, add: { presets: { iva: 19 }, charge: null } });
+
+    expect(plain(result.text)).toContain(`IVA sobre la comisión: ${pesos(3800)}`);
+  });
+
+  it('validates the added charge against the resulting set and says what is wrong in Spanish', () => {
+    const exists = runAdd({ add: { presets: { fee: 5000 }, charge: null } });
+    const noFee = runAdd({ debt: debtRow(), add: { presets: { iva: 19 }, charge: null } });
+    const dangling = runAdd({ add: { presets: {}, charge: { kind: 'tax', label: 'Extra', basis: 'pctOfCharge', value: 10, cadence: 'per_installment', refLabel: 'no existe' } } });
+    const fractional = runAdd({ add: { presets: {}, charge: { ...LIFE_12K, value: 12000.5 } } });
+
+    expect(exists).toMatchObject({ ok: false, issue: expect.stringContaining('ya existe') });
+    expect(noFee.issue).toContain('cuota de manejo');
+    expect(dangling.issue).toContain('no existe');
+    expect(fractional.issue).toContain('pesos enteros');
+    for (const result of [exists, noFee, dangling, fractional]) expect(result.issue).not.toContain('usa la web');
+  });
+
+  it('adds the backdated note when the new charge starts before a recorded payment, and not otherwise', () => {
+    const payment = event('p1', 'payment', '2026-10-10', 390381);
+    const add = { presets: {}, charge: LIFE_12K };
+    const past = runAdd({ debt: debtRow(), events: [disbursement, payment], effectiveOn: '2026-09-10', add });
+    const now = runAdd({ debt: debtRow(), events: [disbursement, payment], add });
+
+    expect(plain(past.text)).toContain(BACKDATED_NOTE);
+    expect(plain(now.text)).not.toContain(BACKDATED_NOTE);
+  });
+
+  it('does not refuse a debt with no charges when the operation is an add (it still refuses an edit)', () => {
+    expect(runAdd({ debt: debtRow(), add: { presets: { gmf: true }, charge: null } })).toMatchObject({ ok: true });
+    expect(runCharge({ debt: debtRow(), draft: { chargeRef: 'seguro' } }).ok).toBe(false);
+  });
+});
+
+describe('rebuildCharges: add (Confirm)', () => {
+  it('adds the presets and the explicit charge to the charges in force now', () => {
+    const rebuiltAdd = rebuildCharges(CHARGES.slice(0, 2), { op: 'add', add: { presets: { iva: 19, gmf: true }, charge: LIFE_12K } });
+
+    expect(rebuiltAdd.charges.map((charge) => charge.id)).toEqual(['life', 'fee', 'iva', 'gmf', 'c1']);
+    expect(rebuiltAdd.charges.find((charge) => charge.id === 'iva')).toMatchObject({ basis: 'pctOfCharge', refId: 'fee', value: 19 });
+    expect(rebuiltAdd.added.map((charge) => charge.id)).toEqual(['iva', 'gmf', 'c1']);
+  });
+
+  it('takes the IVA included in the amount apart from the fee: 53,550 is a 45,000 fee and an IVA of 8,550', () => {
+    const rebuiltAdd = rebuildCharges([], { op: 'add', add: { presets: { fee: 53550, iva: 19, ivaIncluded: true }, charge: null } });
+
+    expect(rebuiltAdd.added.map((charge) => [charge.id, charge.value])).toEqual([['fee', 45000], ['iva', 19]]);
+  });
+
+  it('uses the card ids for a card, and reports a charge that no longer fits as an issue instead of throwing', () => {
+    expect(rebuildCharges([], { op: 'add', add: { presets: { fee: 45000, iva: 19 }, charge: null } }, { card: true }).charges.map((charge) => charge.id)).toEqual(['mgmt_fee', 'mgmt_iva']);
+    expect(rebuildCharges(CHARGES, { op: 'add', add: { presets: { fee: 9000 }, charge: null } })).toMatchObject({ issue: expect.stringContaining('ya existe') });
+  });
+});
+
+describe('describeChargeAdd', () => {
+  it('reports what was added with the next installment before and after', () => {
+    const debt = debtRow();
+    const added = addPresetCharge([], 'life', 0.05);
+    const figures = previewChange(debt, [disbursement], { kind: 'charge_change', effectiveOn: TODAY, charges: added }, { on: TODAY });
+    const text = plain(describeChargeAdd(debt, added, { effectiveOn: TODAY }, figures));
+
+    expect(text).toContain('registré el cambio de cargos de Crédito Vehículo');
+    expect(text).toContain('agregué Seguro de vida');
     expect(text).toContain(`Próxima cuota (con cargos): ${pesos(figures.before.nextTotalMinor)} → ${pesos(figures.after.nextTotalMinor)}`);
   });
 });

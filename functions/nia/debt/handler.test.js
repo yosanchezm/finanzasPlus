@@ -1170,16 +1170,83 @@ describe('charge_change (E2)', () => {
     expect(chargeEvents(w)).toHaveLength(0);
   });
 
-  it('refuses to add a charge, pointing to the web, without even looking for a debt', async () => {
-    const w = chargeWorld([changeAnswer({ op: 'add', chargeRef: 'seguro de desempleo', newValue: 20000 })]);
-    await handleDebt(w.deps, ctx({ text: 'agrega un seguro de desempleo al carro' }));
+  describe('add (S6a)', () => {
+    const CARD = { kind: 'card', principalMinor: 500000, openedOn: '2026-09-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 10, dueDay: 25, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+    const visa = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(CARD) });
+    const addAnswer = (planChange = {}, extra = {}) => changeAnswer({ op: 'add', chargeRef: null, ...planChange }, extra);
+    const LIFE = { kind: 'insurance', label: 'Seguro de vida', basis: 'fixed', newValue: 12000, cadence: 'per_installment', effectiveOn: '2026-09-01' };
 
-    expect(w.sent).toHaveLength(1);
-    expect(w.sent[0].text).toContain('web');
-    expect(w.sent[0].text).toContain('Cambiar seguros y cargos');
-    expect(w.sent[0].keyboard).toBeUndefined();
-    expect(w.sessions[0].pending).toBeNull();
-    expect(chargeEvents(w)).toHaveLength(0);
+    it('previews a life insurance of 12,000 a month on a card, and Confirm writes one charge_change, once', async () => {
+      const w = world({ debts: [visa()], answers: [addAnswer(LIFE, { debtRef: 'visa' })] });
+      await handleDebt(w.deps, ctx({ text: 'agrega un seguro de vida de 12 mil mensual a la tarjeta' }));
+
+      expect(w.sent[0].text).toContain('Cambio de cargos en Visa');
+      expect(w.sent[0].text).toContain(`Se agrega: Seguro de vida: ${plain(pesos(12000))}`);
+      expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+      expect(w.lastPending()).toMatchObject({ action: 'charge_change', awaiting: 'confirm', debtId: 'c1', draft: { effectiveOn: '2026-09-01', op: 'add', add: { presets: {}, charge: { label: 'Seguro de vida', basis: 'fixed', value: 12000 } } } });
+      expect(Buffer.byteLength(JSON.stringify(w.lastPending()), 'utf8')).toBeLessThan(500);
+      expect(chargeEvents(w)).toHaveLength(0);
+
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+      await confirmDebt(w.deps, ctx(), { ...w.sessions[0].pending });
+
+      expect(chargeEvents(w)).toHaveLength(1);
+      expect(JSON.parse(chargeEvents(w)[0].payloadJson).charges).toEqual([expect.objectContaining({ id: 'c1', kind: 'insurance', label: 'Seguro de vida', basis: 'fixed', value: 12000, cadence: 'per_installment' })]);
+      expect(w.sent[1].text).toContain('agregué Seguro de vida');
+      expect(w.sent[2].text).toContain('ya estaba registrado');
+    });
+
+    it('adds a fee of 45,000 with its IVA preset to a loan: IVA 8,550 in the preview and both charges in the event, linked', async () => {
+      const w = world({ answers: [addAnswer({ presets: { fee: 45000, iva: true } })] });
+      await handleDebt(w.deps, ctx({ text: 'agrega cuota de manejo de 45 mil más IVA al carro' }));
+
+      expect(w.sent[0].text).toContain(`IVA sobre la comisión: ${plain(pesos(8550))}`);
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      const charges = JSON.parse(chargeEvents(w)[0].payloadJson).charges;
+      expect(charges.map((charge) => [charge.id, charge.value])).toEqual([['fee', 45000], ['iva', 19]]);
+      expect(charges[1]).toMatchObject({ basis: 'pctOfCharge', refId: 'fee' });
+    });
+
+    it('asks which charge it is when the model gave neither a preset nor fields, and writes nothing', async () => {
+      const w = world({ answers: [addAnswer({ newValue: 20000 })] });
+      await handleDebt(w.deps, ctx());
+
+      expect(w.sent[0].text).toContain('qué seguro o cargo quieres agregar');
+      expect(w.sessions[0].pending).toBeNull();
+      expect(chargeEvents(w)).toHaveLength(0);
+    });
+
+    it('answers with the reason when the charge is already there, and does not look for a charge to edit', async () => {
+      const w = chargeWorld([addAnswer({ presets: { fee: 5000 } })]);
+      await handleDebt(w.deps, ctx());
+
+      expect(w.sent[0].text).toContain('ya existe');
+      expect(w.sent[0].keyboard).toBeUndefined();
+      expect(w.sessions[0].pending).toBeNull();
+    });
+
+    it('rebuilds the set at Confirm from the charges in force: a charge added on the web in between is kept', async () => {
+      const w = world({ answers: [addAnswer({ presets: { gmf: true } })] });
+      await handleDebt(w.deps, ctx());
+      const gps = { id: 'gps', kind: 'insurance', label: 'Seguro GPS', basis: 'fixed', value: 8000, cadence: 'per_installment' };
+      w.tables.debt_events.push({ $id: 'web1', debtId: 'd1', householdId: 'h1', kind: 'charge_change', effectiveOn: '2026-10-01', amountMinor: 0, payloadJson: JSON.stringify({ charges: [gps] }), actorId: ACTOR, source: 'web', dedupeKey: 'web:1', $createdAt: '2026-10-01T12:00:00.000Z' });
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      expect(chargeEvents(w)).toHaveLength(2);
+      expect(JSON.parse(chargeEvents(w)[1].payloadJson).charges.map((charge) => charge.id)).toEqual(['gps', 'gmf']);
+    });
+
+    it('writes nothing at Confirm when the preset is already there by then, and says why', async () => {
+      const w = world({ answers: [addAnswer({ presets: { fee: 45000 } })] });
+      await handleDebt(w.deps, ctx());
+      const fee = { id: 'fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 10000, cadence: 'per_installment' };
+      w.tables.debt_events.push({ $id: 'web1', debtId: 'd1', householdId: 'h1', kind: 'charge_change', effectiveOn: '2026-10-01', amountMinor: 0, payloadJson: JSON.stringify({ charges: [fee] }), actorId: ACTOR, source: 'web', dedupeKey: 'web:1', $createdAt: '2026-10-01T12:00:00.000Z' });
+      await confirmDebt(w.deps, ctx(), w.lastPending());
+
+      expect(w.sent[1].text).toContain('ya existe');
+      expect(chargeEvents(w)).toHaveLength(1);
+    });
   });
 
   it('asks for what is missing', async () => {

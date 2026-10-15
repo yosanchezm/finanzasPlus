@@ -1,9 +1,9 @@
-import { PERIODICITIES, ValidationError, activeEvents, buildRestructureTerms, compareIso, isIsoDate, periodDates, previewChange, project, rateLabel, removeCharge, restructureCarry, sortEvents } from '../../../packages/finance-core/index.js';
+import { PERIODICITIES, ValidationError, activeEvents, addExplicitCharge, addPresetCharge, buildRestructureTerms, compareIso, evaluateCharges, isIsoDate, periodDates, previewChange, project, rateLabel, removeCharge, restructureCarry, sortEvents } from '../../../packages/finance-core/index.js';
 import { fold } from './findDebt.js';
 import { pesos } from './format.js';
 import { PERIOD_LABELS, SYSTEM_LABELS, describeCoreError, usuryLines } from './preview.js';
 
-// Plan changes of Nia (NI2, NI3, NI7): `rate_change`, `charge_change` (edit or remove an existing charge; adding one is web-only) and `restructure`. The model only extracts; every
+// Plan changes of Nia (NI2, NI3, NI7): `rate_change`, `charge_change` (add a preset or an explicit charge, edit or remove one) and `restructure`. The model only extracts; every
 // figure comes from the core's `previewChange`, the same replay the web dialogs use, so a preview equals the
 // projection once the event is saved. Nothing here writes. Pure and Node 16 safe.
 
@@ -144,7 +144,23 @@ const CHARGE_KIND_WORDS = {
 };
 const BASIS_LABELS = { pctOutstanding: 'del saldo', pctOriginal: 'del monto original', pctOfBase: 'de la base', pctOfSubtotal: 'del total de la cuota', pctOfCharge: 'de otro cargo' };
 
-export const ADD_IN_WEB = 'Por ahora solo puedo cambiar el valor de un seguro o cargo que ya existe, o quitarlo. Para agregar uno nuevo usa la web: en Deudas abre la deuda y elige «Más acciones» y «Cambiar seguros y cargos». No guardé nada.';
+// Adding a charge (S6a): a preset the user named (fee, iva, life, insurance, gmf) or explicit fields. The core's `addPresetCharge` and
+// `addExplicitCharge` validate the result against the charges in force, and a failure becomes a Spanish issue (nothing is written).
+const ADD_KINDS = ['insurance', 'fee', 'tax', 'other'];
+const ADD_BASES = ['fixed', 'pctOutstanding', 'pctOriginal', 'pctOfSubtotal', 'pctOfCharge'];
+const ADD_CADENCES = ['per_installment', 'annual', 'once'];
+const PRESET_ORDER = ['fee', 'iva', 'life', 'insurance', 'gmf'];
+const AMOUNT_PRESETS = ['fee', 'life', 'insurance'];
+const DEFAULT_IVA = 19;
+const ADD_ISSUES = {
+  preset_exists: 'Ese cargo ya existe en la deuda. Si quieres cambiar su valor, pídeme “cambia el cargo a …”. No guardé nada.',
+  preset_requires_fee: 'El IVA va sobre una cuota de manejo o comisión, y la deuda no tiene ninguna. Dime también el valor de la cuota de manejo. No guardé nada.',
+  charge_ref_unknown: 'Ese cargo dice que se calcula sobre otro cargo que no existe en la deuda. Dime sobre cuál va. No guardé nada.',
+  charge_ref_ambiguous: 'Hay más de un cargo que podría ser ese. Dime con cuál va. No guardé nada.',
+  preset_amount_missing: 'Me falta el valor del cargo. Escríbelo de nuevo con su valor; no guardé nada.',
+  charge_value_missing: 'Me falta el valor del cargo. Escríbelo de nuevo con su valor; no guardé nada.',
+  invalid_charge: 'El valor de un cargo fijo va en pesos enteros, sin decimales, y un porcentaje no puede ser negativo. Escríbelo de nuevo; no guardé nada.',
+};
 const CHARGE_GONE = 'Ese cargo ya no existe en la deuda, así que no registré nada. Pídeme el cambio de nuevo.';
 const FIXED_WHOLE = 'El valor de un cargo fijo va en pesos enteros, sin decimales. Escríbelo de nuevo; no guardé nada.';
 const PCT_MAX = 'Un porcentaje no puede ser mayor que 100. Escríbelo de nuevo; no guardé nada.';
@@ -153,27 +169,48 @@ const CANNOT_PREVIEW_CHARGES = 'No pude calcular el cambio con esos cargos. Revi
 
 const chargeText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
+// The explicit fields of an added charge, as the model gave them; the value is `null` when it was not given.
+function readExplicitCharge(input) {
+  const label = chargeText(input.label, 40);
+  if (!label || !ADD_BASES.includes(input.basis)) return null;
+  return {
+    kind: ADD_KINDS.includes(input.kind) ? input.kind : 'other',
+    label,
+    basis: input.basis,
+    value: typeof input.newValue === 'number' && Number.isFinite(input.newValue) ? input.newValue : null,
+    cadence: ADD_CADENCES.includes(input.cadence) ? input.cadence : 'per_installment',
+    ...(input.basis === 'pctOfCharge' ? { refLabel: chargeText(input.refLabel, 40) } : {}),
+  };
+}
+
 /**
  * Reads what the model extracted about a charge change: the charge as the user named it, the operation
- * (`set` a new value, `remove`, or `add`, which Nia refuses) and the value. `missing` names what to ask for and `problems`
- * what is invalid (a negative value). The date is today when not said or not a real date.
+ * (`set` a new value, `remove` or `add`) and the value. `missing` names what to ask for and `problems`
+ * what is invalid (a negative value). The date is today when not said or not a real date. An `add` carries `add: { presets, charge }`:
+ * the presets the user named (already read by the extractor) or the explicit fields (`kind`, `label`, `basis`, `newValue`, `cadence`, `refLabel`).
  * @param {object | null} raw The model's `planChange` object.
- * @param {{ today: string }} options
+ * @param {{ today: string, presets?: object }} options
  */
-export function readChargeChange(raw, { today }) {
+export function readChargeChange(raw, { today, presets = {} }) {
   const input = raw && typeof raw === 'object' ? raw : {};
   const given = typeof input.newValue === 'number' && Number.isFinite(input.newValue);
   const chargeRef = chargeText(input.chargeRef, 40) || null;
   const op = CHARGE_OPS.includes(input.op) ? input.op : given && input.newValue >= 0 ? 'set' : null;
   const missing = [];
   const problems = [];
-  if (op !== 'add') {
-    if (!chargeRef) missing.push('charge');
-    if (op === null) missing.push('charge_action');
-    if (op === 'set' && !given) missing.push('charge_value');
-    if (op === 'set' && given && input.newValue < 0) problems.push('invalid_amount');
+  const result = { effectiveOn: isIsoDate(input.effectiveOn) ? input.effectiveOn : today, chargeRef, op, newValue: op === 'remove' || !given ? null : input.newValue, missing, problems };
+  if (op === 'add') {
+    const charge = readExplicitCharge(input);
+    if (PRESET_ORDER.every((key) => !Object.prototype.hasOwnProperty.call(presets, key)) && !charge) missing.push('charge_spec');
+    else if ((charge && charge.value === null) || AMOUNT_PRESETS.some((key) => presets[key] === null)) missing.push('charge_value');
+    if (charge && charge.value !== null && charge.value < 0) problems.push('invalid_amount');
+    return { ...result, add: { presets, charge } };
   }
-  return { effectiveOn: isIsoDate(input.effectiveOn) ? input.effectiveOn : today, chargeRef, op, newValue: op === 'remove' || !given ? null : input.newValue, missing, problems };
+  if (!chargeRef) missing.push('charge');
+  if (op === null) missing.push('charge_action');
+  if (op === 'set' && !given) missing.push('charge_value');
+  if (op === 'set' && given && input.newValue < 0) problems.push('invalid_amount');
+  return result;
 }
 
 /**
@@ -218,14 +255,44 @@ export function findCharge(charges, reference) {
   return { none: true };
 }
 
+// The charges an add brings to the set in force: the presets in the order of the core (the IVA after its fee), then the explicit charge.
+// A price that includes the IVA holds the fee as round(stated / (1 + IVA / 100)), as when a debt is created.
+function addToSet(charges, add, card) {
+  const presets = (add && add.presets) || {};
+  const included = presets.ivaIncluded === true;
+  const iva = presets.iva === undefined && included ? DEFAULT_IVA : presets.iva;
+  let next = charges;
+  for (const key of PRESET_ORDER) {
+    let value = key === 'iva' ? iva : presets[key];
+    if (value === undefined || (key === 'gmf' && value !== true)) continue;
+    if (key === 'fee' && included && typeof value === 'number') value = Math.round(value / (1 + iva / 100));
+    next = addPresetCharge(next, key, value, { card });
+  }
+  if (add && add.charge) next = addExplicitCharge(next, add.charge);
+  const known = new Set(charges.map((charge) => charge.id));
+  return { charges: next, added: next.filter((charge) => !known.has(charge.id)) };
+}
+
+function rebuildAdd(charges, add, card) {
+  try {
+    return addToSet(charges, add, card);
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return { issue: ADD_ISSUES[error.code] || CANNOT_PREVIEW_CHARGES };
+  }
+}
+
 /**
  * The charge set after the change, rebuilt from the charges in force (the pending stores only the charge id, the operation and
- * the value): a removal takes with it every charge that references the removed one (IVA on a fee).
+ * the value, or the preset and fields of an add): a removal takes with it every charge that references the removed one (IVA on a fee).
+ * An add returns the new set and the charges it added, or an `issue` when the result is not valid.
  * @param {object[]} charges The charges in force now.
- * @param {{ chargeId: string, op: ('set' | 'remove'), newValue?: (number | null) }} change
- * @returns {{ gone: true } | { target: object, charges: object[], dependents: object[] }}
+ * @param {{ chargeId?: string, op: ('set' | 'remove' | 'add'), newValue?: (number | null), add?: object }} change
+ * @param {{ card?: boolean }} [options] `card`: the ids and labels a card stores for its management fee and IVA.
+ * @returns {{ gone: true } | { target: object, charges: object[], dependents: object[] } | { charges: object[], added: object[] } | { issue: string }}
  */
-export function rebuildCharges(charges, { chargeId, op, newValue }) {
+export function rebuildCharges(charges, { chargeId, op, newValue, add }, { card = false } = {}) {
+  if (op === 'add') return rebuildAdd(charges, add, card);
   const target = charges.find((charge) => charge.id === chargeId);
   if (!target) return { gone: true };
   if (op === 'remove') {
@@ -243,6 +310,38 @@ function valueIssue(charge, value) {
 }
 
 const nextLabel = (isCard) => (isCard ? 'Próximo pago mínimo' : 'Próxima cuota (con cargos)');
+
+// What the added charges cost in the next period, from the core's evaluation of the whole resulting set (an IVA needs its fee).
+function addedLines(projection, before, charges, added) {
+  const { terms } = projection;
+  const ctx = { period: 1, openingMinor: projection.balanceMinor, installmentMinor: before.installmentMinor || 0, originalMinor: terms.principalMinor, periodsPerYear: PERIODICITIES[terms.periodicity].perYear, unit: 1 };
+  const evaluated = evaluateCharges(charges, ctx).lines;
+  const text = (charge) => {
+    const line = evaluated.find((item) => item.id === charge.id);
+    return `${charge.label}: ${line ? pesos(line.amountMinor) : describeValue(charge, charge.value)}${charge.basis === 'fixed' ? '' : ` (${describeValue(charge, charge.value)})`}`;
+  };
+  return added.length === 1 ? [`Se agrega: ${text(added[0])}`] : ['Se agregan:', ...added.map((charge) => `• ${text(charge)}`)];
+}
+
+function previewAdd({ debt, events, today, draft, projection, charges }) {
+  const rebuilt = rebuildCharges(charges, draft, { card: Boolean(projection.card) });
+  if (rebuilt.issue) return { ok: false, issue: rebuilt.issue };
+  let figures;
+  try {
+    figures = previewChange(debt, events, { kind: 'charge_change', effectiveOn: draft.effectiveOn, charges: rebuilt.charges }, { on: today });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return { ok: false, issue: CANNOT_PREVIEW_CHARGES };
+  }
+  if (figures.payloadChars > EVENT_PAYLOAD_MAX_CHARS) return { ok: false, issue: TOO_MANY };
+  const { before, after, impacted } = figures;
+  const lines = [`🧾 Cambio de cargos en ${debt.name}`, `Desde: ${draft.effectiveOn}`, ...addedLines(projection, before, rebuilt.charges, rebuilt.added)];
+  lines.push(`${nextLabel(Boolean(projection.card))}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`);
+  lines.push(`Cargos por pagar: ${money(before.remainingChargesMinor, after.remainingChargesMinor)}`);
+  if (impacted.length > 0) lines.push(`ℹ️ ${BACKDATED_NOTE}`);
+  lines.push('', '¿Quieres registrar el cambio así? Aún no se guarda.');
+  return { ok: true, draft: { effectiveOn: draft.effectiveOn, op: 'add', add: draft.add }, text: lines.join('\n') };
+}
 
 /**
  * Preview of a charge change: the charge named (or chosen) is given a new value or removed from the effective date, and the
@@ -263,7 +362,8 @@ export function previewChargeChange({ debt, events, today, draft }) {
     return { ok: false, issue: describeCoreError(error) };
   }
   const charges = chargesInForce(projection, events, today);
-  if (charges.length === 0) return { ok: false, issue: `${debt.name} no tiene seguros ni cargos registrados. Para agregar uno nuevo usa la web: en Deudas abre la deuda y elige «Más acciones» y «Cambiar seguros y cargos».` };
+  if (draft.op === 'add') return previewAdd({ debt, events, today, draft, projection, charges });
+  if (charges.length === 0) return { ok: false, issue: `${debt.name} no tiene seguros ni cargos registrados. Si quieres agregar uno, dime cuál es y de cuánto.` };
   let target;
   if (draft.chargeId) {
     target = charges.find((charge) => charge.id === draft.chargeId);
@@ -271,7 +371,7 @@ export function previewChargeChange({ debt, events, today, draft }) {
   } else {
     const found = findCharge(charges, draft.chargeRef);
     if (found.candidates) return { ok: true, needsCharge: true, candidates: found.candidates, text: `¿Cuál cargo de ${debt.name} quieres ${draft.op === 'remove' ? 'quitar' : 'cambiar'}?` };
-    if (found.none) return { ok: false, issue: `No encontré un seguro o cargo que se parezca a «${draft.chargeRef}» en ${debt.name}. Los que tiene: ${charges.map((charge) => charge.label).join(', ')}. Solo puedo cambiar el valor de uno que ya exista o quitarlo; para agregar uno nuevo usa la web.` };
+    if (found.none) return { ok: false, issue: `No encontré un seguro o cargo que se parezca a «${draft.chargeRef}» en ${debt.name}. Los que tiene: ${charges.map((charge) => charge.label).join(', ')}. Puedo cambiar el valor de uno que ya exista, quitarlo o agregar uno nuevo si me dices cuál es y de cuánto.` };
     target = found.match;
   }
   const remove = draft.op === 'remove';
@@ -321,6 +421,20 @@ export function describeChargeChange(debt, target, draft, figures, dependents = 
     ? `quité ${target.label}${dependents.length > 0 ? ` (y ${dependents.map((charge) => charge.label).join(', ')})` : ''}`
     : `${target.label} ahora vale ${describeValue(target, draft.newValue)}`;
   const lines = [`✅ Listo: registré el cambio de cargos de ${debt.name} desde ${draft.effectiveOn}: ${what}.`, `${nextLabel(debt.kind === 'card')}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`];
+  if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
+  return lines.join('\n');
+}
+
+/**
+ * The reply after charges were added, with the next installment of the debt as it is now.
+ * @param {object} debt The live `debts` row.
+ * @param {object[]} added The charges that were added.
+ * @param {{ effectiveOn: string }} draft What was written.
+ * @param {ReturnType<typeof previewChange>} figures The core replay of the written change over the live events.
+ */
+export function describeChargeAdd(debt, added, draft, figures) {
+  const { before, after } = figures;
+  const lines = [`✅ Listo: registré el cambio de cargos de ${debt.name} desde ${draft.effectiveOn}: agregué ${added.map((charge) => charge.label).join(', ')}.`, `${nextLabel(debt.kind === 'card')}: ${money(before.nextTotalMinor, after.nextTotalMinor)}`];
   if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
   return lines.join('\n');
 }

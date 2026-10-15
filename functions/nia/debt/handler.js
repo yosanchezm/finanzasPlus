@@ -11,7 +11,7 @@ import { guardParaphrase } from './guard.js';
 import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
 import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
-import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
+import { CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeAdd, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, setupText, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
@@ -58,6 +58,7 @@ const MISSING = {
   legal_value: 'el valor',
   legal_month: 'el mes',
   charge: 'el seguro o cargo',
+  charge_spec: 'qué seguro o cargo quieres agregar',
   charge_action: 'si quieres cambiar su valor o quitarlo',
   charge_value: 'el nuevo valor',
   late_mode: 'si quieres mora a la tasa de usura, a una tasa fija, como múltiplo de la tasa del contrato, o sin mora',
@@ -251,8 +252,8 @@ async function startRateChange(deps, ctx, request, debts) {
   return withDebt(deps, ctx, request, debts, { action: 'rate_change', draft, question: '¿A cuál deuda le cambio la tasa?' }, (id, debt) => continueRate(deps, ctx, id, debt, draft));
 }
 
-// A charge change (NI2, NI6): Nia edits the value of a charge the debt already has, or removes it; adding one is web-only. The pending
-// stores the charge id, the operation and the value; the whole charge set is rebuilt from the live debt at Confirm.
+// A charge change (NI2, NI6): Nia adds a preset or an explicit charge, edits the value of a charge the debt already has, or removes it. The pending
+// stores the charge id, the operation and the value (or the add block); the whole charge set is rebuilt from the live debt at Confirm.
 async function continueCharge(deps, ctx, id, debt, draft) {
   const preview = previewChargeChange({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
   if (!preview.ok) return inform(deps, ctx, preview.issue);
@@ -266,9 +267,8 @@ async function continueCharge(deps, ctx, id, debt, draft) {
 
 async function startChargeChange(deps, ctx, request, debts) {
   const { effectiveOn, chargeRef, op, newValue } = request.planChange;
-  if (op === 'add') return inform(deps, ctx, ADD_IN_WEB);
-  if (request.missingFields.length) return inform(deps, ctx, `Para cambiar un seguro o cargo necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
-  const draft = { effectiveOn, chargeRef, op, newValue };
+  if (request.missingFields.length) return inform(deps, ctx, `Para ${op === 'add' ? 'agregar' : 'cambiar'} un seguro o cargo necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const draft = op === 'add' ? { effectiveOn, op, add: request.planChange.add } : { effectiveOn, chargeRef, op, newValue };
   return withDebt(deps, ctx, request, debts, { action: 'charge_change', draft, question: '¿A cuál deuda le cambio el seguro o cargo?' }, (id, debt) => continueCharge(deps, ctx, id, debt, draft));
 }
 
@@ -718,13 +718,15 @@ async function commitChargeChange(deps, ctx, pending) {
   const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
   if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
   const events = await loadEvents(deps, debt.$id);
-  const rebuilt = rebuildCharges(chargesInForce(project(debt, events, asOf), events, asOf), pending.draft);
+  const rebuilt = rebuildCharges(chargesInForce(project(debt, events, asOf), events, asOf), pending.draft, { card: debt.kind === 'card' });
   if (rebuilt.gone) return { text: CHARGE_GONE_TEXT, failed: true };
+  if (rebuilt.issue) return { text: rebuilt.issue, failed: true };
   const draft = { kind: 'charge_change', effectiveOn: pending.draft.effectiveOn, charges: rebuilt.charges };
   const plan = planCommit(debt, events, draft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
   const { duplicate } = await commitPlan(debtPort(deps), plan);
   if (duplicate) return { duplicate };
-  return { duplicate: false, text: describeChargeChange(debt, rebuilt.target, pending.draft, previewChange(debt, events, draft, { on: asOf }), rebuilt.dependents) };
+  const figures = previewChange(debt, events, draft, { on: asOf });
+  return { duplicate: false, text: pending.draft.op === 'add' ? describeChargeAdd(debt, rebuilt.added, pending.draft, figures) : describeChargeChange(debt, rebuilt.target, pending.draft, figures, rebuilt.dependents) };
 }
 
 // A restructure is rebuilt from the live debt and events: the carried balance written is the one of now, so a payment recorded after the preview is

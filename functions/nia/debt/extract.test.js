@@ -314,8 +314,31 @@ describe('normaliseDebtExtraction: charge_change', () => {
     expect(norm({ ...change, planChange: { chargeRef: 'manejo', op: 'set', newValue: 12000, effectiveOn: '2026-11-01' } }).planChange).toEqual({ effectiveOn: '2026-11-01', chargeRef: 'manejo', op: 'set', newValue: 12000 });
   });
 
-  it('keeps an add request so the handler can send the user to the web', () => {
-    expect(norm({ ...change, planChange: { op: 'add', chargeRef: 'seguro de desempleo', newValue: 20000 } })).toMatchObject({ missingFields: [], planChange: { op: 'add' } });
+  it('reads an add as the presets the user named: a fee with its IVA and a missing amount that stays a question', () => {
+    const add = (planChange) => norm({ ...change, planChange: { op: 'add', ...planChange } });
+
+    expect(add({ presets: { fee: 45000, iva: true } })).toMatchObject({ missingFields: [], problems: [], planChange: { op: 'add', add: { presets: { fee: 45000, iva: 19 }, charge: null } } });
+    expect(add({ presets: { gmf: true, life: 0.05 } }).planChange.add.presets).toEqual({ life: 0.05, gmf: true });
+    expect(add({ presets: { life: true } }).missingFields).toEqual(['charge_value']);
+    expect(add({ presets: { fee: -5 } }).problems).toEqual(['negative_amount']);
+  });
+
+  it('reads an add as explicit fields, and asks which charge when the model gave neither', () => {
+    const add = (planChange) => norm({ ...change, planChange: { op: 'add', ...planChange } });
+
+    expect(add({ kind: 'insurance', label: 'Seguro de vida', basis: 'fixed', newValue: 12000, cadence: 'per_installment' }).planChange.add)
+      .toEqual({ presets: {}, charge: { kind: 'insurance', label: 'Seguro de vida', basis: 'fixed', value: 12000, cadence: 'per_installment' } });
+    expect(add({ kind: 'tax', label: 'Impuesto', basis: 'pctOfCharge', newValue: 10, refLabel: 'Cuota de manejo' }).planChange.add.charge).toMatchObject({ basis: 'pctOfCharge', refLabel: 'Cuota de manejo', cadence: 'per_installment' });
+    expect(add({ chargeRef: 'seguro de desempleo', newValue: 20000 }).missingFields).toEqual(['charge_spec']);
+    expect(add({ label: 'Seguro', basis: 'fixed' }).missingFields).toEqual(['charge_value']);
+  });
+
+  it('teaches the model the add fields: presets or kind, label, basis, cadence and refLabel', () => {
+    const prompt = debtPrompt('agrega un seguro de 12 mil', [], [], { today: TODAY });
+    const planChangeSchema = prompt.slice(prompt.indexOf('"planChange":'), prompt.indexOf('"late":{'));
+
+    for (const field of ['"presets"', '"kind"', '"label"', '"basis"', '"cadence"', '"refLabel"']) expect(planChangeSchema).toContain(field);
+    expect(prompt).toMatch(/agregar un seguro o cargo/i);
   });
 
   it('reports what is missing and what is invalid', () => {
