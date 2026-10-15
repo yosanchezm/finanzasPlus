@@ -954,3 +954,19 @@ Total vs `feat/dpc-f2-nia-mora` before this progress/tasks commit: 24 files, 608
 ### Remaining
 
 Nothing in F3. Owner gates D2.0 and F2.0 are still open (confirm Nia at or after A1 is deployed, then merge and deploy D2, F2 and F3 in order, web and Nia together). Next: `sdd-verify`.
+
+## Follow-up: Nia card mora
+
+Branch `fix/dpc-nia-card-mora` (from master ad9a33f). The F3 deviation list kept the Nia card refusal; the owner requires card mora to be manageable from both the web and Nia, so it is lifted.
+
+### Changes
+
+- `functions/nia/debt/late.js`: `previewLatePolicy` no longer refuses a card. It previews with the card projection (`previewChange` snapshots, `projection.lateInterestMinor`): mode, effective date, cap echo and the mora accrued as of today before and after, plus a note that a card's mora is computed on the unmet capital of the minimum payment and billed at the next statement. `describeLatePolicy` adds that the card's mora is billed at the next statement. `CARD_LATE` removed. Loan output is unchanged.
+- `functions/nia/debt/handler.js`: the two card refusals (`continueLate` preview and `commitLatePolicy` confirm) are removed. Confirm still writes one `late_policy` event, deduped by `debt:{pendingId}`.
+- `functions/nia/README.md`: added the `late_policy` row (it was missing; the table said nine actions, there are ten) and states that cards are supported.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN |
+|---|---|---|
+| Nia card `late_policy` | `late.test.js` 5 failed (the card refusal replaced by card golden tests) and `handler.test.js` 2 failed (preview and exactly-once Confirm on a card, previously refused) | card golden 125,000 of unmet capital, 10 days at 28.59% EA: "Mora acumulada al 2026-10-20: $ 0 -> $ 861"; one `late_policy` event for a repeated Confirm, then "Esta mora ya estaba registrada"; `npx vitest run functions/nia` all green |
