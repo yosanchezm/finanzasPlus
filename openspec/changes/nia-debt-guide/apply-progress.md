@@ -1,6 +1,6 @@
 # Apply progress: nia-debt-guide
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f). S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b).
 
 ## Batch S0 (explain plumbing): COMPLETE (18/18 tasks)
 
@@ -232,3 +232,77 @@ Triangulation: flag parsing (5 on spellings, 9 off values), flag off (missing, f
 ### Remaining
 
 S4 to S7 and gate G (owner copy review G.1 to G.3 blocks the first deploy of S1 to S3).
+
+## Batch S4 (terms_correction: core event, replay, preview, web Corregir datos): COMPLETE (15/15 tasks; the checkpoint S4.CP is the owner deploy and stays open)
+
+S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b). S4 has no dependency on S1 to S3; it was applied after S3 as planned.
+
+### Tasks
+
+- [x] S4a.1 to S4a.2 (`ledger/correction.js` with `applyCorrection`, `buildCorrection`, `versionTermsAt`, `checkCorrection`; kind `terms_correction` and the strict writer in `events.js`; barrel and node16 list)
+- [x] S4a.3 to S4a.4 (`project.js` folds the opening corrections into the base terms, strips them and adds `projection.corrections` only when non-empty; `tail.js` `applyRestructure` folds the bound ones; `terms_correction_skipped` notices)
+- [x] S4a.5 (characterization: a bundle that does not know the kind projects on the original terms with `unknown_event_kind`, and a void of the correction has no effect)
+- [x] S4a.6 to S4a.7 (`previewChange` accepts `terms_correction`: `corrected`, `impacted`, `statements`; `planCommit` applies the correction before projecting)
+- [x] S4b1.1 to S4b1.2 (`termsCorrectionModel.js`: prefill from the terms version, validation messages, draft through `buildCorrection`, rows, EA echo, impacted, statement warning)
+- [x] S4b1.3 to S4b1.4 (`eventSummary.js` summary, `debtDetailModel.js` `VOIDABLE` and `PLAN_CHANGE_KINDS`, `EventHistory.jsx` label, `VoidDialog.jsx` confirmation)
+- [x] S4b2.1 to S4b2.2 (`TermsCorrectionDialog.jsx` through `useCommitDialog`)
+- [x] S4b2.3 to S4b2.4 (menu item, `DebtDetail.jsx` prop, `DebtDetailContainer.jsx` save and void with `afterSave: reconcileAfter`)
+- [ ] S4.CP checkpoint: tests, build and package are green (below); the owner deploys the web build and the Nia tarball together (action 4). Not done here.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| e446969 `feat(ledger): add the terms_correction event and buildCorrection with typed errors` | S4a (1/2) | 8 files, 502 insertions, 2 deletions |
+| 89c187a `feat(ledger): replay terms corrections retroactively and preview them with the impacted costs` | S4a (2/2) | 7 files, 421 insertions, 26 deletions |
+| 64db2e7 `feat(debts): model the Corregir datos form and summarize and void terms corrections in the history` | S4b1 | 13 files, 462 insertions, 7 deletions |
+| 2e76c0a `feat(debts): add the Corregir datos dialog and wire it with reconcile and void to the debt detail` | S4b2 | 10 files, 433 insertions, 19 deletions |
+
+Code total vs master before the bookkeeping commit: 35 files, 1,817 insertions, 53 deletions = 1,870 changed lines (budget 2,000; each group at most 504; the size-review trigger of 1,500 was crossed only by the last group, which was the slice's last). The slice came to 1,870 against 1,500 estimated (1.25x). S4a was split in two commits because it measured 944 lines (the group limit is 800).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S4a.1/2 | `correction.test.js` (17 cases) and the node16 source list and barrel exact keys written first: the suite failed to load (`correction.js` missing) and both node16 tests failed | 17/17 after `correction.js`, `events.js`, `terms.js`, `commit.js` and the barrel (one assertion about the projection moved to the replay test, where it belongs) | `normalizeCorrectionFields` kept in `events.js` and `termsOfDebt` moved to `terms.js` to avoid an import cycle |
+| S4a.3/4 | `project.correction.test.js`: 13 of 18 failed (the 5 that passed are the no-correction and voided baselines) | 16/18, then the restructure-bound case exposed a real bug (normalizing an event again drops the `corrections` field), fixed with `attachBound` after the sort; the other two failures were wrong expectations in my tests (a restructure tail depends on the carried interest; card mora needs a late policy in the fixture). 19/19, all core suites 755/755 with `project.parity` and `project.test` untouched | None needed |
+| S4a.5 | characterization written against a mocked reader that hides the kind: passes on arrival by design | 16/16 in `events.forward.test.js` | None needed |
+| S4a.6/7 | 7 of 8 new `previewChange: terms_correction` cases failed (kind refused) | 7/8, the last failed on a wrong assumption about `nextDueOn` of a card; compared with a natively built debt instead. Core 766/766 | None needed |
+| S4b1.1/2 | `termsCorrectionModel.test.js` (17 cases): module missing | 17/17 first run | None needed |
+| S4b1.3/4 | 10 cases failed across `eventSummary`, `debtDetailModel`, `EventHistory` | 66/66 in the three files plus `VoidDialog` | None needed |
+| S4b2.1/2 | `TermsCorrectionDialog.test.jsx` (12 cases): module missing | 12/12 first run | `BackdatedNotice` got optional `title` and `intro` instead of a copy |
+| S4b2.3/4 | 16 cases failed (menu lists, flows in both containers) | 13 passed after the wiring; the 3 left were test fixes (arrow-key wrap now ends on index 4, a region hidden by the open modal, the rate text is `24 % E.A.`). `src/features/debts` 595/595 | None needed |
+
+Triangulation: opening and restructure-bound corrections, two corrections and a void of the second, void restores the pre-correction projection (loan and card, deep-equal), 30 and 20 seeded shuffles, a void dated after `asOf`, a stored correction on the wrong kind, a stored correction with a field a newer build added, corrected statement day 20, 30 and 31 with month-end clamps, minimum pct 5 to 3 with past-due flag and mora, no-change per field and for the whole draft, six unsupported fields, three empty shapes, out-of-range days, NAMV against EA, modality, impacted rows against natively built debts, preview against `planCommit` snapshot for a card and a loan, statements drift 2/0/none, form prefill from the version and not from a later rate change, loan without card fields, double submit, write failure with retry, reconcile failure.
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/ledger packages/finance-core/test/node16.test.js src/features/debts` exit 0 (core 766 tests in 48 files; `src/features/debts` 595 tests in 41 files) |
+| Runtime harness | `npm run build` exit 0; `NIA_ALLOW_UNREVIEWED=1 npm run package:nia` exit 0 (14 draft keys listed, `functions/nia.tar.gz` written with the S4 core inside, so the tarball reads corrections). The mocked-port container tests write through the real `planCommit`/`commitPlan`/`saveDebtEvent` path |
+| Full suite | `npm test -- --maxWorkers=4`: 147 files, 2,516 tests passed |
+| Rollback boundary | core `ledger/correction.js`, the `terms_correction` kind and `normalizeCorrectionFields` in `events.js`, the fold hooks in `project.js` and `tail.js`, the kind in `preview.js` and `commit.js`, `termsOfDebt` in `terms.js`, the two barrel exports; web `termsCorrectionModel.js`, `TermsCorrectionDialog.jsx`, the menu item and the container hook, the `terms_correction` entries of `debtDetailModel.js`, `eventSummary.js`, `EventHistory.jsx`, `VoidDialog.jsx`, `debtLabels.js`. Before reverting, void any correction whose old values must not reappear silently |
+
+### Deviations from design
+
+- The barrel exports `versionTermsAt` as well as `buildCorrection`. The dialog has to prefill from the terms version in force (a loan's `projection.terms` carries later rate changes), and the design says to compare with version terms, so the web needs that getter. The exact-keys list was changed RED-first.
+- `normalizeCorrectionFields` lives in `events.js` (internal export) and `termsOfDebt` moved to `terms.js`, so `events.js`, `correction.js` and `project.js` have no import cycle.
+- Restructure-bound corrections are attached to their restructure event after the sort (`attachBound`), because normalizing an event again drops fields it does not know. `applyRestructure` folds `event.corrections` as designed. They are validated against the restructure terms before they are attached.
+- `readEvents` tolerates a `terms_correction` row whose payload does not validate (a newer build may add correctable fields): it is set aside with the validation code as `reason` and `project` reports `terms_correction_skipped {eventId, reason}`. Writers stay strict. Other skip reasons are `invalid` (the fold fails) and `restructure_voided`.
+- Beyond the four typed errors of the task, a draft bound to a restructure that does not exist or was voided throws `correction_target_missing`.
+- `planCommit` does not reject `no_change` (only `buildCorrection` does), so re-planning a request that was already saved stays idempotent.
+- The preview also returns `statements: { recorded, drifted }` (the recorded card statements and those whose drift the correction changes) for the warning.
+- In the web, `terms_correction` is also in `BLOCKS_RESTRUCTURE_VOID`: a restructure cannot be voided while an active correction sorts after it, because voiding it would orphan the correction. The void dialog names it («la corrección de datos»).
+- The modality names shown in the dialog («Consumo», «Bajo monto», «Productivo»...) are new copy: the web had no labels for the legal modalities. Review the wording before the deploy.
+- `BackdatedNotice` takes optional `title` and `intro` so the dialog can say it in its own words.
+
+### Issues found
+
+- Nia is not touched in S4 (its preview of a correction is S6). A Nia tarball packaged now already reads corrections because it bundles the core; the deploy of the web build and the tarball together (owner action 4) is still open.
+- The `terms_correction_skipped` notice is produced by the core but the web has no copy for it yet (it is ignored by `LateNotices`).
+- The statement warning counts `adjustment` events dated up to the reference day only.
+
+### Remaining
+
+S5 to S7 and gate G. S4.CP (owner deploy of web and Nia together) is not part of this batch.
