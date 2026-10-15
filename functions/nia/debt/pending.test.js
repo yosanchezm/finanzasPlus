@@ -14,6 +14,7 @@ import {
   explainButton,
   minimumKeyboard,
   modeKeyboard,
+  otherDebtKeyboard,
   parseExplainCallback,
   parseCallback,
   pickKeyboard,
@@ -316,5 +317,29 @@ describe('the buttons of an adjustment (S6b)', () => {
     expect(parseCallback('nia:adj:other')).toBeNull();
     expect(parseCallback('nia:adj:')).toBeNull();
     expect(parseCallback('nia:confirm:p1')).toBeNull();
+  });
+});
+
+describe('the buttons of «¿Es otra deuda?» (S6x)', () => {
+  it('offers to continue with the open case or start a new one, as nia:other:keep and nia:other:new', () => {
+    const keyboard = otherDebtKeyboard();
+
+    expect(keyboard.map((row) => row[0].callback_data)).toEqual(['nia:other:keep', 'nia:other:new']);
+    expect(keyboard.map((row) => row[0].text)).toEqual(['Seguir con la actual', 'Empezar una nueva']);
+    expect(allButtons(keyboard).every((item) => bytes(item.callback_data) <= CALLBACK_MAX_BYTES)).toBe(true);
+    expect(parseCallback('nia:other:keep')).toEqual({ type: 'other', value: 'keep' });
+    expect(parseCallback('nia:other:new')).toEqual({ type: 'other', value: 'new' });
+  });
+
+  it('refuses an answer that is not one of the two', () => {
+    expect(parseCallback('nia:other:')).toBeNull();
+    expect(parseCallback('nia:other:maybe')).toBeNull();
+    expect(parseCallback('nia:other:keep:x')).toBeNull();
+  });
+
+  it('accepts the stage in a pending that holds the open case and the compact extraction, within 1.5 KB', () => {
+    const pending = buildPending({ id: 'p1', action: 'setup', awaiting: 'other', draft: { setup: { kind: 'card', name: 'Visa' }, next: { kind: 'card', name: 'Nu' } } });
+
+    expect(pending).toMatchObject({ kind: 'debt', action: 'setup', awaiting: 'other', draft: { next: { name: 'Nu' } } });
   });
 });

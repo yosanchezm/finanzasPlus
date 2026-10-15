@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { normalizeRate } from '../../../../packages/finance-core/index.js';
-import { mergeCase } from './merge.js';
+import { compactCase, expandCase, isOtherDebt, mergeCase } from './merge.js';
 
 const MV = normalizeRate({ convention: 'MV', value: 2.1 });
 const EA = normalizeRate({ convention: 'EA', value: 30 });
@@ -131,5 +131,64 @@ describe('mergeCase: adjusting an existing debt', () => {
 
   it('does not let a later answer without a kind erase the one already chosen', () => {
     expect(mergeCase(adjusting({ adjustKind: 'change' }), blank({ adjustKind: null })).adjustKind).toBe('change');
+  });
+});
+
+describe('isOtherDebt: a message about a different debt than the open case', () => {
+  const debts = [
+    { $id: 'c1', name: 'Visa', kind: 'card', lender: 'Bancolombia', status: 'active' },
+    { $id: 'd1', name: 'Crédito Vehículo', kind: 'vehicle', lender: 'Davivienda', status: 'active' },
+  ];
+
+  it('is true when the message states another lender, and ignores case, accents and a longer legal name', () => {
+    expect(isOtherDebt(stored(), blank({ lender: 'Davivienda' }))).toBe(true);
+    expect(isOtherDebt(stored(), blank({ lender: 'bancolombia' }))).toBe(false);
+    expect(isOtherDebt(stored({ lender: 'Bancolombia' }), blank({ lender: 'Bancolombia S.A.' }))).toBe(false);
+    expect(isOtherDebt(stored({ lender: 'Banco de Bogotá' }), blank({ lender: 'banco de bogota' }))).toBe(false);
+  });
+
+  it('is false when either side does not name a lender: a plain answer never changes the debt', () => {
+    expect(isOtherDebt(stored(), blank({ lender: '' }, { statementDay: 15 }))).toBe(false);
+    expect(isOtherDebt(stored({ lender: '' }), blank({ lender: 'Davivienda' }))).toBe(false);
+  });
+
+  it('is true for another kind only when the extraction marks the kind as stated', () => {
+    expect(isOtherDebt(stored(), blank({ kind: 'vehicle', kindStated: true }))).toBe(true);
+    expect(isOtherDebt(stored(), blank({ kind: 'vehicle' }))).toBe(false); // the default of an answer that did not name a kind
+    expect(isOtherDebt(stored(), blank({ kind: 'card', kindStated: true }))).toBe(false);
+  });
+
+  it('is true for an adjust that names another registered debt, and false for the same one or for no reference', () => {
+    const adjusting = (patch = {}) => stored({ lender: '', adjust: true, adjustKind: null, debtRef: 'visa', changeOn: null, ...patch });
+    const message = (debtRef) => blank({ lender: '', adjust: true, debtRef });
+    expect(isOtherDebt(adjusting(), message('vehiculo'), { debts })).toBe(true);
+    expect(isOtherDebt(adjusting(), message('visa'), { debts })).toBe(false);
+    expect(isOtherDebt(adjusting(), message(''), { debts })).toBe(false);
+    expect(isOtherDebt(adjusting(), message('vehiculo'), { debts, openDebtId: 'd1' })).toBe(false); // the open case already targets that debt
+    expect(isOtherDebt(adjusting(), message('algo que no existe'), { debts: [] })).toBe(false);
+  });
+});
+
+describe('compactCase and expandCase: the extraction kept inside the pending', () => {
+  it('drops what the message did not say and expands to the same case, with today as the opening date', () => {
+    const full = blank({ name: 'Visa Gold', lender: 'Davivienda', rate: EA, rateValue: 30, presets: { fee: null, gmf: true }, kindStated: true }, { statementDay: 20 });
+    const compact = compactCase(full);
+
+    expect(compact).toEqual({ kind: 'card', name: 'Visa Gold', lender: 'Davivienda', rate: EA, rateValue: 30, card: { statementDay: 20 }, presets: { fee: null, gmf: true } });
+    expect(Buffer.byteLength(JSON.stringify(compact), 'utf8')).toBeLessThan(Buffer.byteLength(JSON.stringify(full), 'utf8') / 2);
+    const { kindStated, openedOn, ...rest } = full;
+    expect(expandCase(compact, '2026-10-15')).toEqual({ ...rest, openedOn: '2026-10-15' });
+  });
+
+  it('keeps the defaults of a loan and the adjust fields of an adjustment', () => {
+    const loan = blank({ kind: 'consumer', system: null, principalMinor: 1200000, n: 3, rate: EA, rateValue: 30 });
+    expect(expandCase(compactCase(loan), '2026-10-13')).toEqual(loan);
+    const adjust = blank({ adjust: true, adjustKind: 'fix', debtRef: 'visa', changeOn: null });
+    expect(expandCase(compactCase(adjust), '2026-10-13')).toEqual(adjust);
+  });
+
+  it('does not carry the stated-kind marker into the merged case', () => {
+    expect(mergeCase(null, blank({ kindStated: true }))).not.toHaveProperty('kindStated');
+    expect(mergeCase(stored(), blank({ kindStated: true }))).not.toHaveProperty('kindStated');
   });
 });

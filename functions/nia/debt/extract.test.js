@@ -772,3 +772,28 @@ describe('normaliseDebtExtraction: setup that adjusts an existing debt', () => {
     expect(prompt).toMatch(/YA está en la lista de deudas registradas/);
   });
 });
+
+describe('normaliseDebtExtraction: setup marks a kind the user stated', () => {
+  const described = (setup = {}, extra = {}) => ({ action: 'setup', kind: 'vehicle', name: 'Moto', setup, ...extra });
+
+  it('marks the kind as stated only when the model says the message named it and the kind is a known one', () => {
+    expect(norm(described({ kindStated: true })).setup).toMatchObject({ kind: 'vehicle', kindStated: true });
+    expect(norm(described({ kindStated: true }, { kind: 'card' })).setup).toMatchObject({ kind: 'card', kindStated: true });
+    expect(norm(described({ kindStated: true }, { kind: 'cripto' })).setup).toMatchObject({ kind: 'consumer' });
+    expect(norm(described({ kindStated: true }, { kind: 'cripto' })).setup).not.toHaveProperty('kindStated');
+  });
+
+  it('leaves the marker out of a plain answer: the kind it carries is only the extraction default', () => {
+    expect(norm(described({})).setup).not.toHaveProperty('kindStated');
+    expect(norm(described({ kindStated: 'sí' })).setup).not.toHaveProperty('kindStated');
+    expect(norm(described({ kindStated: false })).setup).not.toHaveProperty('kindStated');
+    expect(norm({ action: 'setup', setup: { card: { statementDay: 15 } } }).setup).not.toHaveProperty('kindStated');
+  });
+
+  it('teaches the model the marker, also while a described debt is waiting', () => {
+    expect(debtPrompt('una moto', [], [], { today: TODAY })).toContain('setup.kindStated es true solo si el mensaje dice qué tipo de deuda es');
+    const waiting = debtPrompt('el corte es el 15', [], [], { today: TODAY, setup: { kind: 'card', name: 'Visa' } });
+    expect(waiting).toContain('Hay una configuración de deuda en curso');
+    expect(waiting).toContain('en una respuesta a esas preguntas deja setup.kindStated en null');
+  });
+});

@@ -13,10 +13,12 @@ export const PENDING_ID_MAX = 24;
 
 export const CONVENTION_BUTTONS = ['EA', 'NAMV', 'MV', 'NATV', 'NATA'];
 const ADJUST_KINDS = ['fix', 'change'];
+const OTHER_ANSWERS = ['keep', 'new'];
 const CONVENTION_LABELS = { EA: 'E.A.', NAMV: 'N.A.M.V.', MV: 'M.V.', NATV: 'N.A.T.V.', NATA: 'N.A.T.A.' };
 const MODE_LABELS = { keep_term: 'Mantener el plazo', keep_installment: 'Mantener la cuota' };
 const MINIMUM_LABELS = { interest_fees_plus_pct: 'Intereses, cuota de manejo y % del saldo', installments_due: 'Intereses, cuota de manejo y cuotas del mes', pct_balance: '% del total del extracto', unknown: 'No sé' };
 const ADJUST_LABELS = { fix: 'Estaba mal desde el inicio', change: 'Cambió de verdad' };
+const OTHER_LABELS = { keep: 'Seguir con la actual', new: 'Empezar una nueva' };
 const STRATEGY_LABELS = { reduce_term: 'Reducir plazo', reduce_installment: 'Reducir cuota', advance_installments: 'Adelantar cuotas' };
 
 function fail(code, message) {
@@ -25,7 +27,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'setup'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy'|'terms_correction', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'answers'|'adjust_kind',
+ * @param {{ id: string, action: 'create'|'setup'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy'|'terms_correction', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'answers'|'adjust_kind'|'other',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -64,6 +66,14 @@ export function confirmKeyboard(id) {
 /** Whether a rate or a term of an existing debt was wrong from the start (a correction) or really changed (the `nia:adj:` stage). */
 export function adjustKeyboard() {
   return ADJUST_KINDS.map((kind) => [button(ADJUST_LABELS[kind], `nia:adj:${kind}`)]);
+}
+
+/**
+ * «¿Es otra deuda?» (S6x): a message described a different debt while a setup is open. `keep` goes on with the open case, `new` discards it and
+ * starts the new one from the extraction kept in the pending.
+ */
+export function otherDebtKeyboard() {
+  return OTHER_ANSWERS.map((answer) => [button(OTHER_LABELS[answer], `nia:other:${answer}`)]);
 }
 
 /**
@@ -112,15 +122,16 @@ export function chargeKeyboard(charges) {
   return charges.slice(0, MAX_PICK_BUTTONS).map((charge, index) => [button(String(charge.label).slice(0, 40), `nia:chg:${index}`)]);
 }
 
-/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'adjust', value: (string|number|null) } | null} */
+/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'adjust'|'other', value: (string|number|null) } | null} */
 export function parseCallback(data) {
   if (data === 'nia:simpay') return { type: 'simpay', value: null };
-  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg|min|adj):(.+)$/) : null;
+  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg|min|adj|other):(.+)$/) : null;
   if (!match) return null;
   const [, kind, value] = match;
   if (kind === 'pick') return { type: 'pick', value };
   if (kind === 'strat') return STRATEGIES.includes(value) ? { type: 'strategy', value } : null;
   if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
+  if (kind === 'other') return OTHER_ANSWERS.includes(value) ? { type: 'other', value } : null;
   if (kind === 'adj') return ADJUST_KINDS.includes(value) ? { type: 'adjust', value } : null;
   if (kind === 'min') return MIN_RULES.includes(value) || value === 'unknown' ? { type: 'minimum', value } : null;
   if (kind === 'chg') return /^\d$/.test(value) ? { type: 'charge', value: Number(value) } : null;

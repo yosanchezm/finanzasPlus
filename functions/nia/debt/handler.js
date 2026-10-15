@@ -1,6 +1,6 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { buildSetupTerms } from './advisor/cardTerms.js';
-import { mergeCase } from './advisor/merge.js';
+import { compactCase, expandCase, isOtherDebt, mergeCase } from './advisor/merge.js';
 import { STEP_RECORDED, advanceChain, chainReport, checklistText, planChain } from './advisor/chain.js';
 import { proposeSetup } from './advisor/propose.js';
 import { unsupportedText } from './advisor/unsupported.js';
@@ -13,7 +13,7 @@ import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { adjustKeyboard, buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard, withChain } from './pending.js';
+import { adjustKeyboard, buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, otherDebtKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard, withChain } from './pending.js';
 import { CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeAdd, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, setupText, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
@@ -29,7 +29,7 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification', adjust_kind: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification', adjust_kind: 'awaiting_clarification', other: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';
 
@@ -578,8 +578,24 @@ async function continueSetup(deps, ctx, id, setupCase, legal) {
   return say(deps, ctx, { text: setupText(setupCase, proposal, stage), keyboard, status: STATUS[stage], pending });
 }
 
-async function startSetup(deps, ctx, request, legal) {
+// A message that describes a different debt than the open case (S6x, owner decision) is not merged: Nia asks «¿Es otra deuda?». The pending keeps the
+// open case untouched and the compact extraction of the new message, so «Empezar una nueva» needs no second model call.
+async function askOtherDebt(deps, ctx, open, request) {
+  const name = open.draft.setup.name || 'sin nombre';
+  let pending;
+  try {
+    pending = buildPending({ id: open.id, action: 'setup', awaiting: 'other', ...(open.debtId ? { debtId: open.debtId } : {}), draft: { setup: open.draft.setup, next: compactCase(request.setup) } });
+  } catch (error) {
+    if (error.code !== 'pending_too_large') throw error;
+    return inform(deps, ctx, `Tengo abierta la configuración de «${name}» y este mensaje parece describir otra deuda, pero son demasiados datos para guardar las dos a la vez. Termina o cancela la actual y luego escríbeme la nueva; no guardé nada.`);
+  }
+  const text = `Tengo abierta la configuración de «${name}» y este mensaje parece describir otra deuda. ¿Es otra deuda?\n\nSi sigues con la actual, retomo sus preguntas. Si empiezas una nueva, descarto la actual y armo la nueva con lo que acabas de escribir. Todavía no guardé nada.`;
+  return say(deps, ctx, { text, keyboard: otherDebtKeyboard(), status: STATUS.other, pending });
+}
+
+async function startSetup(deps, ctx, request, legal, debts) {
   const open = isOpenSetup(ctx.previous) ? ctx.previous : null;
+  if (open && isOtherDebt(open.draft.setup, request.setup, { debts: debts.filter(inScopeFor(ctx.profile.ownerScope)), openDebtId: open.debtId || null })) return askOtherDebt(deps, ctx, open, request);
   return continueSetup(deps, ctx, open ? open.id : deps.ids.pending(), mergeCase(open ? open.draft.setup : null, request.setup), legal);
 }
 
@@ -597,7 +613,7 @@ export async function handleDebt(deps, ctx) {
   const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency, setup: open && { kind: open.kind, name: open.name } }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
-  if (request.setup) return startSetup(deps, ctx, request, legal);
+  if (request.setup) return startSetup(deps, ctx, request, legal, debts);
   // G3: a write action of the extraction wins over the router's hint; a read-only list or advise with the hint becomes the explanation.
   if (request.action === 'explain' || (ctx.explainHint && ['list', 'advise'].includes(request.action))) return startExplain(deps, ctx, request, debts, legal);
   if (request.action === 'list') return inform(deps, ctx, listReply(await summaries(deps, debts, asOf)));
@@ -616,6 +632,15 @@ export async function handleDebt(deps, ctx) {
 }
 
 const STALE_BUTTON = 'Esa opción ya no aplica a la solicitud actual.';
+
+// «¿Es otra deuda?» (S6x): `keep` asks the open questions again with the open case as it was; `new` drops it and starts the stored extraction as a new case
+// (a new pending id, so the old debt row id and event key are never reused).
+function answerOtherDebt(deps, ctx, pending, answer) {
+  const { setup, next } = pending.draft || {};
+  if (!setup || !next) return notify(deps, ctx, STALE_BUTTON);
+  if (answer === 'keep') return continueSetup(deps, ctx, pending.id, setup);
+  return continueSetup(deps, { ...ctx, previous: null }, deps.ids.pending(), mergeCase(null, expandCase(next, today(deps))));
+}
 
 // A plan change that stated a rate with no convention keeps the value in its draft until the button arrives; then it goes on with the rate.
 const withStatedRate = (next) => async (deps, ctx, pending, convention) => {
@@ -666,8 +691,9 @@ export async function handleDebtCallback(deps, rawCtx, data) {
   // The buttons of a step of an adjustment chain keep the chain: whatever the step saves next carries it.
   const ctx = pending && pending.chain ? { ...rawCtx, previous: null, chain: pending.chain } : rawCtx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge', minimum: 'minimum', adjust: 'adjust_kind' }[action.type];
-  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change') || (['minimum', 'adjust'].includes(action.type) && pending.action !== 'setup')) return notify(deps, ctx, STALE_BUTTON);
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge', minimum: 'minimum', adjust: 'adjust_kind', other: 'other' }[action.type];
+  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change') || (['minimum', 'adjust', 'other'].includes(action.type) && pending.action !== 'setup')) return notify(deps, ctx, STALE_BUTTON);
+  if (action.type === 'other') return answerOtherDebt(deps, ctx, pending, action.value);
   if (action.type === 'adjust') return continueSetup(deps, ctx, pending.id, { ...pending.draft.setup, adjustKind: action.value });
   if (action.type === 'convention') return CONVENTION_NEXT[pending.action] ? CONVENTION_NEXT[pending.action](deps, ctx, pending, action.value) : notify(deps, ctx, STALE_BUTTON);
   if (action.type === 'minimum') {

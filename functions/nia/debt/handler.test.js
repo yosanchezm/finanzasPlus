@@ -3142,3 +3142,228 @@ describe('advisor adjust: the chain of steps (S6b)', () => {
     expect(w.tables.debt_events).toHaveLength(0);
   });
 });
+
+describe('setup: «¿Es otra deuda?» when a different debt arrives during an open setup (S6x)', () => {
+  const OTHER_BUTTONS = ['nia:other:keep', 'nia:other:new'];
+  const nuCard = (extra = {}, setup = {}) => ({ action: 'setup', kind: 'card', name: 'Tarjeta Nu', lender: 'Nu', rate: MV_TEXT, setup, ...extra });
+  const motoAnswer = (setup = {}, extra = {}) => ({ action: 'setup', kind: 'vehicle', name: 'Moto', principalMinor: 8000000, rate: { value: 24, period: 'annual' }, n: 24, setup, ...extra });
+  // The Bancolombia card, with its questions open (awaiting the minimum rule), and the world that goes on from there.
+  const opened = async (answers) => {
+    const w = world({ debts: [], answers: [setupAnswer(), ...answers] });
+    uniqueIds(w);
+    await handleDebt(w.deps, ctx({ text: 'tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 + IVA' }));
+    return { w, open: w.lastPending(), openCase: setupOf(w) };
+  };
+  const asking = async (answers) => {
+    const found = await opened(answers);
+    await handleDebt(found.w.deps, ctx({ text: 'también tengo otra tarjeta, la Nu', previous: found.open }));
+    return { ...found, question: found.w.lastPending() };
+  };
+
+  it('asks «¿Es otra deuda?» with two buttons and merges nothing when the message states another lender', async () => {
+    const { w, open, openCase } = await opened([nuCard({}, { presets: { fee: 10000 } })]);
+    const sessions = w.sessions.length;
+    await handleDebt(w.deps, ctx({ text: 'también tengo la tarjeta Nu, cuota de manejo 10.000', previous: open }));
+
+    expect(w.sent[1].text).toContain('¿Es otra deuda?');
+    expect(w.sent[1].text).toContain('Tarjeta Bancolombia');
+    expect(buttons(w.sent[1].keyboard)).toEqual(OTHER_BUTTONS);
+    expect(w.sessions).toHaveLength(sessions + 1);
+    expect(w.sessions[sessions].status).toBe('awaiting_clarification');
+    const question = w.lastPending();
+    expect(question).toMatchObject({ id: 'p1', action: 'setup', awaiting: 'other' });
+    expect(question.draft.setup).toEqual(openCase); // the open case is exactly as it was: nothing of the Nu card merged into it
+    expect(question.draft.next).toMatchObject({ kind: 'card', name: 'Tarjeta Nu', lender: 'Nu', presets: { fee: 10000 } });
+    expect(pendingBytes(question)).toBeLessThanOrEqual(1500);
+    expect(w.tables.debts).toHaveLength(0);
+    expect(w.prompts).toHaveLength(2);
+  });
+
+  it('asks it too when the message states another kind, but only if the extraction marks the kind as stated', async () => {
+    const { w, open, openCase } = await opened([motoAnswer({ kindStated: true }), motoAnswer({})]);
+    await handleDebt(w.deps, ctx({ text: 'y un crédito para una moto de 8.000.000', previous: open }));
+
+    expect(w.sent[1].text).toContain('¿Es otra deuda?');
+    expect(buttons(w.sent[1].keyboard)).toEqual(OTHER_BUTTONS);
+    expect(w.lastPending().draft).toMatchObject({ setup: openCase, next: { kind: 'vehicle', name: 'Moto', principalMinor: 8000000, n: 24 } });
+    expect(w.lastPending().draft.next).not.toHaveProperty('kindStated');
+
+    // The same extraction without the marker is the default kind of an answer: it merges, and the case stays a card.
+    await handleDebt(w.deps, ctx({ text: 'y un crédito para una moto de 8.000.000', previous: open }));
+    expect(w.sent[2].text).not.toContain('¿Es otra deuda?');
+    expect(w.lastPending()).toMatchObject({ id: 'p1', action: 'setup', draft: { setup: { kind: 'card', name: 'Moto', lender: 'Bancolombia' } } });
+  });
+
+  it('keeps merging an answer that names the same lender (any case) or no lender, and a stated kind equal to the open one', async () => {
+    const same = cardAnswer({ statementDay: 15, dueDay: 30 }, { lender: 'bancolombia' });
+    const sameKind = { ...cardAnswer({ minRule: 'pct_balance' }), setup: { kindStated: true, card: { minRule: 'pct_balance' } } };
+    const { w, open } = await opened([same, cardAnswer({ statementDay: 15 }), sameKind]);
+
+    await handleDebt(w.deps, ctx({ text: 'el corte es el 15 y el pago el 30, en Bancolombia', previous: open }));
+    expect(w.sent[1].text).not.toContain('¿Es otra deuda?');
+    expect(w.lastPending()).toMatchObject({ id: 'p1', awaiting: 'minimum', draft: { setup: { card: { statementDay: 15, dueDay: 30 } } } });
+
+    await handleDebt(w.deps, ctx({ text: 'el corte es el 15', previous: open })); // a plain answer
+    expect(w.sent[2].text).not.toContain('¿Es otra deuda?');
+    expect(setupOf(w).card.statementDay).toBe(15);
+
+    await handleDebt(w.deps, ctx({ text: 'la tarjeta calcula el mínimo sobre el extracto', previous: open }));
+    expect(w.sent[3].text).not.toContain('¿Es otra deuda?');
+    expect(setupOf(w).card.minRule).toBe('pct_balance');
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('«Seguir con la actual» keeps the open case as it was, asks its open questions again and calls no model', async () => {
+    const { w, openCase, question } = await asking([nuCard()]);
+    const prompts = w.prompts.length;
+    await handleDebtCallback(w.deps, ctx({ pending: question }), 'nia:other:keep');
+
+    const reply = w.sent[w.sent.length - 1];
+    expect(reply.text).toContain('Tarjeta Bancolombia');
+    expect(reply.text).toContain('¿Qué día del mes es el corte');
+    expect(reply.text).toContain('¿Cómo calcula el banco tu pago mínimo?');
+    expect(buttons(reply.keyboard)).toEqual(MIN_BUTTONS);
+    expect(w.lastPending()).toMatchObject({ id: 'p1', action: 'setup', awaiting: 'minimum' });
+    expect(setupOf(w)).toEqual(openCase);
+    expect(w.lastPending().draft).not.toHaveProperty('next');
+    expect(w.prompts).toHaveLength(prompts);
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('«Empezar una nueva» discards the open case and proposes the new one from the stored extraction, with a new id and no model call', async () => {
+    const { w, question } = await asking([nuCard()]);
+    const prompts = w.prompts.length;
+    await handleDebtCallback(w.deps, ctx({ pending: question }), 'nia:other:new');
+
+    const reply = w.sent[w.sent.length - 1];
+    expect(reply.text).toContain('Nueva tarjeta: Tarjeta Nu');
+    expect(reply.text).not.toContain('Bancolombia');
+    expect(reply.text).not.toContain('Cuota de manejo'); // the preset of the discarded case did not carry over
+    expect(reply.text).toContain('¿Qué día del mes es el corte');
+    expect(buttons(reply.keyboard)).toEqual(MIN_BUTTONS);
+    const fresh = w.lastPending();
+    expect(fresh).toMatchObject({ id: 'p2', action: 'setup', awaiting: 'minimum', draft: { setup: { kind: 'card', name: 'Tarjeta Nu', lender: 'Nu', openedOn: '2026-10-13', rate: { value: 2.1 }, asked: ['statementDay', 'dueDay', 'minRule'] } } });
+    expect(fresh.draft.setup.presets).toEqual({});
+    expect(fresh.draft).not.toHaveProperty('next');
+    expect(w.sessions[w.sessions.length - 1].status).toBe('awaiting_clarification');
+    expect(w.prompts).toHaveLength(prompts);
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('a new loan from the stored extraction keeps its plan, and the new case goes on to Confirm like any other', async () => {
+    const { w, open } = await opened([motoAnswer({ kindStated: true })]);
+    await handleDebt(w.deps, ctx({ text: 'y un crédito para una moto de 8.000.000 a 24 cuotas al 24% EA', previous: open }));
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:other:new');
+
+    expect(w.sent[2].text).toContain('Nueva deuda: Moto');
+    expect(w.sent[2].text).toContain('24 cuotas mensuales');
+    expect(buttons(w.sent[2].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.lastPending()).toMatchObject({ id: 'p2', awaiting: 'confirm', draft: { setup: { kind: 'vehicle', principalMinor: 8000000, n: 24 } } });
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+    expect(w.tables.debts).toEqual([expect.objectContaining({ $id: 'dbp2', name: 'Moto', kind: 'vehicle' })]);
+  });
+
+  it('answers a plain message while the question is open by merging it into the open case and dropping the question', async () => {
+    const { w, question } = await asking([nuCard(), cardAnswer({ statementDay: 15, dueDay: 30 })]);
+    await handleDebt(w.deps, ctx({ text: 'el corte es el 15 y el pago el 30', previous: question }));
+
+    expect(w.sent[w.sent.length - 1].text).not.toContain('¿Es otra deuda?');
+    expect(w.lastPending()).toMatchObject({ id: 'p1', awaiting: 'minimum', draft: { setup: { name: 'Tarjeta Bancolombia', card: { statementDay: 15, dueDay: 30 } } } });
+    expect(w.lastPending().draft).not.toHaveProperty('next');
+  });
+
+  it('rejects the buttons when they are stale: no pending, another stage, an answered question or a question with nothing to start from', async () => {
+    const none = world({ debts: [] });
+    await handleDebtCallback(none.deps, ctx({ pending: null }), 'nia:other:new');
+    expect(none.sent[0].text).toBe('No tengo una solicitud de deuda pendiente.');
+
+    const { w, open, question } = await asking([nuCard()]);
+    const sessions = w.sessions.length;
+    await handleDebtCallback(w.deps, ctx({ pending: open }), 'nia:other:new'); // the open case is waiting for answers, not for this
+    expect(w.sent[w.sent.length - 1].text).toContain('Esa opción ya no aplica');
+    await handleDebtCallback(w.deps, ctx({ pending: { ...question, draft: { setup: question.draft.setup } } }), 'nia:other:new'); // nothing stored to start from
+    expect(w.sent[w.sent.length - 1].text).toContain('Esa opción ya no aplica');
+
+    await handleDebtCallback(w.deps, ctx({ pending: question }), 'nia:other:keep');
+    const answered = w.sessions.length;
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:other:new'); // the session no longer holds the question
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:other:keep');
+    expect(w.sent.slice(-2).map((message) => message.text)).toEqual(['Esa opción ya no aplica a la solicitud actual.', 'Esa opción ya no aplica a la solicitud actual.']);
+    expect(w.sessions).toHaveLength(answered);
+    expect(answered).toBe(sessions + 1);
+
+    const pay = world({ answers: [payAnswer({ amountMinor: 1000000 })] });
+    await handleDebt(pay.deps, ctx());
+    await handleDebtCallback(pay.deps, ctx({ pending: pay.lastPending() }), 'nia:other:new');
+    expect(pay.sent[1].text).toContain('Esa opción ya no aplica');
+  });
+
+  it('keeps the open case and says so when both do not fit in a Telegram pending', async () => {
+    const charge = (index) => ({ kind: 'other', label: `Cargo con un nombre bastante largo ${index}`.slice(0, 40), basis: 'fixed', value: 10000 + index });
+    const bigOpen = cardCase({ charges: [1, 2, 3].map(charge) });
+    expect(pendingBytes(setupPending(bigOpen, { awaiting: 'answers' }))).toBeLessThan(1500);
+    const w = world({ debts: [], answers: [nuCard({ name: 'N'.repeat(100), lender: 'Nu' }, { charges: [1, 2, 3, 4, 5, 6].map(charge) })] });
+    const open = setupPending(bigOpen, { awaiting: 'answers' });
+    await handleDebt(w.deps, ctx({ text: 'también tengo otra', previous: open }));
+
+    expect(w.sent[0].text).toContain('demasiados datos');
+    expect(w.sent[0].text).toContain('Tarjeta Bancolombia');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toEqual(open);
+  });
+
+  describe('adjusting a registered debt', () => {
+    const fixtureCard = JSON.parse(readFileSync(new URL('../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+    const CARD = { ...fixtureCard.terms, late: { mode: 'usury', graceDays: 0 } };
+    const visa = () => debtRow('c1', 'Visa', { kind: 'card', lender: 'Bancolombia', termsJson: serializeTerms(CARD) });
+    const carro = () => debtRow('d1', 'Crédito Vehículo', { lender: 'Davivienda' });
+    const rateAnswer = (extra = {}) => ({ action: 'setup', kind: 'vehicle', debtRef: 'vehiculo', rate: { value: 22, period: 'annual' }, setup: { adjust: true, adjustKind: null }, ...extra });
+    const visaAnswer = (extra = {}) => ({ action: 'setup', kind: 'card', debtRef: 'visa', setup: { adjust: true, adjustKind: 'fix', card: { statementDay: 20 } }, ...extra });
+    const adjustWorld = async (answers) => {
+      const w = world({ debts: [visa(), carro()], answers: [rateAnswer(), ...answers] });
+      w.tables.debt_events = w.tables.debt_events.filter((event) => event.debtId !== 'c1'); // a card has no disbursement
+      uniqueIds(w);
+      await handleDebt(w.deps, ctx({ text: 'la tasa del carro es 22' }));
+      return { w, open: w.lastPending() };
+    };
+
+    it('asks «¿Es otra deuda?» when the debtRef names another registered debt, and merges nothing', async () => {
+      const { w, open } = await adjustWorld([visaAnswer()]);
+      expect(open).toMatchObject({ action: 'setup', awaiting: 'adjust_kind', debtId: 'd1' });
+      await handleDebt(w.deps, ctx({ text: 'mi tarjeta Visa: el corte siempre fue el 20', previous: open }));
+
+      expect(w.sent[1].text).toContain('¿Es otra deuda?');
+      expect(buttons(w.sent[1].keyboard)).toEqual(['nia:other:keep', 'nia:other:new']);
+      const question = w.lastPending();
+      expect(question).toMatchObject({ id: 'p1', awaiting: 'other', debtId: 'd1', draft: { setup: open.draft.setup, next: { adjust: true, debtRef: 'visa', kind: 'card' } } });
+      expect(pendingBytes(question)).toBeLessThanOrEqual(1500);
+      expect(w.tables.debt_events.filter((event) => event.kind !== 'disbursement')).toHaveLength(0);
+    });
+
+    it('keeps merging a message about the same debt, and «Seguir con la actual» asks the fix or change question again', async () => {
+      const { w, open } = await adjustWorld([rateAnswer({ debtRef: 'carro', setup: { adjust: true, adjustKind: 'fix' } }), visaAnswer()]);
+      await handleDebt(w.deps, ctx({ text: 'es el carro, siempre fue 22', previous: open }));
+      const said = w.sent.slice(1).map((message) => message.text).join('\n');
+      expect(said).not.toContain('¿Es otra deuda?');
+      expect(said).toContain('Corrección de datos en Crédito Vehículo');
+
+      await handleDebt(w.deps, ctx({ text: 'mi tarjeta Visa: el corte siempre fue el 20', previous: open }));
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:other:keep');
+      expect(w.sent[w.sent.length - 1].text).toContain('Crédito Vehículo');
+      expect(buttons(w.sent[w.sent.length - 1].keyboard)).toEqual(['nia:adj:fix', 'nia:adj:change']);
+      expect(w.lastPending()).toMatchObject({ id: 'p1', action: 'setup', awaiting: 'adjust_kind', debtId: 'd1' });
+    });
+
+    it('«Empezar una nueva» starts the adjustment of the other debt from the stored extraction', async () => {
+      const { w, open } = await adjustWorld([visaAnswer()]);
+      await handleDebt(w.deps, ctx({ text: 'mi tarjeta Visa: el corte siempre fue el 20', previous: open }));
+      const prompts = w.prompts.length;
+      await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:other:new');
+
+      expect(w.sent.map((message) => message.text).join('\n')).toContain('Corregir el día de corte a 20');
+      expect(w.lastPending()).toMatchObject({ id: 'p2', action: 'terms_correction', awaiting: 'confirm', debtId: 'c1' });
+      expect(w.prompts).toHaveLength(prompts);
+      expect(w.tables.debt_events.filter((event) => event.kind === 'terms_correction')).toHaveLength(0);
+    });
+  });
+});

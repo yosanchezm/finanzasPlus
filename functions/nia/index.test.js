@@ -823,6 +823,59 @@ describe('advisor setup in the Nia entry point', () => {
     expect(fake.tables.bot_sessions[0].pendingJson).toBe(ready);
     expect(fake.tables.debts).toHaveLength(0);
   });
+
+  describe('«¿Es otra deuda?» (S6x)', () => {
+    const nu = { action: 'setup', kind: 'card', name: 'Tarjeta Nu', lender: 'Nu', rate: MV_TEXT, setup: {} };
+    const OTHER_BUTTONS = ['nia:other:keep', 'nia:other:new'];
+
+    it('asks instead of merging when the message is about another lender, and routes «Empezar una nueva» with no model call', async () => {
+      fake = makeNet([classify, bancolombia(), classify, nu]);
+      await run(message(OWNER_TEXT));
+      const open = sessionPending();
+      await run(message('también tengo la tarjeta Nu al 2,1% mensual'));
+
+      expect(sent()[1].text).toContain('¿Es otra deuda?');
+      expect(buttons(sent()[1])).toEqual(OTHER_BUTTONS);
+      expect(sessionPending()).toMatchObject({ id: open.id, awaiting: 'other', draft: { setup: open.draft.setup, next: { name: 'Tarjeta Nu', lender: 'Nu' } } });
+      expect(fake.tables.debts).toHaveLength(0);
+      const prompts = fake.prompts.length;
+
+      await run(press('nia:other:new'));
+      expect(sent()[2].text).toContain('Nueva tarjeta: Tarjeta Nu');
+      expect(sent()[2].text).not.toContain('Bancolombia');
+      expect(buttons(sent()[2])).toEqual(MIN_BUTTONS);
+      expect(sessionPending()).toMatchObject({ awaiting: 'minimum', draft: { setup: { name: 'Tarjeta Nu', lender: 'Nu' } } });
+      expect(sessionPending().id).not.toBe(open.id);
+      expect(fake.prompts).toHaveLength(prompts);
+      expect(fake.tables.debts).toHaveLength(0);
+
+      await run(press('nia:other:keep')); // the question was answered: the same button is now stale
+      expect(sent()[3].text).toBe('Esa opción ya no aplica a la solicitud actual.');
+    });
+
+    it('routes «Seguir con la actual»: the open case stays and its questions are asked again', async () => {
+      fake = makeNet([classify, bancolombia(), classify, nu]);
+      await run(message(OWNER_TEXT));
+      const open = sessionPending();
+      await run(message('también tengo la tarjeta Nu al 2,1% mensual'));
+      await run(press('nia:other:keep'));
+
+      expect(sent()[2].text).toContain('Tarjeta Bancolombia');
+      expect(sent()[2].text).toContain('¿Qué día del mes es el corte');
+      expect(buttons(sent()[2])).toEqual(MIN_BUTTONS);
+      expect(sessionPending()).toEqual(open);
+      expect(fake.tables.debts).toHaveLength(0);
+    });
+
+    it('ignores the buttons with no pending', async () => {
+      fake = makeNet([]);
+      await run(press('nia:other:new'));
+      await run(press('nia:other:keep'));
+
+      expect(sent().map((call) => call.text)).toEqual(['No tengo una solicitud de deuda pendiente.', 'No tengo una solicitud de deuda pendiente.']);
+      expect(writes()).toBe(0);
+    });
+  });
 });
 
 describe('advisor adjust in the Nia entry point (chain of steps)', () => {

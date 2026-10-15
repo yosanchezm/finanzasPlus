@@ -1194,7 +1194,7 @@ async function handleUpdate(update) {
       // Stateless and read-only: routed before the stage check, so it needs no pending and leaves the waiting one as it is.
       const session = await getSession(chatId);
       await handleExplainCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), previous: pendingFromSession(session), sessionStatus: session?.status }, callback.data);
-    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|min:|adj:|simpay$)/.test(callback.data || '')) {
+    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|min:|adj:|other:|simpay$)/.test(callback.data || '')) {
       const session = await getSession(chatId);
       await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
     } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');

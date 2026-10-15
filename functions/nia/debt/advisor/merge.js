@@ -1,4 +1,4 @@
-import { fold } from '../findDebt.js';
+import { findDebt, fold } from '../findDebt.js';
 
 // Merges a later answer into the stored case (design G13). The pending keeps the merged case, not the history, so a text answer such as
 // «el corte es el 15» fills what was asked without re-reading the conversation. Pure and Node 16 safe.
@@ -50,13 +50,20 @@ function mergeUnknown(earlier, card) {
   return [...kept, ...added];
 }
 
+// `kindStated` only tells `isOtherDebt` how to read the kind of a message; it is not part of the case.
+function withoutMarker(extracted) {
+  const rest = { ...extracted };
+  delete rest.kindStated;
+  return rest;
+}
+
 /**
  * @param {(object | null)} stored The case in the pending (with its `asked` and `unknown` lists), or null for the first message.
  * @param {object} extracted `normaliseDebtExtraction(...).setup` of the latest message.
  * @returns {object} A new case. Later non-null values override, nulls fill from the stored case, `kind` stays, and a zero opening balance never overrides.
  */
 export function mergeCase(stored, extracted) {
-  if (!stored) return { ...extracted, asked: [], unknown: [] };
+  if (!stored) return { ...withoutMarker(extracted), asked: [], unknown: [] };
   const card = {};
   for (const field of ['statementDay', 'dueDay', 'minRule', 'minPct', 'minFloorMinor']) card[field] = pick(extracted.card && extracted.card[field], stored.card && stored.card[field]);
   return {
@@ -78,5 +85,88 @@ export function mergeCase(stored, extracted) {
     mentions: [...(stored.mentions || []), ...(extracted.mentions || []).filter((mention) => !(stored.mentions || []).includes(mention))],
     asked: stored.asked || [],
     unknown: mergeUnknown(stored, card),
+  };
+}
+
+// Whether two lender names are the same one: equal once folded, or one holds the other («Bancolombia» and «Bancolombia S.A.»).
+function sameLender(a, b) {
+  const x = fold(a);
+  const y = fold(b);
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+// An adjustment names its debt in free text: the message is about another registered debt only when its reference resolves to a debt that is
+// not the one the open case targets. A reference that matches nothing, or no reference, is not another debt.
+function namesAnotherRegistered(stored, extracted, debts, openDebtId) {
+  if (!stored.adjust || !text(extracted.debtRef, '')) return false;
+  const named = findDebt(debts, extracted.debtRef).match;
+  const open = openDebtId || (findDebt(debts, stored.debtRef).match || {}).$id;
+  return Boolean(named && open && named.$id !== open);
+}
+
+/**
+ * Whether a message describes a different debt than the open case (owner decision S6x), so it must not be merged.
+ * Only what the message states counts: another lender, another kind the extraction marked as stated (`kindStated`: the kind of a plain answer
+ * is only the extraction default), or, for an adjustment, a reference that resolves to another registered debt.
+ * @param {object} stored The case in the pending.
+ * @param {object} extracted `normaliseDebtExtraction(...).setup` of the latest message.
+ * @param {{ debts?: object[], openDebtId?: (string | null) }} [options] `debts`: the registered debts in scope; `openDebtId`: the debt the open adjustment targets, when known.
+ * @returns {boolean}
+ */
+export function isOtherDebt(stored, extracted, { debts = [], openDebtId = null } = {}) {
+  if (text(stored.lender, '') && text(extracted.lender, '') && !sameLender(stored.lender, extracted.lender)) return true;
+  if (extracted.kindStated === true && extracted.kind !== stored.kind) return true;
+  return namesAnotherRegistered(stored, extracted, debts, openDebtId);
+}
+
+const DROPPED = ['kindStated', 'openedOn', 'asked', 'unknown'];
+
+/**
+ * The extraction of a message without what it did not say (nulls, empty lists, the default `none` system), so it fits next to the open case in
+ * the pending. Presets keep their nulls: there a null is «mentioned without an amount».
+ * @param {object} extracted `normaliseDebtExtraction(...).setup`.
+ * @returns {object} A plain object that `expandCase` turns back into the case.
+ */
+export function compactCase(extracted) {
+  const compact = {};
+  for (const [key, value] of Object.entries(extracted)) {
+    if (DROPPED.includes(key) || value === null || value === undefined || value === '') continue;
+    if (key === 'system' && value === 'none') continue;
+    if (key === 'principalMinor' && value === 0) continue;
+    if (key === 'card') {
+      const card = Object.fromEntries(Object.entries(value).filter(([, item]) => present(item)));
+      if (Object.keys(card).length > 0) compact.card = card;
+    } else if (Array.isArray(value)) {
+      if (value.length > 0) compact[key] = value;
+    } else if (key !== 'presets' || Object.keys(value).length > 0) compact[key] = value;
+  }
+  return compact;
+}
+
+/**
+ * The case a `compactCase` result stands for: every field the message did not say is back to the value the extraction gives it.
+ * @param {object} compact
+ * @param {string} today `YYYY-MM-DD` of the new case's opening date.
+ */
+export function expandCase(compact, today) {
+  const scheduled = compact.kind !== 'card' && compact.kind !== 'informal';
+  return {
+    name: '',
+    lender: '',
+    principalMinor: compact.kind === 'card' ? 0 : null,
+    openedOn: today,
+    rate: null,
+    rateValue: null,
+    n: null,
+    periodicity: null,
+    system: scheduled ? null : 'none',
+    firstDueOn: null,
+    presets: {},
+    charges: [],
+    lateStated: null,
+    mentions: [],
+    ...(compact.adjust ? { adjustKind: null, debtRef: null, changeOn: null } : {}),
+    ...compact,
+    card: { statementDay: null, dueDay: null, minRule: null, minPct: null, minFloorMinor: null, ...compact.card },
   };
 }
