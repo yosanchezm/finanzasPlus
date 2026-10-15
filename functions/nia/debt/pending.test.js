@@ -11,6 +11,7 @@ import {
   dedupeKeyOf,
   eventIdOf,
   explainButton,
+  minimumKeyboard,
   modeKeyboard,
   parseExplainCallback,
   parseCallback,
@@ -271,5 +272,31 @@ describe('explainButton and parseExplainCallback (stateless nia:exp: buttons)', 
 
   it('makes the shared button() assert the 64 byte limit for any callback', () => {
     expect(() => pickKeyboard([{ $id: 'x'.repeat(80), name: 'Larga' }])).toThrow(expect.objectContaining({ code: 'callback_too_long' }));
+  });
+});
+
+describe('minimum payment rule callbacks (S5c)', () => {
+  it('offers the three rules and «no sé», each callback within 64 bytes, in a stable order', () => {
+    const buttons = allButtons(minimumKeyboard());
+
+    expect(buttons.map((item) => item.callback_data)).toEqual(['nia:min:interest_fees_plus_pct', 'nia:min:installments_due', 'nia:min:pct_balance', 'nia:min:unknown']);
+    expect(buttons.map((item) => item.text)).toEqual(['Intereses, cuota de manejo y % del saldo', 'Intereses, cuota de manejo y cuotas del mes', '% del total del extracto', 'No sé']);
+    for (const item of buttons) expect(bytes(item.callback_data)).toBeLessThanOrEqual(CALLBACK_MAX_BYTES);
+  });
+
+  it('parses a rule and «unknown» into the minimum stage, and refuses anything else', () => {
+    expect(parseCallback('nia:min:installments_due')).toEqual({ type: 'minimum', value: 'installments_due' });
+    expect(parseCallback('nia:min:unknown')).toEqual({ type: 'minimum', value: 'unknown' });
+    expect(parseCallback('nia:min:pct_total')).toBeNull();
+    expect(parseCallback('nia:min:')).toBeNull();
+    expect(parseCallback('nia:min')).toBeNull();
+  });
+
+  it('keeps a pending that waits for the rule compact: the Bancolombia case and its answers stay under 1,500 bytes', () => {
+    const setup = { kind: 'card', name: 'Tarjeta Bancolombia', lender: 'Bancolombia', principalMinor: 0, openedOn: '2026-10-13', rate: { value: 2.1, basis: 'effective', periodicity: 'monthly', timing: 'arrears' }, rateValue: 2.1, n: null, periodicity: null, system: 'none', firstDueOn: null, card: { statementDay: 15, dueDay: 30, minRule: null, minPct: null, minFloorMinor: null }, presets: { fee: 45000, iva: 19 }, charges: [], lateStated: null, mentions: [], asked: ['minRule'], unknown: [] };
+    const pending = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'setup', awaiting: 'minimum', draft: { setup } });
+
+    expect(pending).toMatchObject({ kind: 'debt', action: 'setup', awaiting: 'minimum' });
+    expect(bytes(JSON.stringify(pending))).toBeLessThan(PENDING_MAX_BYTES);
   });
 });

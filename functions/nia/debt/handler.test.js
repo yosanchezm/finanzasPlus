@@ -273,14 +273,15 @@ describe('create', () => {
     expect(w.lastPending()).toMatchObject({ awaiting: 'confirm' });
   });
 
-  it('asks for what is missing and points cards to the web', async () => {
+  it('asks for what is missing, and no longer points a card to the web (the advisor takes it)', async () => {
     const w = world({ debts: [], answers: [{ action: 'create', kind: 'consumer', name: 'Libre' }, loanAnswer({ kind: 'card' })] });
     await handleDebt(w.deps, ctx());
     await handleDebt(w.deps, ctx());
 
     expect(w.sent[0].text).toContain('monto del préstamo');
     expect(w.sent[0].text).toContain('tasa');
-    expect(w.sent[1].text).toContain('web');
+    expect(w.sent[1].text).not.toContain('web');
+    expect(w.sent[1].text).toContain('Nueva tarjeta: Moto');
     expect(w.tables.debts).toHaveLength(0);
   });
 });
@@ -2460,5 +2461,263 @@ describe('commit a described setup (exactly once)', () => {
 
     expect(w.sent[0].text).toContain('Antes de confirmar');
     expect(w.tables.debts).toHaveLength(0);
+  });
+});
+
+// S5c: the advisor proposes a described debt, asks what it still needs, and only offers Confirm when nothing blocks.
+const MV_TEXT = { value: 2.1, period: 'monthly', compounding: 'effective', timing: 'arrears' };
+const setupAnswer = (extra = {}, setup = {}) => ({ action: 'setup', kind: 'card', name: 'Tarjeta Bancolombia', lender: 'Bancolombia', rate: MV_TEXT, setup: { presets: { fee: 45000, iva: true }, ...setup }, ...extra });
+const cardAnswer = (card, extra = {}) => ({ action: 'setup', kind: 'card', setup: { card }, ...extra });
+const loanSetup = (extra = {}) => ({ action: 'setup', kind: 'consumer', name: 'Libre inversión', principalMinor: 1200000, rate: { value: 24, period: 'annual' }, n: 3, setup: {}, ...extra });
+const uniqueIds = (w) => { let count = 0; w.deps.ids.pending = () => `p${++count}`; };
+const setupOf = (w) => w.lastPending().draft.setup;
+const pendingBytes = (pending) => Buffer.byteLength(JSON.stringify(pending), 'utf8');
+const MIN_BUTTONS = ['nia:min:interest_fees_plus_pct', 'nia:min:installments_due', 'nia:min:pct_balance', 'nia:min:unknown'];
+
+describe('setup: the proposal (read-only)', () => {
+  it('answers the Bancolombia case with the EA echo, the linked IVA, the assumptions, the questions and the disclaimer, and writes nothing', async () => {
+    const w = world({ debts: [], answers: [setupAnswer()] });
+    await handleDebt(w.deps, ctx({ text: 'tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 + IVA' }));
+
+    const { text, keyboard } = w.sent[0];
+    expect(text).toContain('Nueva tarjeta: Tarjeta Bancolombia');
+    expect(text).toContain('2.1% MV ≈ 28.32% EA');
+    expect(text).toContain('Cuota de manejo: $ 45.000');
+    expect(text).toContain('IVA: $ 8.550');
+    expect(text).toContain('IVA del 19 %');
+    expect(text).toMatch(/Mora a la tasa de usura/);
+    expect(text).toContain('¿Qué día del mes es el corte');
+    expect(text).toContain('¿Qué día del mes es la fecha límite');
+    expect(text).toContain('¿Cómo calcula el banco tu pago mínimo?');
+    expect(text).toContain('Todavía no guardé nada');
+    expect(buttons(keyboard)).toEqual(MIN_BUTTONS);
+    expect(buttons(keyboard)).not.toContain('nia:confirm');
+    expect(w.tables.debts).toHaveLength(0);
+    expect(w.tables.debt_events).toHaveLength(0);
+    expect(costRows(w)).toHaveLength(0);
+    expect(w.sessions).toHaveLength(1);
+    expect(w.sessions[0].status).toBe('awaiting_clarification');
+    expect(w.lastPending()).toMatchObject({ kind: 'debt', v: 1, id: 'p1', action: 'setup', awaiting: 'minimum', draft: { setup: { kind: 'card', name: 'Tarjeta Bancolombia', asked: ['statementDay', 'dueDay', 'minRule'], unknown: [] } } });
+    expect(pendingBytes(w.lastPending())).toBeLessThanOrEqual(1500);
+    expect(w.prompts).toHaveLength(1);
+  });
+
+  it('asks only the convention, with its buttons and no preview, when the rate type is missing; the other questions wait', async () => {
+    const w = world({ debts: [], answers: [setupAnswer({ rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+    expect(w.sent[0].text).toContain('no me queda claro de qué tipo es');
+    expect(w.sent[0].text).not.toContain('Cuota de manejo');
+    expect(w.sent[0].text).not.toContain('corte');
+    expect(w.lastPending()).toMatchObject({ action: 'setup', awaiting: 'convention', draft: { setup: { rateValue: 2, rate: null, asked: [] } } });
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('goes on with the convention buttons: the chosen type decides the EA echo, and a stale convention button is ignored', async () => {
+    const w = world({ debts: [], answers: [setupAnswer({ rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(w.deps, ctx());
+    const asking = w.lastPending();
+
+    await handleDebtCallback(w.deps, ctx({ pending: asking }), 'nia:conv:MV');
+    expect(w.sent[1].text).toContain('2% MV ≈ 26.82% EA');
+    expect(w.sent[1].text).toContain('IVA: $ 8.550');
+    expect(buttons(w.sent[1].keyboard)).toEqual(MIN_BUTTONS);
+    expect(w.lastPending()).toMatchObject({ awaiting: 'minimum', draft: { setup: { rate: { value: 2 }, asked: ['statementDay', 'dueDay', 'minRule'] } } });
+
+    const sessions = w.sessions.length;
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:EA'); // the flow no longer waits for a convention
+    expect(w.sent[2].text).toContain('Esa opción ya no aplica');
+    expect(w.sessions).toHaveLength(sessions);
+
+    const other = world({ debts: [], answers: [setupAnswer({ rate: { value: 2, period: 'monthly' } })] });
+    await handleDebt(other.deps, ctx());
+    await handleDebtCallback(other.deps, ctx({ pending: other.lastPending() }), 'nia:conv:EA');
+    expect(other.sent[1].text).toContain('2% EA');
+  });
+
+  it('merges the text answers into the stored case, keeps the pending id and asks again only what is missing', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15, dueDay: 30 })] });
+    uniqueIds(w);
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx({ text: 'el corte es el 15 y el pago el 30', previous: w.lastPending() }));
+
+    expect(w.sent[1].text).toContain('Tarjeta Bancolombia');
+    expect(w.sent[1].text).not.toContain('¿Qué día del mes es el corte');
+    expect(w.sent[1].text).toContain('Próximo corte: 2026-10-15');
+    expect(w.sent[1].text).toContain('¿Cómo calcula el banco tu pago mínimo?');
+    expect(buttons(w.sent[1].keyboard)).toEqual(MIN_BUTTONS);
+    expect(w.lastPending()).toMatchObject({ id: 'p1', awaiting: 'minimum', draft: { setup: { name: 'Tarjeta Bancolombia', card: { statementDay: 15, dueDay: 30, minRule: null }, presets: { fee: 45000, iva: 19 }, asked: ['minRule'], unknown: [] } } });
+    expect(w.prompts).toHaveLength(2);
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('marks the asked fields unknown when the message answers none of them: no Confirm, no default, and it says what is missing', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({})] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx({ text: 'no sé', previous: w.lastPending() }));
+
+    expect(setupOf(w).unknown).toEqual(['statementDay', 'dueDay', 'minRule']);
+    expect(setupOf(w).asked).toEqual([]);
+    expect(w.sent[1].text).toContain('No puedo crear la tarjeta sin el día de corte');
+    expect(w.sent[1].text).toContain('sin saber cómo se calcula el pago mínimo');
+    expect(w.sent[1].keyboard).toBeUndefined();
+    expect(w.lastPending()).toMatchObject({ action: 'setup', awaiting: 'answers' });
+    expect(setupOf(w).card.minRule).toBeNull(); // never a provisional value
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('does not mark anything unknown when the message answers some of the asked fields, and a late answer unblocks the stuck ones', async () => {
+    const some = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15 })] });
+    await handleDebt(some.deps, ctx());
+    await handleDebt(some.deps, ctx({ previous: some.lastPending() }));
+    expect(setupOf(some).unknown).toEqual([]);
+    expect(some.sent[1].text).toContain('¿Qué día del mes es la fecha límite');
+    expect(buttons(some.sent[1].keyboard)).toEqual(MIN_BUTTONS);
+
+    const stuck = world({ debts: [], answers: [setupAnswer(), cardAnswer({}), cardAnswer({ statementDay: 15, dueDay: 30, minRule: 'pct_balance' })] });
+    await handleDebt(stuck.deps, ctx());
+    await handleDebt(stuck.deps, ctx({ previous: stuck.lastPending() }));
+    expect(stuck.sent[1].keyboard).toBeUndefined();
+    await handleDebt(stuck.deps, ctx({ text: 'ya lo encontré', previous: stuck.lastPending() }));
+    expect(stuck.sent[2].text).toContain('Pago mínimo: 5 % del total del extracto');
+    expect(buttons(stuck.sent[2].keyboard)).toContain('nia:confirm');
+    expect(setupOf(stuck).unknown).toEqual([]);
+    expect(stuck.lastPending().awaiting).toBe('confirm');
+  });
+
+  it('sets the minimum rule from a nia:min: button, goes to Confirm with the minimum in the preview, and «No sé» blocks the creation', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15, dueDay: 30 })] });
+    uniqueIds(w);
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx({ previous: w.lastPending() }));
+    const waiting = w.lastPending();
+
+    await handleDebtCallback(w.deps, ctx({ pending: waiting }), 'nia:min:interest_fees_plus_pct');
+    expect(w.sent[2].text).toContain('Pago mínimo: intereses, cuota de manejo, cuotas y 5 % del saldo');
+    expect(w.sent[2].text).toContain('Vista previa: no se guarda hasta que confirmes');
+    expect(buttons(w.sent[2].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[w.sessions.length - 1].status).toBe('awaiting_confirmation');
+    expect(w.lastPending()).toMatchObject({ id: 'p1', awaiting: 'confirm', draft: { setup: { card: { minRule: 'interest_fees_plus_pct' } } } });
+
+    await handleDebtCallback(w.deps, ctx({ pending: waiting }), 'nia:min:unknown');
+    expect(w.sent[3].text).toContain('sin saber cómo se calcula el pago mínimo');
+    expect(w.sent[3].keyboard).toBeUndefined();
+    expect(setupOf(w).card.minRule).toBe('unknown');
+    expect(w.lastPending().awaiting).toBe('answers');
+    expect(w.tables.debts).toHaveLength(0);
+    expect(w.prompts).toHaveLength(2); // the buttons call no model
+  });
+
+  it('ignores a minimum button that does not match the request: no pending, another stage, another action', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15, dueDay: 30, minRule: 'pct_balance' })] });
+    await handleDebtCallback(w.deps, ctx({ pending: null }), 'nia:min:pct_balance');
+    expect(w.sent[0].text).toBe('No tengo una solicitud de deuda pendiente.');
+
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx({ previous: w.lastPending() }));
+    const confirming = w.lastPending();
+    const sessions = w.sessions.length;
+    await handleDebtCallback(w.deps, ctx({ pending: confirming }), 'nia:min:installments_due');
+    expect(w.sent[w.sent.length - 1].text).toContain('Esa opción ya no aplica');
+
+    const pay = world({ answers: [payAnswer({ amountMinor: 1000000 })] });
+    await handleDebt(pay.deps, ctx()); // awaiting the strategy, a different action and stage
+    await handleDebtCallback(pay.deps, ctx({ pending: pay.lastPending() }), 'nia:min:pct_balance');
+    expect(pay.sent[1].text).toContain('Esa opción ya no aplica');
+
+    expect(w.sessions).toHaveLength(sessions);
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('refuses to confirm while a question is open and says so', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({})] });
+    await handleDebt(w.deps, ctx());
+    await handleDebt(w.deps, ctx({ previous: w.lastPending() }));
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.sent[2].text).toContain('Antes de confirmar');
+    expect(w.sent[2].text).toContain('preguntas');
+    expect(w.tables.debts).toHaveLength(0);
+  });
+
+  it('proposes a loan with the plan and a first installment, and is ready to confirm when nothing is missing', async () => {
+    const w = world({ debts: [], answers: [loanSetup()] });
+    await handleDebt(w.deps, ctx({ text: 'préstamo libre inversión de 1.200.000 a 3 cuotas al 24% EA' }));
+
+    expect(w.sent[0].text).toContain('Nueva deuda: Libre inversión');
+    expect(w.sent[0].text).toContain('3 cuotas mensuales');
+    expect(w.sent[0].text).toContain('Primera cuota');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.lastPending()).toMatchObject({ action: 'setup', awaiting: 'confirm', draft: { setup: { kind: 'consumer', principalMinor: 1200000, n: 3 } } });
+    expect(w.tables.debts).toHaveLength(0);
+    expect(w.tables.debt_events).toHaveLength(0);
+  });
+
+  it('asks the missing loan data with text only (no keyboard), and a card sent as create goes to the advisor, not to the web', async () => {
+    const w = world({ debts: [], answers: [loanSetup({ principalMinor: null, n: null }), loanAnswer({ kind: 'card' })] });
+    await handleDebt(w.deps, ctx());
+    expect(w.sent[0].text).toContain('¿De cuánto es el préstamo?');
+    expect(w.sent[0].text).toContain('¿A cuántas cuotas es?');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.lastPending()).toMatchObject({ action: 'setup', awaiting: 'answers' });
+
+    await handleDebt(w.deps, ctx());
+    expect(w.sent[1].text).toContain('Nueva tarjeta: Moto');
+    expect(w.sent[1].text).not.toContain('web');
+  });
+
+  it('says a stated card limit is «no soportado aún» and that the card is created without it', async () => {
+    const w = world({ debts: [], answers: [setupAnswer({}, { mentions: ['card_limit'] })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('No soportado aún');
+    expect(w.sent[0].text).toContain('El cupo de la tarjeta: no soportado aún');
+  });
+
+  it('keeps the previous pending and says so when the described debt does not fit a Telegram pending', async () => {
+    const charge = (index) => ({ kind: 'other', label: `Cargo con un nombre bastante largo ${index}`.slice(0, 40), basis: 'fixed', value: 10000 + index });
+    const answer = setupAnswer({ name: 'N'.repeat(120), lender: 'L'.repeat(120) }, { charges: [1, 2, 3, 4, 5, 6].map(charge) });
+    const w = world({ debts: [], answers: [answer] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('demasiados cargos');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+  });
+
+  it('reports an invalid day and keeps the request waiting', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 40 })] });
+    await handleDebt(w.deps, ctx());
+    const waiting = w.lastPending();
+    await handleDebt(w.deps, ctx({ previous: waiting }));
+
+    expect(w.sent[1].text).toContain('El día debe ser un número del 1 al 31');
+    expect(w.lastPending()).toEqual(waiting);
+  });
+
+  it('runs the whole Bancolombia case: proposal, answers, button, Confirm, and a double Confirm writes one debts row and no event', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15, dueDay: 30 })] });
+    uniqueIds(w);
+    await handleDebt(w.deps, ctx({ text: 'tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 + IVA' }));
+    await handleDebt(w.deps, ctx({ text: 'el corte es el 15 y el pago el 30', previous: w.lastPending() }));
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:min:interest_fees_plus_pct');
+    const ready = w.lastPending();
+    expect(w.tables.debts).toHaveLength(0);
+
+    await confirmDebt(w.deps, ctx(), ready);
+    await confirmDebt(w.deps, ctx(), ready);
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(cardRows(w)).toEqual([expect.objectContaining({ $id: 'dbp1', name: 'Tarjeta Bancolombia', kind: 'card' })]);
+    expect(w.tables.debt_events).toHaveLength(0);
+    expect(costRows(w)).toHaveLength(0);
+    const terms = JSON.parse(w.tables.debts[0].termsJson);
+    expect(terms.card).toMatchObject({ statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 0 } });
+    expect(terms.card).not.toHaveProperty('limitMinor');
+    expect(terms.late).toMatchObject({ mode: 'usury' });
+    expect(terms.charges.map((item) => [item.id, item.value])).toEqual([['mgmt_fee', 45000], ['mgmt_iva', 19]]);
+    expect(w.sent.slice(-3).map((message) => message.text.includes('ya estaba registrada'))).toEqual([false, true, true]);
+    expect(w.prompts).toHaveLength(2); // one extraction per text message and none for the buttons or the Confirm
   });
 });

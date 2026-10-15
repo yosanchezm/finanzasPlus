@@ -171,3 +171,38 @@ export function previewCreate(create, options = {}) {
     return { ok: true, terms, text: createText(create, terms, options.legal) };
   });
 }
+
+const SETUP_OPEN_FOOTER = 'Todavía no guardé nada.';
+const SETUP_READY_FOOTER = 'Vista previa: no se guarda hasta que confirmes.';
+
+const bullets = (title, items) => (items.length ? ['', title, ...items.map((item) => `• ${item}`)] : []);
+
+/**
+ * The reply of the advisor for a described debt (S5c): the preview computed by the core, the assumptions Nia made, what is not supported yet
+ * and the questions still open. It never states a number the proposal did not compute. A convention question comes alone, before any preview.
+ * @param {object} setupCase The merged `SetupCase` (name and kind head the reply).
+ * @param {object} proposal `proposeSetup(...)`
+ * @param {'confirm'|'convention'|'minimum'|'answers'} stage
+ * @returns {string}
+ */
+export function setupText(setupCase, proposal, stage) {
+  if (stage === 'convention') return [proposal.questions.find((question) => question.field === 'convention').text, '', SETUP_OPEN_FOOTER].join('\n');
+  const lines = [`🆕 Nueva ${setupCase.kind === 'card' ? 'tarjeta' : 'deuda'}${setupCase.name ? `: ${setupCase.name}` : ''}`];
+  if (proposal.invalid.length > 0) {
+    lines.push(...proposal.invalid.map((item) => item.text));
+  } else if (proposal.preview) {
+    const { preview } = proposal;
+    lines.push(`Tasa: ${preview.rateLabel}`);
+    if (preview.planText) lines.push(`Plan: ${preview.planText}`);
+    if (preview.firstInstallmentText) lines.push(preview.firstInstallmentText);
+    lines.push(...preview.chargeLines.map((line) => `${line.label}: ${line.amountText}`));
+    if (preview.minimumText) lines.push(preview.minimumText);
+    if (preview.nextStatementOn) lines.push(`Próximo corte: ${preview.nextStatementOn}`);
+    lines.push(...preview.usuryLines);
+  }
+  lines.push(...bullets('Supuestos:', proposal.assumptions.map((item) => item.text)));
+  lines.push(...bullets('No soportado aún:', proposal.unsupported.map((item) => item.text)));
+  lines.push(...bullets('Para seguir necesito:', proposal.questions.map((question) => question.text)));
+  lines.push('', stage === 'confirm' ? SETUP_READY_FOOTER : SETUP_OPEN_FOOTER);
+  return lines.join('\n');
+}

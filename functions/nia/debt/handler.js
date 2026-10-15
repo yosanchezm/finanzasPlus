@@ -1,5 +1,7 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { buildSetupTerms } from './advisor/cardTerms.js';
+import { mergeCase } from './advisor/merge.js';
+import { proposeSetup } from './advisor/propose.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { applicableDebts, cardOnly, explainReplyParaphrased, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
@@ -8,9 +10,9 @@ import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
+import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, minimumKeyboard, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
-import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
+import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, setupText, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
 
 // Debt flow of Nia (NDA-1, NDA-3, NDA-4). The model only extracts; every number comes
@@ -24,11 +26,12 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
 const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
-const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification' };
+const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';
 
 const CARDS_WEB = 'Simular y recomendar abonos aplica a préstamos con plan de cuotas; todavía no está disponible para tarjetas (ni en la web).';
+const TOO_MANY_CHARGES = 'Esa deuda tiene demasiados cargos para registrarla por Telegram. Créala desde la web, en la sección Deudas.';
 const ASK_EXTRA = '¿Cuánto quieres abonar? Escríbeme el monto en pesos.';
 const PROBLEMS = {
   negative_amount: 'El monto no puede ser negativo. Escríbelo de nuevo, por ejemplo: “pagué 500.000 al carro”.',
@@ -36,7 +39,6 @@ const PROBLEMS = {
   future_date: 'La fecha del pago no puede ser futura. ¿Qué día fue?',
   invalid_rate: 'La tasa no es válida: debe ser desde 0 y, si es anticipada, menor a 100 % por periodo. ¿Cuál es?',
   invalid_day: 'El día debe ser un número del 1 al 31. Escríbelo de nuevo; no guardé nada.',
-  card_in_web: 'Las tarjetas se crean desde la web, en la sección Deudas. Aquí puedo registrar abonos a una tarjeta que ya exista.',
   legal_value_out_of_range: 'Ese valor no parece una tasa válida: debe estar entre 5 % y 100 % E.A. y tener máximo dos decimales (por ejemplo, 28.2). Escríbelo de nuevo; no guardé nada.',
   legal_smmlv_out_of_range: 'El salario mínimo debe estar entre $ 100.000 y $ 100.000.000, en pesos enteros. Escríbelo de nuevo; no guardé nada.',
   legal_mortgage_needs_usury: 'Para la hipoteca registra directamente la tasa de usura: el IBC no la deriva. Dime la usura y el mes; no guardé nada.',
@@ -186,7 +188,7 @@ async function finishCreate(deps, ctx, id, create, legal) {
     pending = buildPending({ id, action: 'create', awaiting: 'confirm', draft: { create } });
   } catch (error) {
     if (error.code !== 'pending_too_large') throw error;
-    return inform(deps, ctx, 'Esa deuda tiene demasiados cargos para registrarla por Telegram. Créala desde la web, en la sección Deudas.');
+    return inform(deps, ctx, TOO_MANY_CHARGES);
   }
   return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
 }
@@ -459,6 +461,43 @@ export async function handleExplainCallback(deps, ctx, data) {
   return sendExplain(deps, ctx, { topic: parsed.topic, debt, asked, legal, page: parsed.page });
 }
 
+// A described debt (S5c, design G13). The pending keeps the merged case; the stage says what the next message or button answers:
+// `convention` (the rate type, buttons), `minimum` (the rule of the minimum payment, buttons), `answers` (text only) or `confirm`.
+// Nothing is written here. A follow-up of an open setup keeps the pending id, so the debt row id and the event key stay the same.
+const SETUP_TRACKED = ['statementDay', 'dueDay', 'minRule'];
+const SETUP_KEYBOARDS = { confirm: confirmKeyboard, convention: conventionKeyboard, minimum: minimumKeyboard };
+
+/** The pending of a described debt that still waits for the user (not the done marker). */
+export const isOpenSetup = (pending) => Boolean(pending) && pending.kind === 'debt' && pending.action === 'setup' && !pending.done && Boolean(pending.draft && pending.draft.setup);
+
+function setupStage(proposal) {
+  if (proposal.draft) return 'confirm';
+  if (proposal.questions.some((question) => question.field === 'convention')) return 'convention';
+  return proposal.questions.some((question) => question.field === 'minRule' && question.options) ? 'minimum' : 'answers';
+}
+
+async function continueSetup(deps, ctx, id, setupCase, legal) {
+  const proposal = proposeSetup(setupCase, [], legal || (await loadLegal(deps)), today(deps));
+  const stage = setupStage(proposal);
+  // `asked` are the cycle fields this reply really asks (a stuck question is not asked again; a lone convention question asks none):
+  // the next message that answers none of them marks them unknown, and one that answers some does not.
+  const asked = stage === 'convention' ? [] : proposal.questions.filter((question) => !question.stuck && SETUP_TRACKED.includes(question.field)).map((question) => question.field);
+  let pending;
+  try {
+    pending = buildPending({ id, action: 'setup', awaiting: stage, draft: { setup: { ...setupCase, asked } } });
+  } catch (error) {
+    if (error.code !== 'pending_too_large') throw error;
+    return inform(deps, ctx, TOO_MANY_CHARGES);
+  }
+  const keyboard = SETUP_KEYBOARDS[stage] ? SETUP_KEYBOARDS[stage]() : undefined;
+  return say(deps, ctx, { text: setupText(setupCase, proposal, stage), keyboard, status: STATUS[stage], pending });
+}
+
+async function startSetup(deps, ctx, request, legal) {
+  const open = isOpenSetup(ctx.previous) ? ctx.previous : null;
+  return continueSetup(deps, ctx, open ? open.id : deps.ids.pending(), mergeCase(open ? open.draft.setup : null, request.setup), legal);
+}
+
 /**
  * Entry point for a message classified as `debt`: extracts, validates, previews and asks for
  * what is missing. Nothing is written here.
@@ -472,7 +511,7 @@ export async function handleDebt(deps, ctx) {
   const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
-  if (request.setup) return inform(deps, ctx, PROBLEMS.card_in_web); // until the advisor handles a described debt (S5c)
+  if (request.setup) return startSetup(deps, ctx, request, legal);
   // G3: a write action of the extraction wins over the router's hint; a read-only list or advise with the hint becomes the explanation.
   if (request.action === 'explain' || (ctx.explainHint && ['list', 'advise'].includes(request.action))) return startExplain(deps, ctx, request, debts, legal);
   if (request.action === 'list') return inform(deps, ctx, listReply(await summaries(deps, debts, asOf)));
@@ -505,6 +544,17 @@ const CONVENTION_NEXT = {
   create: (deps, ctx, pending, convention) => finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, convention)),
   rate_change: withStatedRate(continueRate),
   restructure: withStatedRate(continueRestructure),
+  setup: async (deps, ctx, pending, convention) => {
+    const { setup } = pending.draft;
+    let rate;
+    try {
+      rate = normalizeRate({ convention, value: setup.rateValue });
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      return inform(deps, ctx, PROBLEMS.invalid_rate);
+    }
+    return continueSetup(deps, ctx, pending.id, { ...setup, rate });
+  },
   late_policy: async (deps, ctx, pending, convention) => {
     const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
     if (!debt) return notify(deps, ctx, 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.');
@@ -526,9 +576,13 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (!action) return undefined;
   const { pending } = ctx;
   if (!pending || pending.kind !== 'debt' || pending.done) return notify(deps, ctx, 'No tengo una solicitud de deuda pendiente.');
-  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge' }[action.type];
-  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change')) return notify(deps, ctx, STALE_BUTTON);
+  const stage = { pick: 'pick', strategy: 'strategy', convention: 'convention', simpay: 'simpay', mode: 'mode', charge: 'charge', minimum: 'minimum' }[action.type];
+  if (pending.awaiting !== stage || (action.type === 'mode' && pending.action !== 'rate_change') || (action.type === 'charge' && pending.action !== 'charge_change') || (action.type === 'minimum' && pending.action !== 'setup')) return notify(deps, ctx, STALE_BUTTON);
   if (action.type === 'convention') return CONVENTION_NEXT[pending.action] ? CONVENTION_NEXT[pending.action](deps, ctx, pending, action.value) : notify(deps, ctx, STALE_BUTTON);
+  if (action.type === 'minimum') {
+    const { setup } = pending.draft;
+    return continueSetup(deps, ctx, pending.id, { ...setup, card: { ...setup.card, minRule: action.value }, unknown: (setup.unknown || []).filter((field) => field !== 'minRule') });
+  }
   if (action.type === 'charge' && !pending.candidates[action.value]) return notify(deps, ctx, 'Ese cargo no es una de las opciones. Elige uno de la lista o escríbeme de nuevo.');
   if (action.type === 'pick' && !pending.candidates.includes(action.value)) return notify(deps, ctx, 'Esa deuda no es una de las opciones. Elige una de la lista o escríbeme de nuevo.');
   const debts = await loadDebts(deps);
@@ -705,7 +759,7 @@ const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create
  */
 export async function confirmDebt(deps, ctx, pending) {
   if (pending.done) return notify(deps, ctx, ALREADY[pending.action]);
-  if (pending.awaiting !== 'confirm') return notify(deps, ctx, 'Antes de confirmar necesito que elijas una de las opciones de los botones anteriores.');
+  if (pending.awaiting !== 'confirm') return notify(deps, ctx, pending.action === 'setup' ? 'Antes de confirmar necesito que respondas las preguntas pendientes, con un mensaje o con los botones.' : 'Antes de confirmar necesito que elijas una de las opciones de los botones anteriores.');
   let outcome;
   try {
     outcome = COMMIT[pending.action] ? await COMMIT[pending.action](deps, ctx, pending) : await commitPay(deps, ctx, pending, today(deps));

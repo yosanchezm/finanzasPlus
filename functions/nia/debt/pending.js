@@ -1,5 +1,5 @@
 import { EXPLAIN_TOPICS } from '../../../packages/finance-core/index.js';
-import { STRATEGIES } from './extract.js';
+import { MIN_RULES, STRATEGIES } from './extract.js';
 import { MODES } from './planChange.js';
 
 // The pending payload that rides in `bot_sessions.pendingJson` and the inline
@@ -14,6 +14,7 @@ export const PENDING_ID_MAX = 24;
 export const CONVENTION_BUTTONS = ['EA', 'NAMV', 'MV', 'NATV', 'NATA'];
 const CONVENTION_LABELS = { EA: 'E.A.', NAMV: 'N.A.M.V.', MV: 'M.V.', NATV: 'N.A.T.V.', NATA: 'N.A.T.A.' };
 const MODE_LABELS = { keep_term: 'Mantener el plazo', keep_installment: 'Mantener la cuota' };
+const MINIMUM_LABELS = { interest_fees_plus_pct: 'Intereses, cuota de manejo y % del saldo', installments_due: 'Intereses, cuota de manejo y cuotas del mes', pct_balance: '% del total del extracto', unknown: 'No sé' };
 const STRATEGY_LABELS = { reduce_term: 'Reducir plazo', reduce_installment: 'Reducir cuota', advance_installments: 'Adelantar cuotas' };
 
 function fail(code, message) {
@@ -22,7 +23,7 @@ function fail(code, message) {
 
 /**
  * Builds the pending payload and asserts it stays compact.
- * @param {{ id: string, action: 'create'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge',
+ * @param {{ id: string, action: 'create'|'setup'|'pay'|'simulate'|'advise'|'legal_rate'|'rate_change'|'charge_change'|'restructure'|'late_policy', awaiting: 'confirm'|'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum'|'answers',
  *   debtId?: string, candidates?: string[], draft: object, preview?: object }} fields
  */
 export function buildPending(fields) {
@@ -69,6 +70,11 @@ export function conventionKeyboard() {
   return [buttons.slice(0, 3), buttons.slice(3)];
 }
 
+/** How the bank computes the minimum payment of a card (the `nia:min:` stage), plus «No sé». One rule per row: the labels are long. */
+export function minimumKeyboard() {
+  return [...MIN_RULES, 'unknown'].map((rule) => [button(MINIMUM_LABELS[rule], `nia:min:${rule}`)]);
+}
+
 /**
  * The mode buttons of a rate change: keep the term (the installment is recalculated) or keep the installment (the term is).
  * @param {string[]} [modes] The modes the debt offers (`modesFor`); `keep_installment` only exists for French loans.
@@ -85,15 +91,16 @@ export function chargeKeyboard(charges) {
   return charges.slice(0, MAX_PICK_BUTTONS).map((charge, index) => [button(String(charge.label).slice(0, 40), `nia:chg:${index}`)]);
 }
 
-/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge', value: (string|number|null) } | null} */
+/** @returns {{ type: 'pick'|'strategy'|'convention'|'simpay'|'mode'|'charge'|'minimum', value: (string|number|null) } | null} */
 export function parseCallback(data) {
   if (data === 'nia:simpay') return { type: 'simpay', value: null };
-  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg):(.+)$/) : null;
+  const match = typeof data === 'string' ? data.match(/^nia:(pick|strat|conv|mode|chg|min):(.+)$/) : null;
   if (!match) return null;
   const [, kind, value] = match;
   if (kind === 'pick') return { type: 'pick', value };
   if (kind === 'strat') return STRATEGIES.includes(value) ? { type: 'strategy', value } : null;
   if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
+  if (kind === 'min') return MIN_RULES.includes(value) || value === 'unknown' ? { type: 'minimum', value } : null;
   if (kind === 'chg') return /^\d$/.test(value) ? { type: 'charge', value: Number(value) } : null;
   return CONVENTION_BUTTONS.includes(value) ? { type: 'convention', value } : null;
 }
