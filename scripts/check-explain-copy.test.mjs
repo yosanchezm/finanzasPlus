@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -131,4 +131,17 @@ describe('package:nia runs the check before building the tarball', () => {
       rmSync(out, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+describe('npm run build runs the check first', () => {
+  const { scripts } = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+
+  it('runs the copy check and then vite build, so a web build never ships unreviewed copy', () => {
+    expect(scripts.build).toBe('node scripts/check-explain-copy.mjs && vite build');
+  });
+
+  it('leaves the other scripts alone', () => {
+    expect(scripts['package:nia']).toBe('node scripts/package-nia.mjs');
+    expect(scripts.dev).toBe('vite');
+  });
 });

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/check-explain-copy.mjs && vite build",
     "preview": "vite preview",
     "migrate:appwrite": "node --env-file=.env scripts/migrate-appwrite.mjs",
     "test": "vitest run",
