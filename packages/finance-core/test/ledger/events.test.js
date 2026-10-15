@@ -30,9 +30,9 @@ const code = (fn) => {
 };
 
 describe('EVENT_KINDS', () => {
-  it('lists the ten append-only kinds', () => {
+  it('lists the eleven append-only kinds', () => {
     expect([...EVENT_KINDS].sort()).toEqual(
-      ['adjustment', 'charge', 'charge_change', 'disbursement', 'extra_payment', 'late_policy', 'payment', 'rate_change', 'restructure', 'void'],
+      ['adjustment', 'charge', 'charge_change', 'disbursement', 'extra_payment', 'late_policy', 'payment', 'rate_change', 'restructure', 'terms_correction', 'void'],
     );
   });
 });

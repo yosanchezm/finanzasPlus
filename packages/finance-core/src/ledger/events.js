@@ -1,6 +1,8 @@
 import { compareIso, isIsoDate } from '../calendar.js';
+import { MIN_RULES } from '../card/config.js';
 import { ValidationError } from '../errors.js';
 import { normalizeLate } from '../late/policy.js';
+import { LEGAL_MODALITIES } from '../legal.js';
 import { assertMinor } from '../money.js';
 import { normalizeRate } from '../rates.js';
 import { normalizeCharges, validateTerms } from '../terms.js';
@@ -15,6 +17,7 @@ export const EVENT_KINDS = Object.freeze([
   'charge_change',
   'restructure',
   'late_policy',
+  'terms_correction',
   'adjustment',
   'charge',
   'void',
@@ -83,6 +86,79 @@ function adjustment(payload) {
   return result;
 }
 
+const unsupported = (path) => new ValidationError('correction_unsupported_field', `${path} cannot be corrected`);
+const badCard = (message) => new ValidationError('invalid_card', message);
+const isDay = (value) => Number.isSafeInteger(value) && value >= 1 && value <= 31;
+
+// Keeps only the keys listed in `allowed` and throws on any other defined one.
+function onlyKeys(source, allowed, path) {
+  for (const key of Object.keys(source)) if (!allowed.includes(key) && source[key] !== undefined) throw unsupported(`${path}${key}`);
+}
+
+function minPaymentFields(input) {
+  if (!isObject(input)) throw badCard('minPayment must be an object');
+  onlyKeys(input, ['rule', 'pct', 'floorMinor'], 'card.minPayment.');
+  const result = {};
+  if (input.rule !== undefined) {
+    if (!MIN_RULES.includes(input.rule)) throw badCard(`minPayment.rule must be one of ${MIN_RULES.join(', ')}, got ${String(input.rule)}`);
+    result.rule = input.rule;
+  }
+  if (input.pct !== undefined) {
+    if (typeof input.pct !== 'number' || !Number.isFinite(input.pct) || input.pct < 0 || input.pct > 100) throw badCard(`minPayment.pct must be 0..100, got ${String(input.pct)}`);
+    result.pct = input.pct;
+  }
+  if (input.floorMinor !== undefined) {
+    if (!isMinor(input.floorMinor)) throw badCard('minPayment.floorMinor must be whole pesos >= 0');
+    result.floorMinor = input.floorMinor;
+  }
+  return result;
+}
+
+function cardFields(input) {
+  if (!isObject(input)) throw badCard('card must be an object');
+  onlyKeys(input, ['statementDay', 'dueDay', 'minPayment'], 'card.');
+  const result = {};
+  for (const key of ['statementDay', 'dueDay']) {
+    if (input[key] === undefined) continue;
+    if (!isDay(input[key])) throw badCard(`${key} must be a whole day 1..31, got ${String(input[key])}`);
+    result[key] = input[key];
+  }
+  if (input.minPayment !== undefined) {
+    const minPayment = minPaymentFields(input.minPayment);
+    if (Object.keys(minPayment).length > 0) result.minPayment = minPayment;
+  }
+  return result;
+}
+
+/**
+ * Validates the fields of a `terms_correction`: the rate as the bank states it, the modality, and for cards the
+ * statement day, due day and minimum-payment rule, percentage and floor. Any other field is refused. Returns a
+ * normalized copy with the keys in a fixed order and no empty parts. Internal: not exported by the package barrel.
+ * @param {object} input
+ * @param {{ allowEmpty?: boolean }} [options] `allowEmpty` is for the `previous` values, which may be absent.
+ * @returns {{ rate?: object, modality?: string, card?: object }}
+ * @throws {ValidationError} `correction_empty`, `correction_unsupported_field`, `invalid_card`, `invalid_rate` or `invalid_terms`
+ */
+export function normalizeCorrectionFields(input, { allowEmpty = false } = {}) {
+  if (!isObject(input)) {
+    if (allowEmpty && input === undefined) return {};
+    throw new ValidationError('correction_empty', 'a correction needs at least one field');
+  }
+  onlyKeys(input, ['rate', 'modality', 'card'], '');
+  const result = {};
+  if (input.rate !== undefined) result.rate = normalizeRate(input.rate);
+  if (input.modality !== undefined) {
+    if (!LEGAL_MODALITIES.includes(input.modality)) throw new ValidationError('invalid_terms', `modality must be one of ${LEGAL_MODALITIES.join(', ')}, got ${String(input.modality)}`);
+    result.modality = input.modality;
+  }
+  if (input.card !== undefined) {
+    const card = cardFields(input.card);
+    if (Object.keys(card).length > 0) result.card = card;
+  }
+  if (!allowEmpty && Object.keys(result).length === 0) throw new ValidationError('correction_empty', 'a correction needs at least one field');
+  return result;
+}
+
 function normalizePayload(kind, payload, amountMinor) {
   switch (kind) {
     case 'payment': {
@@ -109,6 +185,14 @@ function normalizePayload(kind, payload, amountMinor) {
     case 'late_policy': {
       if (payload.late === undefined) throw invalid('late_policy needs a late policy');
       return { late: normalizeLate(payload.late) };
+    }
+    case 'terms_correction': {
+      if (typeof payload.appliesTo !== 'string' || payload.appliesTo === '') throw invalid('terms_correction needs appliesTo: opening or a restructure event id');
+      return {
+        fields: normalizeCorrectionFields(payload.fields),
+        previous: normalizeCorrectionFields(payload.previous, { allowEmpty: true }),
+        appliesTo: payload.appliesTo,
+      };
     }
     case 'adjustment': {
       return adjustment(payload);

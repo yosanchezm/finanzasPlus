@@ -1,5 +1,6 @@
 import { compareIso } from '../calendar.js';
 import { CommitError, ValidationError } from '../errors.js';
+import { checkCorrection } from './correction.js';
 import { activeEvents, validateEvent } from './events.js';
 import { project } from './project.js';
 import { assertRestructurable } from './restructure.js';
@@ -82,6 +83,7 @@ export function planCommit(debt, events, draft, ctx) {
   if (kind === 'restructure') assertRestructurable(debt);
   const debtId = debt.$id ?? debt.id;
   const candidate = validateEvent({ id: ctx.eventId, debtId, kind, effectiveOn, amountMinor, payload, createdAt: NEWEST, actorId: ctx.actorId, source: ctx.source });
+  if (kind === 'terms_correction') checkCorrection(debt, events, candidate);
   let dedupeKey = ctx.dedupeKey;
   let deleteCostRowId = null;
   if (kind === 'void') {

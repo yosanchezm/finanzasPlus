@@ -212,6 +212,18 @@ export function serializeTerms(terms) {
   return text;
 }
 
+/**
+ * The terms stored on a `debts` row (`terms` object or `termsJson`), validated. Internal: not exported by the package barrel.
+ * @param {object} debt
+ * @returns {object} DebtTerms
+ * @throws {ValidationError} `invalid_debt` or whatever `validateTerms` and `parseTerms` throw
+ */
+export function termsOfDebt(debt) {
+  if (debt?.terms) return validateTerms(debt.terms);
+  if (typeof debt?.termsJson === 'string') return parseTerms(debt.termsJson);
+  throw fail('invalid_debt', 'a debt needs terms or termsJson');
+}
+
 // Migrations upgrade a parsed document one version at a time. Documents written
 // before versioning existed have no `schemaVersion` and count as version 0.
 const MIGRATIONS = [(document) => ({ ...document, schemaVersion: 1 })];
