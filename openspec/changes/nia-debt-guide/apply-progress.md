@@ -554,3 +554,62 @@ Triangulation: add (preset only, explicit fields, both, IVA included in the amou
 ### Remaining
 
 S6.CP (owner deploys Nia, action 6, after the S4 web), then S7 (popovers, build check and docs).
+
+## Follow-up S6x (a different debt during an open setup): COMPLETE (1/1 task; the S6.CP deploy checkpoint stays open for the owner)
+
+Branch: `fix/ndg-setup-other-debt` (from master efeaed1). Owner decision 2026-10-15: a message that describes a different debt while a setup (a create, or an adjust, which is a setup with `setup.adjust: true`) is open must not be merged into the open case. This closes the issue that S5c and S6 left open.
+
+### Tasks
+
+- [x] S6x.1 (`advisor/merge.js`: `isOtherDebt`, `compactCase`, `expandCase`, `mergeCase` drops the marker; `extract.js`: `setup.kindStated`; `pending.js`: `otherDebtKeyboard`, `nia:other:keep|new`, stage `other`; `handler.js`: `askOtherDebt`, `answerOtherDebt`, the stage check; `index.js`: the `other:` callback route)
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| 634a533 `fix(nia): ask «¿Es otra deuda?» instead of merging a different debt into an open setup, with continue and start-new buttons` | S6x.1 | 10 files, 532 insertions, 17 deletions |
+
+### Behaviour
+
+- A message is a different debt when its explicitly stated lender differs from the open case's (compared folded; one name holding the other, as «Bancolombia» and «Bancolombia S.A.», is the same), when its kind differs and the extraction marks the kind as stated, or, for an adjust, when its `debtRef` resolves to a registered debt other than the one the open case targets (`pending.debtId`, or the open `debtRef` resolved the same way). A lender or kind the message did not state never counts, so «el corte es el 15» and «no sé» keep merging.
+- The kind of a plain answer cannot be told from the extraction default (`consumer`), so there was no marker: the extraction schema now has `setup.kindStated` (the model sets it only when the message says what type of debt it is), and `normaliseDebtExtraction` keeps it as `kindStated: true` only for a known kind. `mergeCase` never copies it into the case.
+- Nia answers «¿Es otra deuda?» with two buttons, `nia:other:keep` («Seguir con la actual») and `nia:other:new` («Empezar una nueva»), 14 and 13 bytes. The pending keeps `draft.setup` (the open case, untouched) and `draft.next` (`compactCase` of the new extraction: no nulls, no empty lists, no default `none` system; presets keep their nulls, which mean «mentioned without an amount»), under the same id and with `awaiting: 'other'`. If both do not fit in 1.5 KB, Nia says so, keeps the open pending as it was and asks to finish or cancel the current one first.
+- `keep` runs `continueSetup` on the open case again (for an adjust, `continueAdjust`): the same questions are asked and no model is called. `new` expands `draft.next`, takes a fresh pending id (so the old debt row id and event key are never reused) and runs `continueSetup` on it: no model call either.
+- The buttons go through the stage check like every other debt callback: no pending, another stage, another action, or a question with no `next` stored (`Esa opción ya no aplica a la solicitud actual.`). Once answered, the session holds another stage, so a second tap is stale. A text message sent while the question is open is read like any other message of an open setup (it merges, or asks again), which also drops the question.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S6x.1 merge | 7 `merge.test.js` cases (`isOtherDebt` by lender, kind and adjust ref; `compactCase`/`expandCase`; the marker not copied): 7 failed (`isOtherDebt`, `compactCase` and `expandCase` are not functions) | `advisor/merge.js`: 22/22 | A `withoutMarker` helper; the compact condition split into plain branches |
+| S6x.1 extract | 3 `extract.test.js` cases: 2 failed (the marker was not read, the prompt did not teach it); the one that checks the marker is absent from a plain answer passed on arrival, as it asserts an absence | `extract.js` (schema, both prompt lines, `readSetup`): 112/112 | None needed |
+| S6x.1 pending | 3 `pending.test.js` cases: 1 failed (`otherDebtKeyboard` missing); the refusal of an unknown answer and the new stage in `buildPending` passed on arrival (the regex and `buildPending` already rejected or accepted them) | `pending.js`: 39/39 | None needed |
+| S6x.1 handler | 11 `handler.test.js` cases (another lender, another stated kind with and without the marker, same lender and plain answers still merge, keep, new for a card and for a loan to Confirm, a message while the question is open, stale buttons, too large, adjust with another `debtRef`, same `debtRef`, new adjust): 11 failed (the message was merged; the buttons were unknown) | `handler.js`: `functions/nia/debt` 918/918. One test of mine expected the stage `minimum` for a merged answer; it is `answers` (the minimum question was already asked once), as before this change | None needed |
+| S6x.1 index | 3 `index.test.js` cases (ask, `new` with no model call, `keep`, stale with no pending): 3 failed (`nia:other:` was not routed, so the press produced no reply) | `index.js` route: `functions/nia` 965/965 | None needed |
+
+Triangulation: lender (other, same in another case, a longer legal name, accents, none on either side), kind (stated and different, not stated, stated and equal), adjust (another registered debt, the same one by another word, no reference, an unknown reference, the debt the open case targets), buttons (keep and new for a card, for a loan that reaches Confirm and is written once, and for an adjust that starts a chain), stale (no pending, wrong stage, answered, no `next`, another action), size (the open case plus the new extraction over 1.5 KB).
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run functions/nia` exit 0: 24 files, 965 tests passed (937 before: 28 new) |
+| Runtime harness | the real Function entry point against the in-memory Appwrite, Telegram and Gemini of `index.test.js`: the Bancolombia card is open, «también tengo la tarjeta Nu…» gives «¿Es otra deuda?» with the two buttons and an `other` pending that holds both cases; `nia:other:new` proposes the Nu card with a new id and no model call (the prompt count is unchanged), `nia:other:keep` restores the open questions with the pending equal to the one before, and a second tap answers «Esa opción ya no aplica» |
+| Full suite | `npm test -- --maxWorkers=4`: 155 files, 2,788 tests passed (first run) |
+| Build and package | `npm run build` and plain `npm run package:nia` succeeded |
+| Rollback boundary | the commit above: `advisor/merge.js` (`isOtherDebt`, `compactCase`, `expandCase`, `withoutMarker`), `extract.js` (`setup.kindStated`), `pending.js` (`otherDebtKeyboard`, the `other` callback), `handler.js` (`askOtherDebt`, `answerOtherDebt`, the `other` stage) and the `other:` route of `index.js`, with their tests |
+
+### Deviations from design
+
+- Design G13 merged every later message into the open case; this follow-up is an owner decision that changes that rule for a message that states another lender, another kind or another registered debt. The `other` stage and `draft.next` are new pending fields.
+- The extraction schema gained `setup.kindStated` (the request asked for a marker in the `extract.js` normalisation if none existed). It relies on the model: a plain answer that the model marks as naming a kind would ask the question.
+
+### Issues found
+
+- The check covers `setup` messages. A different non-card loan described while a setup is open takes the `create` path (a loan with all its data) as before and does not merge; only a card or a described `setup` reaches the merge.
+- An adjust message that targets a registered debt while a create setup is open (or the reverse) is not compared by `debtRef`, as the open case has no target; the lender and kind rules still apply.
+- `confirmDebt` with the question open answers the existing «Antes de confirmar necesito que respondas las preguntas pendientes…» (the stage is not `confirm`).
+
+### Remaining
+
+S6.CP (owner deploys Nia, action 6, after the S4 web), then S7 (popovers, build check and docs).
