@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { EXPLAIN_TOPICS, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
+import { EXPLAIN_TOPICS, normalizeRate, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../packages/finance-core/test/helpers/explainCopy.js';
 import { pesos } from './format.js';
 import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain, loadDebts, loadLegal } from './handler.js';
+import { buildPending } from './pending.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
 const ACTOR = 'telegram:1';
@@ -2320,5 +2321,144 @@ describe('explain (read-only, session-safe)', () => {
       expect(lastExplain(entry({ topic: 'usury_ibc', debtId: null, stated: { value: 20 } }))).toEqual({ topic: 'usury_ibc', debtId: null, stated: { value: 20 } });
       expect(lastExplain(entry({ topic: 'mora', debtId: 'd1', amountMinor: -5, stated: 'rápido' }))).toEqual({ topic: 'mora', debtId: 'd1' });
     });
+  });
+});
+
+// S5c: the advisor creates the debt it proposed. The pending stores the described case; the terms are rebuilt at Confirm, so everything below
+// starts from a pending built by hand (the proposal replies are covered further down).
+const MV_RATE = normalizeRate({ convention: 'MV', value: 2.1 });
+const EA_RATE = normalizeRate({ convention: 'EA', value: 24 });
+const cardCase = (patch = {}, cardPatch = {}) => ({
+  kind: 'card',
+  name: 'Tarjeta Bancolombia',
+  lender: 'Bancolombia',
+  principalMinor: 0,
+  openedOn: '2026-10-13',
+  rate: MV_RATE,
+  rateValue: 2.1,
+  n: null,
+  periodicity: null,
+  system: 'none',
+  firstDueOn: null,
+  card: { statementDay: 15, dueDay: 30, minRule: 'interest_fees_plus_pct', minPct: null, minFloorMinor: null, ...cardPatch },
+  presets: { fee: 45000, iva: 19 },
+  charges: [],
+  lateStated: null,
+  mentions: [],
+  asked: [],
+  unknown: [],
+  ...patch,
+});
+const loanCase = (patch = {}) => ({
+  ...cardCase(),
+  kind: 'consumer',
+  name: 'Libre inversión',
+  lender: '',
+  principalMinor: 1200000,
+  rate: EA_RATE,
+  rateValue: 24,
+  n: 3,
+  system: null,
+  card: { statementDay: null, dueDay: null, minRule: null, minPct: null, minFloorMinor: null },
+  presets: {},
+  ...patch,
+});
+const setupPending = (setup, extra = {}) => buildPending({ id: 'p1', action: 'setup', awaiting: 'confirm', draft: { setup }, ...extra });
+const cardRows = (w) => w.tables.debts.filter((row) => row.kind === 'card');
+
+describe('commit a described setup (exactly once)', () => {
+  it('writes the card as the debts row db{id} only: no event, no cost row, no card limit', async () => {
+    const w = world({ debts: [] });
+    await confirmDebt(w.deps, ctx(), setupPending(cardCase({ mentions: ['card_limit'] })));
+
+    expect(w.tables.debts).toEqual([expect.objectContaining({ $id: 'dbp1', householdId: 'h1', name: 'Tarjeta Bancolombia', kind: 'card', lender: 'Bancolombia', ownerScope: 'you', status: 'active', principalMinor: 0, openedOn: '2026-10-13', termsVersion: 1, actorId: ACTOR })]);
+    const terms = JSON.parse(w.tables.debts[0].termsJson);
+    expect(terms).toMatchObject({ kind: 'card', system: 'none', card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5 } } });
+    expect(terms.card).not.toHaveProperty('limitMinor');
+    expect(terms.charges).toEqual([expect.objectContaining({ id: 'mgmt_fee', label: 'Cuota de manejo', value: 45000 }), expect.objectContaining({ id: 'mgmt_iva', basis: 'pctOfCharge', refId: 'mgmt_fee', value: 19 })]);
+    expect(w.tables.debt_events).toHaveLength(0);
+    expect(costRows(w)).toHaveLength(0);
+    expect(w.sent[0].text).toContain('registré la tarjeta «Tarjeta Bancolombia»');
+    expect(w.sessions[w.sessions.length - 1]).toMatchObject({ status: 'completed', pending: { kind: 'debt', id: 'p1', action: 'setup', done: true } });
+  });
+
+  it('leaves one card row when the same Confirm arrives again, whether the session still holds the pending or already the done marker', async () => {
+    const w = world({ debts: [] });
+    const pending = setupPending(cardCase());
+    await confirmDebt(w.deps, ctx(), pending);
+    await confirmDebt(w.deps, ctx(), pending); // a Telegram retry: the session was not updated yet
+    await confirmDebt(w.deps, ctx(), w.lastPending()); // a second tap after the first one finished
+
+    expect(cardRows(w)).toHaveLength(1);
+    expect(w.tables.debt_events).toHaveLength(0);
+    expect(w.sent.map((message) => message.text.includes('ya estaba registrada'))).toEqual([false, true, true]);
+  });
+
+  it('stays at one card row when two confirmations race', async () => {
+    const w = world({ debts: [] });
+    const pending = setupPending(cardCase());
+    await Promise.all([confirmDebt(w.deps, ctx(), pending), confirmDebt(w.deps, ctx(), pending)]);
+
+    expect(cardRows(w)).toHaveLength(1);
+    expect(w.sent.filter((message) => message.text.includes('ya estaba registrada'))).toHaveLength(1);
+  });
+
+  it('writes a loan as its debt row plus its disbursement and nothing else, once', async () => {
+    const w = world({ debts: [] });
+    const pending = setupPending(loanCase());
+    await confirmDebt(w.deps, ctx(), pending);
+    await confirmDebt(w.deps, ctx(), pending);
+
+    expect(w.tables.debts).toEqual([expect.objectContaining({ $id: 'dbp1', name: 'Libre inversión', kind: 'consumer', principalMinor: 1200000, ownerScope: 'you' })]);
+    expect(JSON.parse(w.tables.debts[0].termsJson)).toMatchObject({ kind: 'consumer', system: 'french', periodicity: 'monthly', n: 3 });
+    expect(w.tables.debt_events).toEqual([expect.objectContaining({ $id: 'dep1', debtId: 'dbp1', kind: 'disbursement', amountMinor: 1200000, dedupeKey: 'debt:p1' })]);
+    expect(costRows(w)).toHaveLength(0);
+    expect(w.sent[0].text).toContain('registré la deuda «Libre inversión»');
+    expect(w.sent[1].text).toContain('ya estaba registrada');
+  });
+
+  it('finishes a loan whose event was saved but whose row is missing, and one whose row exists but the event does not', async () => {
+    const half = world({ debts: [] });
+    await half.deps.createRow('debt_events', { id: 'dep1', data: { householdId: 'h1', debtId: 'dbp1', kind: 'disbursement', dedupeKey: 'debt:p1' } });
+    await confirmDebt(half.deps, ctx(), setupPending(loanCase()));
+    expect(half.tables.debts).toHaveLength(1);
+    expect(half.tables.debt_events).toHaveLength(1);
+    expect(half.sent[0].text).toContain('registré');
+
+    const rowOnly = world({ debts: [] });
+    await rowOnly.deps.createRow('debts', { id: 'dbp1', data: { householdId: 'h1', name: 'Libre inversión', kind: 'consumer' } });
+    await confirmDebt(rowOnly.deps, ctx(), setupPending(loanCase()));
+    expect(rowOnly.tables.debts).toHaveLength(1);
+    expect(rowOnly.tables.debt_events).toEqual([expect.objectContaining({ kind: 'disbursement', dedupeKey: 'debt:p1' })]);
+  });
+
+  it('checks the stored row before rebuilding the terms: an already recorded card answers so even if the case could no longer be built', async () => {
+    const w = world({ debts: [] });
+    await w.deps.createRow('debts', { id: 'dbp1', data: { householdId: 'h1', name: 'Tarjeta Bancolombia', kind: 'card' } });
+    await confirmDebt(w.deps, ctx(), setupPending(cardCase({}, { minRule: null })));
+
+    expect(w.sent[0].text).toContain('ya estaba registrada');
+    expect(w.tables.debts).toHaveLength(1);
+  });
+
+  it('rebuilds the terms at Confirm: an IVA-included price stores the fee without the IVA, and a case that cannot be built writes nothing', async () => {
+    const w = world({ debts: [] });
+    await confirmDebt(w.deps, ctx(), setupPending(cardCase({ presets: { fee: 53550, ivaIncluded: true } })));
+    expect(JSON.parse(w.tables.debts[0].termsJson).charges).toEqual([expect.objectContaining({ id: 'mgmt_fee', value: 45000 }), expect.objectContaining({ id: 'mgmt_iva', value: 19 })]);
+
+    const broken = world({ debts: [] });
+    await confirmDebt(broken.deps, ctx(), setupPending(cardCase({}, { minRule: null })));
+    expect(broken.tables.debts).toHaveLength(0);
+    expect(broken.tables.debt_events).toHaveLength(0);
+    expect(broken.sessions).toHaveLength(0); // no done marker: the request is still open
+    expect(broken.sent[0].text).toContain('Faltan datos para crear la deuda');
+  });
+
+  it('refuses to confirm while a question is still open', async () => {
+    const w = world({ debts: [] });
+    await confirmDebt(w.deps, ctx(), setupPending(cardCase({}, { statementDay: null }), { awaiting: 'answers' }));
+
+    expect(w.sent[0].text).toContain('Antes de confirmar');
+    expect(w.tables.debts).toHaveLength(0);
   });
 });

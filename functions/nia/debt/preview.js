@@ -31,6 +31,7 @@ const CORE_MESSAGES = {
   installment_too_low: 'Con ese abono la cuota no alcanza a cubrir los intereses del saldo. Prueba con otro monto o con otra opción.',
   manual_plan_below_interest: 'Una cuota del plan manual queda por debajo de los intereses del periodo.',
   terms_too_large: 'El plan es demasiado largo para guardarlo. Reduce las cuotas.',
+  setup_incomplete: 'Faltan datos para crear la deuda. Escríbeme de nuevo qué quieres registrar; no guardé nada.',
   invalid_terms_json: 'No pude leer los términos de esta deuda.',
   invalid_debt: 'No pude leer los términos de esta deuda.',
   unsupported_schema_version: 'No pude leer los términos de esta deuda.',

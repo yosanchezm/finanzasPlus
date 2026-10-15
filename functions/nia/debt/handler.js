@@ -1,4 +1,5 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { buildSetupTerms } from './advisor/cardTerms.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
 import { applicableDebts, cardOnly, explainReplyParaphrased, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
@@ -552,9 +553,9 @@ async function commitPay(deps, ctx, pending, asOf) {
   return { duplicate, text: `✅ Listo: registré el abono de ${pesos(pending.draft.amountMinor)} a ${debt.name}. Saldo: ${pesos(plan.projection.balanceMinor)}.` };
 }
 
-async function commitCreate(deps, ctx, pending) {
-  const terms = buildTerms(pending.draft.create);
-  const { name, lender } = pending.draft.create;
+// The debt row `db{id}` and, for a loan, its `disbursement` (a card has none: its opening balance lives in the terms, as in the web's `saveLoan`).
+// The event goes first and is unique by `debt:{id}`; the row id is deterministic, so a 409 on it means an earlier Confirm already created it.
+async function writeNewDebt(deps, ctx, pending, { name, lender, terms }) {
   const id = debtRowId(pending);
   const data = {
     householdId: deps.config.householdId,
@@ -570,9 +571,12 @@ async function commitCreate(deps, ctx, pending) {
     termsVersion: 1,
     actorId: ctx.profile.appwriteUserId,
   };
-  const disbursement = { kind: 'disbursement', effectiveOn: terms.openedOn, amountMinor: terms.principalMinor };
-  const eventCtx = { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram' };
-  const { duplicate } = await commitPlan(debtPort(deps), planCommit({ ...data, $id: id }, [], disbursement, eventCtx));
+  let duplicate = true;
+  if (terms.kind !== 'card') {
+    const disbursement = { kind: 'disbursement', effectiveOn: terms.openedOn, amountMinor: terms.principalMinor };
+    const eventCtx = { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram' };
+    ({ duplicate } = await commitPlan(debtPort(deps), planCommit({ ...data, $id: id }, [], disbursement, eventCtx)));
+  }
   let existed = false;
   try {
     await deps.createRow(T.debts, { id, data });
@@ -580,7 +584,28 @@ async function commitCreate(deps, ctx, pending) {
     if (!hasStatus(error, 409)) throw error;
     existed = true;
   }
-  return { duplicate: duplicate && existed, text: `✅ Listo: registré la deuda «${name}» por ${pesos(terms.principalMinor)}.` };
+  return { duplicate: duplicate && existed };
+}
+
+async function commitCreate(deps, ctx, pending) {
+  const terms = buildTerms(pending.draft.create);
+  const { name, lender } = pending.draft.create;
+  const { duplicate } = await writeNewDebt(deps, ctx, pending, { name, lender, terms });
+  return { duplicate, text: `✅ Listo: registré la deuda «${name}» por ${pesos(terms.principalMinor)}.` };
+}
+
+// A described debt (S5c): the pending holds the case and the terms are rebuilt here. The stored row (and, for a loan, the event) is looked up first,
+// so a repeated Confirm answers «ya estaba registrada» without rebuilding terms that may no longer be buildable.
+async function commitSetup(deps, ctx, pending) {
+  const setup = pending.draft.setup;
+  const rows = await deps.listRows(T.debts, { householdId: deps.config.householdId });
+  if (rows.some((row) => row.$id === debtRowId(pending)) && (setup.kind === 'card' || (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))))) return { duplicate: true };
+  const terms = buildSetupTerms(setup);
+  const { duplicate } = await writeNewDebt(deps, ctx, pending, { name: setup.name, lender: setup.lender, terms });
+  const text = terms.kind === 'card'
+    ? `✅ Listo: registré la tarjeta «${setup.name}» (corte el día ${terms.card.statementDay}, pago el día ${terms.card.dueDay}).`
+    : `✅ Listo: registré la deuda «${setup.name}» por ${pesos(terms.principalMinor)}.`;
+  return { duplicate, text };
 }
 
 // The row id is the same for the same key (core `legalRateId`), so a second save collides (409) and becomes an update:
@@ -670,8 +695,8 @@ async function commitLatePolicy(deps, ctx, pending) {
   return { duplicate: false, text: describeLatePolicy({ debt, draft: pending.draft, figures: previewChange(debt, events, draft, { on: asOf }), today: asOf }) };
 }
 
-const COMMIT = { create: commitCreate, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure, late_policy: commitLatePolicy };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.', late_policy: 'Esta mora ya estaba registrada. No la repetí.' };
+const COMMIT = { create: commitCreate, setup: commitSetup, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure, late_policy: commitLatePolicy };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', setup: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.', late_policy: 'Esta mora ya estaba registrada. No la repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its
