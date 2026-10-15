@@ -970,3 +970,22 @@ Branch `fix/dpc-nia-card-mora` (from master ad9a33f). The F3 deviation list kept
 | Task | RED | GREEN |
 |---|---|---|
 | Nia card `late_policy` | `late.test.js` 5 failed (the card refusal replaced by card golden tests) and `handler.test.js` 2 failed (preview and exactly-once Confirm on a card, previously refused) | card golden 125,000 of unmet capital, 10 days at 28.59% EA: "Mora acumulada al 2026-10-20: $ 0 -> $ 861"; one `late_policy` event for a repeated Confirm, then "Esta mora ya estaba registrada"; `npx vitest run functions/nia` all green |
+
+## Verify follow-up W6
+
+Branch `fix/dpc-card-rate-in-force` (from master 84a6a52). Verify warning W6: the rate change dialog showed the original rate of a card after a card `rate_change`, because a card projection keeps the original `terms` (a loan projection applies its changes into its terms).
+
+### Changes
+
+- `src/features/debts/rateChangeModel.js`: new `rateInForce(projection)`. A loan returns `projection.terms.rate`; a card returns the rate of its revolving tranche, which the core card projector already sets from the active, non-voided `rate_change` events dated on or before the projection date (`state.rate` in `card.js`). No event re-folding is needed, unlike `chargesInForce` (a card projection exposes no charges in force). `initialRateForm` and `RateChangeDialog` ("Tasa actual") both use it.
+- Nia: the rate-change preview (`functions/nia/debt/planChange.js`) never shows the current rate (it shows the new rate and before/after figures from `previewChange`), so it needed no change and `package:nia` was not run.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN |
+|---|---|---|
+| Card rate in force | `rateChangeModel.test.js` and `RateChangeDialog.test.jsx` failed: `rateInForce` missing, `initialRateForm` of a card with a 28% to 24% EA `rate_change` started at 28, the dialog said "Tasa actual: 28 % E.A." | active change shows 24% EA and pre-fills 24; voided change and future change fall back to 28%; loan unchanged (a loan `rate_change` is already in `terms.rate`) |
+
+### Not changed (same stale read, outside W6)
+
+`DebtDetail.jsx:61`, `debtViewModel.js:18` and `functions/nia/debt/handler.js:143` (`eaPercent` in the summaries) also read `projection.terms.rate` and show the original rate of a card after a `rate_change`. `rateInForce` can be reused there in a separate follow-up.
