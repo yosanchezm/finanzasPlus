@@ -157,7 +157,7 @@ Groups: D1a model (about 350), D1b steps 1-2 (about 400), D1c step 3 + wiring (a
 ### D2 mora UI (design 850) · deps: C3, A1 deployed
 Groups: D2a wizard (about 250), D2b detail + payment (about 330), D2c `LatePolicyDialog` (about 270).
 
-- [ ] D2.0 GATE (owner): A1 is deployed on web and Nia. Do not merge D2 otherwise. Open: D2 is implemented on `feat/dpc-d2-mora-ui` but must not be merged or deployed until the owner confirms this gate.
+- [x] D2.0 GATE (owner): A1 is deployed on web and Nia. Confirmed by the owner on 2026-10-15 (web redeployed from master cb09a35, migration run, Nia tarball from cb09a35 uploaded).
 - [x] D2a.1 RED `wizardModel`/`PlanStep` tests: mora select defaults (family none, consumer usury); `fixed` asks for a rate; default applied to the created terms. Reqs WM7, LI2.
 - [x] D2a.2 GREEN `wizardModel.js`, `PlanStep.jsx`.
 - [x] D2b.1 RED detail tests: mora KPI, Mora column when any `lateMinor > 0` (1,375, 10 days, base 199,505), totals include mora, `late_cap_stale` (with Ajustes link), `late_cap_unknown`, `late_mortgage_unverified` notices non-blocking; `paymentModel`: 390,381 at day 10 previews 10,000 / 1,375 / 180,876 / 198,130 with cost 192,251; double submit one event; history `late_policy` summary. Reqs WM8, WM9, DL8, AS1.
@@ -200,7 +200,7 @@ Groups: F1a rebuild (about 330), F1b handler (about 320).
 - [x] F1.CP checkpoint.
 
 ### F2 Nia mora (design 450) · deps: C3, D2, A1 deployed on Nia
-- [ ] F2.0 GATE (owner): Nia tarball at or after A1 is deployed. Do not deploy F2 otherwise. Open: F2 is implemented on `feat/dpc-f2-nia-mora` but must not be merged or deployed until the owner confirms this gate.
+- [x] F2.0 GATE (owner): Nia tarball at or after A1 is deployed. Confirmed by the owner on 2026-10-15 (tarball built from master cb09a35).
 - [x] F2.1 RED `extract.test.js`, `handler.test.js`, `preview.test.js`, `replies.test.js`: "activa mora a la usura" previews mode `usury`, today, cap in force, "la mora no es retroactiva", Confirm writes one `late_policy`; fixed 40% vs cap 28.59 states 28.59 applies; all four modes including `contract_multiple`; creating a debt applies the default by kind; list replies show mora; double Confirm one event. Reqs NI4, NI6, NI8, LI2.
 - [x] F2.2 GREEN `extract.js`, `handler.js`, `preview.js`, `replies.js`.
 - [x] F2.CP checkpoint.
