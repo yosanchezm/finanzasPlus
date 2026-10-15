@@ -2,6 +2,7 @@ import { compareIso, isIsoDate } from '../calendar.js';
 import { ValidationError } from '../errors.js';
 import { validateEvent } from './events.js';
 import { project } from './project.js';
+import { assertRestructurable } from './restructure.js';
 import { snapshot } from './snapshot.js';
 
 // Plan change preview (DL2, AD8): replay project() with and without a synthetic
@@ -40,7 +41,8 @@ function impactedBy(baseline, changed) {
  *   impacted: Array<{ eventId: string, kind: string, effectiveOn: string, costBeforeMinor: number, costAfterMinor: number }> }}
  *   `before` and `after` are snapshots (see `snapshot`); `backdated` is true when the change takes effect before `on`;
  *   `payloadChars` is the length of the serialized payload (the event column holds 8000); `notices` are those of the projection with the change.
- * @throws {ValidationError} `invalid_draft` for another kind, `invalid_date`, `invalid_event` for a bad payload, and
+ * @throws {ValidationError} `invalid_draft` for another kind, `invalid_date`, `invalid_event` for a bad payload,
+ *   `restructure_unsupported` for a restructure of a card, and
  *   `installment_too_low` when `keep_installment` cannot cover the new interest or the plan would pass 2000 periods.
  */
 export function previewChange(debt, events, draft, { on } = {}) {
@@ -49,6 +51,7 @@ export function previewChange(debt, events, draft, { on } = {}) {
     throw new ValidationError('invalid_draft', `a plan change preview needs a draft of kind ${PREVIEW_KINDS.join(', ')}, got ${String(draft?.kind)}`);
   }
   const { kind, effectiveOn, amountMinor = 0, ...payload } = draft;
+  if (kind === 'restructure') assertRestructurable(debt);
   const candidate = validateEvent({ id: CANDIDATE.id, kind, effectiveOn, amountMinor, payload, createdAt: CANDIDATE.createdAt });
   const asOf = compareIso(on, candidate.effectiveOn) > 0 ? on : candidate.effectiveOn;
   const baseline = project(debt, events, asOf);

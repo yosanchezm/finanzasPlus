@@ -28,6 +28,16 @@ export function registerProjector(kind, projector) {
   else throw new ValidationError('invalid_projector', 'a projector must be a function or null');
 }
 
+/**
+ * The kind of a debt (`card`, `consumer`...), read from its terms. Internal: not exported by the package barrel.
+ * @param {object} debt A `debts` row.
+ * @returns {string}
+ * @throws {ValidationError} `invalid_debt` or whatever `validateTerms` throws
+ */
+export function debtKindOf(debt) {
+  return debtTerms(debt).kind;
+}
+
 function debtTerms(debt) {
   if (debt?.terms) return validateTerms(debt.terms);
   if (typeof debt?.termsJson === 'string') return parseTerms(debt.termsJson);

@@ -2,9 +2,11 @@ import { addMonthsClamped, compareIso, daysBetween } from '../calendar.js';
 import { evaluateCharges } from '../charges.js';
 import { ValidationError } from '../errors.js';
 import { BUCKETS, allocate, emptyBuckets } from '../ledger/allocate.js';
+import { DEFAULT_LEGAL } from '../legal.js';
 import { roundUnit } from '../money.js';
 import { periodicRate } from '../rates.js';
 import { buildSchedule } from '../schedule/index.js';
+import { accrueCardLate, lateView, markDue, newCardLate, newLateItem, pendingLate, refreshLate, settleLate } from './late.js';
 
 // Credit card projector (S7). A card is a statement-driven parent debt (AD of
 // the credit-card-debt spec): the balance moves only through payments, `charge`
@@ -25,6 +27,8 @@ import { buildSchedule } from '../schedule/index.js';
 //     reduces the shortfall (interest is decided by the balance on the due date).
 //   - An `adjustment` is the statement's truth: it is applied after that day's
 //     close, resets tranche balances and absorbs the rest in the revolving balance.
+//   - Mora (F3, `./late.js`) accrues on the capital of the minimum left unpaid after the due date, until the
+//     next close, where it is billed as a line of that statement. A billed mora line accrues nothing more.
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_CYCLES = 1200;
@@ -87,11 +91,11 @@ const sum = (items, pick) => items.reduce((total, item) => total + pick(item), 0
 const ofType = (state, type) => state.tranches.filter((tranche) => tranche.type === type);
 
 const balanceOf = (state) =>
-  state.billed + state.pending + sum(state.tranches, (t) => t.balanceMinor) + state.accrued.charges + state.accrued.taxes + state.accrued.interest;
+  state.billed + state.pending + sum(state.tranches, (t) => t.balanceMinor) + state.accrued.charges + state.accrued.taxes + state.accrued.interest + state.accrued.lateInterest;
 
 /** What a payment on the statement settles: everything billed and not yet paid. */
 const payInFullOf = (state) =>
-  state.accrued.charges + state.accrued.taxes + state.accrued.interest + sum(ofType(state, 'deferred'), (t) => t.dueMinor) + sum(ofType(state, 'advance'), (t) => t.balanceMinor) + state.billed;
+  state.accrued.charges + state.accrued.taxes + state.accrued.lateInterest + state.accrued.interest + sum(ofType(state, 'deferred'), (t) => t.dueMinor) + sum(ofType(state, 'advance'), (t) => t.balanceMinor) + state.billed;
 
 function frenchRows(state, { openedOn, principalMinor, n, rate }) {
   return buildSchedule({
@@ -133,12 +137,12 @@ function applyPayment(state, event) {
   const due = {
     charges: state.accrued.charges,
     taxes: state.accrued.taxes,
-    lateInterest: 0,
+    lateInterest: state.accrued.lateInterest,
     interest: state.accrued.interest,
     principal: sum(deferred, (t) => t.dueMinor) + sum(advances, (t) => t.balanceMinor) + state.billed + state.pending,
   };
   const allocation = allocate(event.amountMinor, due, state.order);
-  for (const key of ['charges', 'taxes', 'interest']) state.accrued[key] -= allocation[key];
+  for (const key of ['charges', 'taxes', 'lateInterest', 'interest']) state.accrued[key] -= allocation[key];
   // Principal goes to the installments due, then cash advances, then the revolving balance.
   let left = allocation.principal;
   for (const tranche of deferred) {
@@ -163,6 +167,7 @@ function applyPayment(state, event) {
     cycle.eventIds.push(event.id);
     rest -= take;
   }
+  refreshLate(state);
   return { allocation };
 }
 
@@ -185,12 +190,23 @@ function setTranche(state, id, value) {
 }
 
 function applyAdjustment(state, event) {
-  const { balanceMinor, trancheBalances = {}, minimumDueMinor } = event.payload;
+  const { balanceMinor, trancheBalances = {}, minimumDueMinor, lateInterestMinor } = event.payload;
   const before = balanceOf(state);
+  const latest = state.cycles[state.cycles.length - 1];
+  // The stated mora replaces the billed line of the latest statement; the difference stays on that line, never in the revolving balance.
+  if (lateInterestMinor !== undefined && latest) {
+    const next = Math.max(state.accrued.lateInterest + lateInterestMinor - latest.lateInterest, 0);
+    const diff = next - state.accrued.lateInterest;
+    state.accrued.lateInterest = next;
+    latest.lateInterest += diff;
+    latest.total += diff;
+    latest.payInFull += diff;
+    latest.closing += diff;
+  }
   for (const id of Object.keys(trancheBalances)) setTranche(state, id, trancheBalances[id]);
   if (balanceMinor !== undefined) state.billed = Math.max(state.billed + balanceMinor - balanceOf(state), 0);
-  const latest = state.cycles[state.cycles.length - 1];
   if (minimumDueMinor !== undefined && latest) latest.minimum = minimumDueMinor;
+  refreshLate(state);
   return { driftMinor: balanceOf(state) - before, absorbed: balanceMinor === undefined || balanceOf(state) === balanceMinor };
 }
 
@@ -201,6 +217,11 @@ const HANDLERS = {
   charge: applyCharge,
   rate_change: (state, event) => {
     state.rate = event.payload.rate;
+    state.late.work = { ...state.late.work, rate: event.payload.rate };
+    return {};
+  },
+  late_policy: (state, event) => {
+    state.late.work = { ...state.late.work, late: event.payload.late };
     return {};
   },
   charge_change: (state, event) => {
@@ -212,7 +233,10 @@ const HANDLERS = {
 function closeCycle(state, cycle) {
   const { unit } = state;
   const previous = addMonthsClamped(cycle.statementOn, -1, state.card.statementDay);
-  const lines = { interest: roundUnit((state.interestBase ?? state.billed) * monthly(state.rate), unit), deferred: 0 };
+  // The mora of the statements ending now is billed here; the capital it ran on paid no revolving interest those days.
+  const late = settleLate(state, daysBetween(previous, cycle.statementOn));
+  const base = state.interestBase ?? state.billed;
+  const lines = { interest: roundUnit(Math.max(base - Math.min(late.excludedBase, base), 0) * monthly(state.rate), unit), deferred: 0, late: late.billedMinor };
   for (const tranche of state.tranches) {
     if (tranche.type === 'advance' && tranche.balanceMinor > 0) {
       const share = compareIso(tranche.openedOn, previous) > 0 ? daysBetween(tranche.openedOn, cycle.statementOn) / daysBetween(previous, cycle.statementOn) : 1;
@@ -236,10 +260,11 @@ function closeCycle(state, cycle) {
   state.accrued.charges += fees.chargesMinor;
   state.accrued.taxes += fees.taxesMinor;
   state.accrued.interest += lines.interest;
+  state.accrued.lateInterest += lines.late;
   state.interestBase = null;
   state.billed += state.pending;
   state.pending = 0;
-  const total = lines.interest + lines.deferred + fees.chargesMinor + fees.taxesMinor;
+  const total = lines.interest + lines.deferred + fees.chargesMinor + fees.taxesMinor + lines.late;
   const payInFull = payInFullOf(state);
   const minimum = minimumPayment(state.card.minPayment, {
     contractualMinor: total,
@@ -253,6 +278,8 @@ function closeCycle(state, cycle) {
     deferred: lines.deferred,
     charges: fees.chargesMinor,
     taxes: fees.taxesMinor,
+    lateInterest: lines.late,
+    late: newLateItem(unit, cycle.dueOn),
     chargeLines: fees.lines,
     total,
     payInFull,
@@ -269,7 +296,7 @@ function trancheView(state) {
   return [revolving, ...others];
 }
 
-function totalsOf(applied, accrued) {
+function totalsOf(applied, accrued, pendingLateMinor) {
   const paid = emptyBuckets();
   for (const entry of applied) if (entry.allocation) for (const key of BUCKETS) paid[key] += entry.allocation[key];
   return {
@@ -281,6 +308,7 @@ function totalsOf(applied, accrued) {
     remainingInterest: accrued.interest,
     remainingCharges: accrued.charges,
     remainingTaxes: accrued.taxes,
+    remainingLateInterest: accrued.lateInterest + pendingLateMinor,
   };
 }
 
@@ -291,7 +319,7 @@ function totalsOf(applied, accrued) {
  * @param {{ debt: object, terms: object, events: object[], asOf: string }} context Events are active and sorted.
  * @returns {object} Projection
  */
-export function projectCard({ debt, terms, events, asOf }) {
+export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }) {
   const state = {
     card: terms.card,
     unit: terms.roundingUnit,
@@ -302,32 +330,42 @@ export function projectCard({ debt, terms, events, asOf }) {
     billed: terms.principalMinor,
     pending: 0,
     interestBase: null,
-    accrued: { charges: 0, taxes: 0, interest: 0 },
+    accrued: { charges: 0, taxes: 0, interest: 0, lateInterest: 0 },
     tranches: [],
     cycles: [],
+    legal,
+    late: newCardLate(terms),
   };
   for (const item of terms.card.deferred) openDeferred(state, { openedOn: terms.openedOn, ...item });
   const { cycles, next } = cyclesThrough(terms.card, terms.openedOn, asOf);
   const moments = events.map((event) => ({ at: event.effectiveOn, rank: event.kind === 'adjustment' ? 3 : 0, event }));
   for (const cycle of cycles) {
     moments.push({ at: cycle.statementOn, rank: 2, close: cycle });
-    if (compareIso(cycle.dueOn, asOf) <= 0) moments.push({ at: cycle.dueOn, rank: 1, due: true });
+    if (compareIso(cycle.dueOn, asOf) <= 0) moments.push({ at: cycle.dueOn, rank: 1, due: cycle });
   }
   moments.sort((a, b) => compareIso(a.at, b.at) || a.rank - b.rank);
 
   const applied = [];
   const notices = [];
   for (const moment of moments) {
-    if (moment.close) closeCycle(state, moment.close);
-    else if (moment.due) state.interestBase = state.billed;
-    else {
+    accrueCardLate(state, moment.at); // days up to the moment are accrued under the policy in force before it
+    if (moment.close) {
+      closeCycle(state, moment.close);
+      // A due date clamped onto the statement day is marked right after the close.
+      if (moment.close.dueOn === moment.close.statementOn) markDue(state, state.cycles[state.cycles.length - 1]);
+    } else if (moment.due) {
+      state.interestBase = state.billed;
+      if (moment.due.dueOn !== moment.due.statementOn) markDue(state, state.cycles.find((closed) => closed.period === moment.due.period));
+    } else {
       const { event } = moment;
       const { allocation = null, ...extra } = HANDLERS[event.kind]?.(state, event) ?? {};
       const costMinor = allocation ? allocation.charges + allocation.taxes + allocation.lateInterest + allocation.interest : 0;
       applied.push({ eventId: event.id, kind: event.kind, effectiveOn: event.effectiveOn, allocation, costMinor, ...extra });
       if (extra.driftMinor) notices.push({ code: 'drift', eventId: event.id, amountMinor: extra.driftMinor, absorbed: extra.absorbed });
+      if (event.kind === 'restructure') notices.push({ code: 'card_restructure_ignored', eventId: event.id });
     }
   }
+  accrueCardLate(state, asOf);
 
   let dueTaken = false;
   const plan = state.cycles.map((cycle) => {
@@ -358,12 +396,14 @@ export function projectCard({ debt, terms, events, asOf }) {
       paidMinor: cycle.covered,
       outstandingMinor,
       paidByEventIds: cycle.eventIds.slice(),
+      ...lateView(cycle),
       status,
     };
   });
   const pastDueMinor = sum(plan, (entry) => (entry.status === 'pastDue' ? entry.outstandingMinor : 0));
   const nextDue = plan.find((entry) => entry.status === 'pastDue' || entry.status === 'partial' || entry.status === 'due') ?? null;
   const tranches = trancheView(state);
+  const totals = totalsOf(applied, state.accrued, pendingLate(state));
   return {
     asOf,
     termsVersion: debt.termsVersion ?? 1,
@@ -375,8 +415,9 @@ export function projectCard({ debt, terms, events, asOf }) {
     plan,
     applied,
     tranches,
-    totals: totalsOf(applied, state.accrued),
-    notices: [...applied.filter((entry) => entry.allocation?.surplus > 0).map((entry) => ({ code: 'surplus', eventId: entry.eventId, amountMinor: entry.allocation.surplus })), ...notices],
+    lateInterestMinor: totals.remainingLateInterest,
+    totals,
+    notices: [...applied.filter((entry) => entry.allocation?.surplus > 0).map((entry) => ({ code: 'surplus', eventId: entry.eventId, amountMinor: entry.allocation.surplus })), ...notices, ...state.late.lateNotices],
     card: {
       statementDay: terms.card.statementDay,
       dueDay: terms.card.dueDay,

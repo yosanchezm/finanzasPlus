@@ -64,6 +64,10 @@ function adjustment(payload) {
     if (!isMinor(payload.minimumDueMinor)) throw invalid('adjustment minimumDueMinor must be whole pesos >= 0');
     result.minimumDueMinor = payload.minimumDueMinor;
   }
+  if (payload.lateInterestMinor !== undefined) {
+    if (!isMinor(payload.lateInterestMinor)) throw invalid('adjustment lateInterestMinor must be whole pesos >= 0');
+    result.lateInterestMinor = payload.lateInterestMinor;
+  }
   if (payload.dueOn !== undefined) {
     if (!isIsoDate(payload.dueOn)) throw invalid('adjustment dueOn must be a real YYYY-MM-DD date');
     result.dueOn = payload.dueOn;

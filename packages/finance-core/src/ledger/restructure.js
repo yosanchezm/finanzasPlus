@@ -1,7 +1,7 @@
 import { compareIso } from '../calendar.js';
 import { ValidationError } from '../errors.js';
 import { validateTerms } from '../terms.js';
-import { replayLoanAt } from './project.js';
+import { debtKindOf, replayLoanAt } from './project.js';
 import { carryOf } from './tail.js';
 
 // Helpers for a `restructure` event (DL2, DL3): what it refinances and the terms it starts from.
@@ -11,6 +11,16 @@ import { carryOf } from './tail.js';
 const PLAN_SHAPE = ['grace', 'balloonMinor', 'manualPlan', 'dueDay'];
 
 const unsupported = () => new ValidationError('restructure_unsupported', 'a card cannot be restructured');
+
+/**
+ * Throws `restructure_unsupported` when the debt is a card. `planCommit` and `previewChange` call it before a
+ * `restructure` draft is built, so nothing is written for a card. Internal: not exported by the package barrel.
+ * @param {object} debt A `debts` row.
+ * @throws {ValidationError} `restructure_unsupported`
+ */
+export function assertRestructurable(debt) {
+  if (debtKindOf(debt) === 'card') throw unsupported();
+}
 
 /**
  * What a restructure effective on `on` would refinance: the debt's balance and the unpaid interest, charges,

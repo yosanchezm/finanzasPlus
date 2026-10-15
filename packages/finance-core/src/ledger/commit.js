@@ -2,6 +2,7 @@ import { compareIso } from '../calendar.js';
 import { CommitError, ValidationError } from '../errors.js';
 import { activeEvents, validateEvent } from './events.js';
 import { project } from './project.js';
+import { assertRestructurable } from './restructure.js';
 
 // Write path (AD6, AD7). `planCommit` is pure: it turns a draft into the event
 // row and, when the payment has a cost, the expense row. `commitPlan` writes
@@ -78,6 +79,7 @@ export function buildCostRow(debt, event, costMinor) {
 export function planCommit(debt, events, draft, ctx) {
   checkContext(debt, ctx);
   const { kind, effectiveOn, amountMinor = 0, ...payload } = draft;
+  if (kind === 'restructure') assertRestructurable(debt);
   const debtId = debt.$id ?? debt.id;
   const candidate = validateEvent({ id: ctx.eventId, debtId, kind, effectiveOn, amountMinor, payload, createdAt: NEWEST, actorId: ctx.actorId, source: ctx.source });
   let dedupeKey = ctx.dedupeKey;
