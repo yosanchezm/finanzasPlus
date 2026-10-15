@@ -532,3 +532,157 @@ describe('late_policy in the Nia entry point', () => {
     expect(sent().slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
   });
 });
+
+describe('explain in the Nia entry point', () => {
+  const REVIEW = 'Este tema está en revisión';
+  const writes = () => fake.posts.length + fake.patches.length;
+  const markerOf = () => {
+    const { history } = JSON.parse(fake.tables.bot_sessions[0].pendingJson);
+    return history[history.length - 1].explain;
+  };
+
+  it('tells the classifier that glossary questions about debts are explain requests', async () => {
+    fake = makeNet([{ intent: 'conversation', action: 'none', reply: 'Hola' }]);
+    await run(message('hola'));
+
+    expect(fake.prompts[0]).toContain('explain');
+  });
+
+  it('moves «qué es la mora», classified as conversation, to the explain flow with the topic mora', async () => {
+    fake = makeNet([{ intent: 'conversation', action: 'none', reply: 'La mora es un cargo.' }, { action: 'explain', topic: 'mora' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+    const before = writes();
+
+    await run(message('qué es la mora'));
+
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].text).toContain(REVIEW);
+    expect(sent()[0].text).not.toContain('La mora es un cargo');
+    expect(fake.prompts).toHaveLength(2);
+    expect(fake.prompts[1]).toContain('Crédito Vehículo');
+    expect(markerOf()).toEqual({ topic: 'mora', debtId: 'd1' });
+    expect(fake.tables.debt_events).toHaveLength(1);
+    expect(fake.tables.transactions).toHaveLength(0);
+    expect(writes() - before).toBe(1); // the session row only
+  });
+
+  it('also moves an analysis classification, and falls back to the keyword topic when the extraction gives none', async () => {
+    fake = makeNet([{ intent: 'analysis', action: 'none', reply: null }, { action: 'explain', topic: null }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('explícame la usura'));
+
+    expect(sent()[0].text).toContain(REVIEW);
+    expect(markerOf()).toEqual({ topic: 'usury_ibc', debtId: 'd1' });
+    expect(fake.prompts).toHaveLength(2);
+  });
+
+  it('keeps «pagué la mora» as a payment when it is classified as debt, and as a conversation when it is not', async () => {
+    fake = makeNet([{ intent: 'debt', action: 'pay' }, { action: 'pay', debtRef: 'vehiculo', amountMinor: 380381 }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+    await run(message('pagué la mora'));
+    expect(sent()[0].text).toContain('Abono a Crédito Vehículo');
+    expect(buttons(sent()[0])).toContain('nia:confirm');
+
+    fake = makeNet([{ intent: 'conversation', action: 'none', reply: 'Anotado, ¿de cuánto fue?' }]);
+    await run(message('pagué la mora'));
+    expect(sent()[0].text).toBe('Anotado, ¿de cuánto fue?');
+    expect(fake.prompts).toHaveLength(1);
+  });
+
+  it('keeps a glossary question with no debt concept in conversation, with a single model call', async () => {
+    fake = makeNet([{ intent: 'conversation', action: 'none', reply: 'Una acción es una parte de una empresa.' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('qué es una acción en bolsa'));
+
+    expect(sent()).toEqual([expect.objectContaining({ text: 'Una acción es una parte de una empresa.' })]);
+    expect(fake.prompts).toHaveLength(1);
+    expect(markerOf()).toBeUndefined();
+  });
+
+  it('answers a follow-up «¿y con ejemplo?» for the marker topic and debt', async () => {
+    fake = makeNet([
+      { intent: 'conversation', action: 'none', reply: 'x' }, { action: 'explain', topic: 'mora', debtRef: 'moto' },
+      { intent: 'conversation', action: 'none', reply: 'y' }, { action: 'explain', topic: null },
+    ]);
+    seed([debtRow('d1', 'Carro'), debtRow('d2', 'Moto')]);
+
+    await run(message('qué es la mora de la moto'));
+    expect(markerOf()).toEqual({ topic: 'mora', debtId: 'd2' });
+    await run(message('¿y con ejemplo?'));
+
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1].text).toContain(REVIEW);
+    expect(markerOf()).toEqual({ topic: 'mora', debtId: 'd2' });
+    expect(fake.prompts).toHaveLength(4);
+  });
+
+  it('keeps the pending payment through an explanation, and the later Confirm writes once', async () => {
+    fake = makeNet([{ intent: 'debt', action: 'pay' }, { action: 'pay', debtRef: 'vehiculo', amountMinor: 380381 }, { intent: 'conversation', action: 'none', reply: 'x' }, { action: 'explain', topic: 'usury_ibc' }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(message('pagué 380 mil al carro'));
+    const pending = JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending;
+    await run(message('¿qué es la usura?'));
+
+    expect(sent()[1].text).toContain(REVIEW);
+    expect(JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending).toEqual(pending);
+    expect(fake.tables.bot_sessions[0].status).toBe('awaiting_confirmation');
+    expect(payments()).toHaveLength(0);
+
+    await run(press('nia:confirm'));
+    expect(payments()).toHaveLength(1);
+  });
+
+  it('routes a nia:exp: button before the stage check: it works with no pending and no model call', async () => {
+    fake = makeNet([]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+
+    await run(press('nia:exp:mora:d1'));
+
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].text).toContain(REVIEW);
+    expect(fake.prompts).toHaveLength(0);
+    expect(markerOf()).toEqual({ topic: 'mora', debtId: 'd1' });
+    expect(fake.tables.debt_events).toHaveLength(1);
+  });
+
+  it('keeps the pending of a waiting Confirm when an explain button is tapped', async () => {
+    fake = makeNet([{ intent: 'debt', action: 'pay' }, { action: 'pay', debtRef: 'vehiculo', amountMinor: 380381 }]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+    await run(message('pagué 380 mil al carro'));
+
+    await run(press('nia:exp:charges:d1'));
+    await run(press('nia:confirm'));
+
+    expect(sent()[1].text).toContain(REVIEW);
+    expect(payments()).toHaveLength(1);
+  });
+
+  it('answers a deleted or foreign-scope debt on an explain button with a short safe reply and no write', async () => {
+    fake = makeNet([]);
+    seed([debtRow('d2', 'Carro de ella', { ownerScope: 'partner' })]);
+    const before = writes();
+
+    await run(press('nia:exp:mora:gone'));
+    await run(press('nia:exp:mora:d2'));
+    await run(press('nia:exp:tax_returns'));
+
+    expect(sent().map((call) => /ya no está disponible/.test(call.text))).toEqual([true, true, true]);
+    expect(writes()).toBe(before);
+    expect(fake.tables.bot_sessions).toHaveLength(0);
+  });
+
+  it('still ignores a stale stage button with no pending', async () => {
+    fake = makeNet([]);
+    seed([debtRow('d1', 'Crédito Vehículo')]);
+    const before = writes();
+
+    await run(press('nia:mode:keep_term'));
+    await run(press('nia:pick:d1'));
+
+    expect(sent().map((call) => call.text)).toEqual(['No tengo una solicitud de deuda pendiente.', 'No tengo una solicitud de deuda pendiente.']);
+    expect(writes()).toBe(before);
+  });
+});

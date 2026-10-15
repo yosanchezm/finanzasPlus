@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Blob } from 'node:buffer';
 import undici from 'undici';
 import { parseThresholds } from './debt/cashflow.js';
-import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback } from './debt/handler.js';
+import { glossaryTopic } from './debt/explain/router.js';
+import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
 
@@ -464,7 +465,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     `La moneda predeterminada del hogar es ${config.currency}.`,
     `En este chat el usuario está configurado como ${profile.alias}, con alcance predeterminado ${profile.ownerScope}.`,
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
-    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar, registrar una tasa legal: la usura, el IBC o el salario mínimo, cambiar la tasa de una deuda que ya existe, cambiar o quitar un seguro o cargo de una deuda, configurar la mora de una deuda que ya existe, o reestructurar una deuda que ya existe); conversation para preguntas generales, capacidades, identidad o educación financiera.',
+    'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar, registrar una tasa legal: la usura, el IBC o el salario mínimo, cambiar la tasa de una deuda que ya existe, cambiar o quitar un seguro o cargo de una deuda, configurar la mora de una deuda que ya existe, reestructurar una deuda que ya existe, o pedir que te expliquen un concepto de deudas como tasas y sus convenciones, usura, mora, cargos, GMF, corte de la tarjeta o abonos: la acción explain); conversation para preguntas generales, capacidades, identidad o educación financiera.',
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
@@ -1064,6 +1065,16 @@ async function handleTextOrReceipt(message, updateId, profile) {
     return;
   }
 
+  // Glossary router: a question that names a debt concept moves from conversation or analysis to the read-only explain flow.
+  // A message that reports or requests a write keeps its original action (the router vetoes it), and an attachment never moves.
+  if (intent === 'conversation' || intent === 'analysis') {
+    const explainHint = glossaryTopic(text, { marker: lastExplain(history), hasAttachment: Boolean(attachment) });
+    if (explainHint) {
+      await handleDebt(debtDeps(), { chatId, actorId, profile, text, history, previous, sessionStatus: session?.status, explainHint });
+      return;
+    }
+  }
+
   const operation = normaliseOperation(raw, profile);
   if (operation && (intent !== 'transaction' || ['update', 'delete'].includes(operation.action))) {
     const snapshot = await workspaceSnapshot();
@@ -1157,7 +1168,11 @@ async function handleUpdate(update) {
     const actorId = String(callback.from.id);
     if (callback.data === 'nia:confirm') await confirmPending(chatId, actorId, profile, update.update_id);
     else if (callback.data === 'nia:cancel') await cancelPending(chatId, actorId);
-    else if (/^nia:(pick:|strat:|conv:|mode:|chg:|simpay$)/.test(callback.data || '')) {
+    else if (/^nia:exp:/.test(callback.data || '')) {
+      // Stateless and read-only: routed before the stage check, so it needs no pending and leaves the waiting one as it is.
+      const session = await getSession(chatId);
+      await handleExplainCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), previous: pendingFromSession(session), sessionStatus: session?.status }, callback.data);
+    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|simpay$)/.test(callback.data || '')) {
       const session = await getSession(chatId);
       await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
     } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');
