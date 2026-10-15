@@ -10,7 +10,7 @@ import BackdatedNotice from './BackdatedNotice';
 import BeforeAfterPreview from './BeforeAfterPreview';
 import RateField from './RateField';
 import { formatEa } from './debtLabels';
-import { INSTALLMENT_TOO_LOW, KEEP_TERM_ONLY, initialRateForm, previewRateChange } from './rateChangeModel';
+import { INSTALLMENT_TOO_LOW, KEEP_TERM_ONLY, initialRateForm, previewRateChange, rateInForce } from './rateChangeModel';
 import Notices from './wizard/Notices';
 
 const MODE_OPTIONS = [
@@ -54,7 +54,7 @@ export default function RateChangeDialog({ debt, events, projection, today, save
     <DialogRoot open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent variant="center" aria-describedby={undefined}>
         <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
-          <DialogHeader title="Cambiar tasa" description={`${debt.name}. Tasa actual: ${formatEa(toEffectiveAnnual(projection.terms.rate))}.`} />
+          <DialogHeader title="Cambiar tasa" description={`${debt.name}. Tasa actual: ${formatEa(toEffectiveAnnual(rateInForce(projection)))}.`} />
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
             <TextField label="Vigente desde" type="date" value={form.effectiveOn} onChange={(event) => setForm({ ...form, effectiveOn: event.target.value })} disabled={saving} />
             {result.backdated && <BackdatedNotice impacted={result.impacted} />}

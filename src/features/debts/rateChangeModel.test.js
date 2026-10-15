@@ -1,7 +1,7 @@
 import { project, resolveLegal } from '@finance-core';
 import { describe, expect, it } from 'vitest';
 import { makeCard, makeDebt, makeEvent, makePayment } from './debtFixtures';
-import { INSTALLMENT_TOO_LOW, initialRateForm, modesFor, previewRateChange } from './rateChangeModel';
+import { INSTALLMENT_TOO_LOW, initialRateForm, modesFor, previewRateChange, rateInForce } from './rateChangeModel';
 
 const DISBURSEMENT = makeEvent('e0', 'disbursement', '2026-01-05', 1000000);
 const EA = (value) => ({ value: String(value), basis: 'effective', periodicity: 'annual', timing: 'arrears' });
@@ -13,11 +13,46 @@ const run = ({ debt = makeDebt(), events = [DISBURSEMENT], today = '2026-03-10',
   return previewRateChange({ debt, events, projection, today, form: { effectiveOn: today, rate: EA(24), mode: 'keep_term', ...form } });
 };
 
+describe('rateInForce', () => {
+  const rateChange = (id, on, value) => ({ ...makeEvent(id, 'rate_change', on, 0, { rate: { value, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }), debtId: 'c1' });
+  const voidOf = (id, targetEventId) => ({ ...makeEvent(id, 'void', '2026-05-02', 0, { targetEventId, reason: 'x' }), debtId: 'c1' });
+
+  it('is the rate of the terms for a loan, whose projection already applies its changes', () => {
+    const events = [DISBURSEMENT, makeEvent('r1', 'rate_change', '2026-02-01', 0, { rate: { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' })];
+    const projection = project(makeDebt(), events, '2026-03-10');
+
+    expect(rateInForce(projection)).toEqual(projection.terms.rate);
+    expect(rateInForce(projection).value).toBe(20);
+  });
+
+  it('follows the active rate changes of a card, whose projection keeps the original terms, and skips voided and future ones', () => {
+    const events = [rateChange('r1', '2026-04-20', 24), rateChange('r2', '2026-05-01', 22), voidOf('v1', 'r2'), rateChange('r3', '2026-08-01', 18)];
+    const projection = project(makeCard(), events, '2026-05-20');
+
+    expect(projection.terms.rate.value).toBe(28); // the card projection has not applied them
+    expect(rateInForce(projection).value).toBe(24);
+  });
+
+  it('falls back to the original rate when every rate change of the card is voided or still in the future', () => {
+    const events = [rateChange('r1', '2026-04-20', 24), voidOf('v1', 'r1'), rateChange('r3', '2026-08-01', 18)];
+
+    expect(rateInForce(project(makeCard(), events, '2026-05-20')).value).toBe(28);
+    expect(rateInForce(project(makeCard(), [], '2026-05-20')).value).toBe(28);
+  });
+});
+
 describe('initialRateForm', () => {
   it('starts from the rate in force, as the strings the inputs hold, effective today and keeping the term', () => {
     const projection = project(makeDebt(), [DISBURSEMENT], '2026-03-10');
 
     expect(initialRateForm(projection, '2026-03-10')).toEqual({ effectiveOn: '2026-03-10', rate: EA(24), mode: 'keep_term' });
+  });
+
+  it('starts a card from the rate its active rate change put in force, not from the original terms', () => {
+    const events = [{ ...makeEvent('r1', 'rate_change', '2026-04-20', 0, { rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }), debtId: 'c1' }];
+    const projection = project(makeCard(), events, '2026-05-20');
+
+    expect(initialRateForm(projection, '2026-05-20')).toEqual({ effectiveOn: '2026-05-20', rate: EA(24), mode: 'keep_term' });
   });
 
   it('keeps the convention of the current rate and starts an interest-free debt at 0', () => {

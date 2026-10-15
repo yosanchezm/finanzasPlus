@@ -110,6 +110,25 @@ describe('RateChangeDialog modes', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'rate_change', mode: 'keep_term' }));
   });
 
+  it('shows the rate a card has in force after a rate change, and starts the form from it', () => {
+    const events = [{ ...makeEvent('r1', 'rate_change', '2026-04-20', 0, { rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }), debtId: 'c1' }];
+    setup({ debt: makeCard(), events, today: '2026-05-20' });
+
+    expect(screen.getByText(/Tasa actual: 24 % E\.A\./)).toBeInTheDocument();
+    expect(rateField()).toHaveValue(24);
+  });
+
+  it('falls back to the original rate of a card when its rate change was voided', () => {
+    const events = [
+      { ...makeEvent('r1', 'rate_change', '2026-04-20', 0, { rate: { value: 24, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, mode: 'keep_term' }), debtId: 'c1' },
+      { ...makeEvent('v1', 'void', '2026-04-21', 0, { targetEventId: 'r1', reason: 'x' }), debtId: 'c1' },
+    ];
+    setup({ debt: makeCard(), events, today: '2026-05-20' });
+
+    expect(screen.getByText(/Tasa actual: 28 % E\.A\./)).toBeInTheDocument();
+    expect(rateField()).toHaveValue(28);
+  });
+
   it('explains a too-low installment, selects keep term and never submits the failing choice', async () => {
     const { user, onSubmit } = setup();
     await user.click(screen.getByRole('radio', { name: /Mantener la cuota/ }));
