@@ -51,7 +51,10 @@ export function chargesFacts({ projection }) {
   const shown = lines.slice(0, MAX_LINES);
   const result = { status: 'ok', dataSource: 'debt', ...examples(false), approximate: [], notices: [] };
   result.numbers.lines = shown.length;
-  if (lines.length > shown.length) result.numbers.hidden = lines.length - shown.length;
+  if (lines.length > shown.length) {
+    result.numbers.hidden = lines.length - shown.length;
+    result.text.hidden = String(result.numbers.hidden);
+  }
   shown.forEach((line, position) => {
     const part = lineFacts(line, position, projection.terms.charges || []);
     Object.assign(result.numbers, part.numbers);

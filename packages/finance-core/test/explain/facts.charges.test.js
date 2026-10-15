@@ -58,6 +58,7 @@ describe('explain facts: charges', () => {
     const result = facts(withCharges(many));
 
     expect(result.numbers).toMatchObject({ lines: 6, hidden: 2 });
+    expect(result.text.hidden).toBe('2');
     expect(result.text['l5.label']).toBe('Seguro 5');
     expect(result.text['l6.label']).toBeUndefined();
   });

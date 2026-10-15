@@ -65,7 +65,7 @@ describe('explainReply: nothing is released in S0', () => {
   });
 
   it('falls back to the under review text for a status it has no template for', () => {
-    const released = { ...facts('mora', null), status: 'ok' };
+    const released = { ...facts('card_statement', null), status: 'ok' };
 
     expect(explainReply(released).text).toBe(UNDER_REVIEW_TEXT);
     expect(renderExplain(released)).toEqual({ parts: [UNDER_REVIEW_TEXT], followUps: [] });
