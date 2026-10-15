@@ -41,6 +41,14 @@ describe('card wizard model', () => {
     expect(toTerms(card({ fee: '' })).charges).toEqual([]);
   });
 
+  it('keeps the stored ids, labels, cadence and order of the card charges (behaviour neutral)', () => {
+    expect(toTerms(card()).charges).toEqual([
+      { id: 'mgmt_fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 9000, cadence: 'per_installment', fromPeriod: 1, toPeriod: null, display: 'itemized' },
+      { id: 'mgmt_iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'mgmt_fee', value: 19, cadence: 'per_installment', fromPeriod: 1, toPeriod: null, display: 'itemized' },
+    ]);
+    expect(() => toTerms(card({ feeIvaPct: '' }))).toThrow(expect.objectContaining({ code: 'invalid_charge' }));
+  });
+
   it('treats the opening balance as optional and turns purchases into installment plans with their own rate', () => {
     expect(toTerms(card({}, { principal: '' })).principalMinor).toBe(0);
     const terms = toTerms(card({ deferred: [NEVERA, { label: ' ', amount: '300000', n: '3', rate: '28' }] }));

@@ -1,5 +1,5 @@
 import {
-  CONVENTIONS, buildSchedule, ley1555Notice, normalizeRate, periodDates, rateLabel, summarizeSchedule,
+  CHARGE_PRESET_SPECS, CONVENTIONS, buildSchedule, ley1555Notice, normalizeRate, periodDates, presetCharges, rateLabel, summarizeSchedule,
   toEffectiveAnnual, usuryNotice, validateTerms,
 } from '@finance-core';
 import { defaultLateDraft, lateFromDraft, lateIssueOf } from '../lateModel';
@@ -36,14 +36,20 @@ export const SYSTEM_LABELS = {
   none: 'Sin plan de cuotas',
 };
 
+/** The inputs' own text per preset; kind, basis, label, cadence, link and default come from the core spec. */
+const PRESET_UI = {
+  life: { unit: '% del saldo, por cuota', placeholder: '0,05' },
+  insurance: { unit: '$ por cuota', placeholder: '$ 0' },
+  fee: { unit: '$ por cuota', placeholder: '$ 0' },
+  iva: { unit: '%' },
+  gmf: { unit: '%' },
+};
+
 /** Offered insurance, fee and tax lines. Evaluation order in the core: IVA after its fee, GMF last. */
-export const CHARGE_PRESETS = [
-  { key: 'life', kind: 'insurance', label: 'Seguro de vida', basis: 'pctOutstanding', unit: '% del saldo, por cuota', placeholder: '0,05' },
-  { key: 'insurance', kind: 'insurance', label: 'Otro seguro', basis: 'fixed', unit: '$ por cuota', placeholder: '$ 0' },
-  { key: 'fee', kind: 'fee', label: 'Comisión o cuota de manejo', basis: 'fixed', unit: '$ por cuota', placeholder: '$ 0' },
-  { key: 'iva', kind: 'tax', label: 'IVA sobre la comisión', basis: 'pctOfCharge', refId: 'fee', requires: 'fee', unit: '%', defaultValue: '19' },
-  { key: 'gmf', kind: 'tax', label: 'GMF (4 x 1000)', basis: 'pctOfSubtotal', unit: '%', defaultValue: '0.4' },
-];
+export const CHARGE_PRESETS = Object.keys(CHARGE_PRESET_SPECS).map((key) => {
+  const { defaultValue, ...spec } = CHARGE_PRESET_SPECS[key];
+  return { key, ...spec, ...PRESET_UI[key], ...(defaultValue === undefined ? {} : { defaultValue: String(defaultValue) }) };
+});
 
 /** Minimum-payment rules a card can use (see the core's `minimumPayment`). */
 export const MIN_RULES = [
@@ -112,14 +118,8 @@ const chargesOf = (selected) => CHARGE_PRESETS.filter((preset) => preset.key in 
 
 const blank = (text) => String(text).trim() === '';
 
-// The management fee is an ordinary monthly charge; its IVA is a `pctOfCharge` link the user can edit or remove.
-const cardCharges = ({ fee, feeIva, feeIvaPct }) => {
-  if (blank(fee)) return [];
-  const line = { cadence: 'per_installment' };
-  const lines = [{ ...line, id: 'mgmt_fee', kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: pesos(fee) }];
-  if (feeIva) lines.push({ ...line, id: 'mgmt_iva', kind: 'tax', label: 'IVA', basis: 'pctOfCharge', refId: 'mgmt_fee', value: num(feeIvaPct) });
-  return lines;
-};
+// The management fee is an ordinary monthly charge; its IVA is a `pctOfCharge` link the user can edit or remove. The core builds both.
+const cardCharges = ({ fee, feeIva, feeIvaPct }) => (blank(fee) ? [] : presetCharges({ fee: pesos(fee), ...(feeIva ? { iva: num(feeIvaPct) } : {}) }, { card: true }));
 
 function cardTerms(state) {
   const { card } = state;

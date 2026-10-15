@@ -38,6 +38,7 @@ export {
 export { LATE_MODES, dailyRate, defaultLateFor, lateEAOn, lateRateOn, modalityOf, normalizeLate } from './src/late/policy.js';
 export { TERMS_MAX_CHARS, TERMS_SCHEMA_VERSION, normalizeCharges, parseTerms, serializeTerms, validateTerms } from './src/terms.js';
 export { evaluateCharges, removeCharge } from './src/charges.js';
+export { CHARGE_PRESET_SPECS, addExplicitCharge, addPresetCharge, presetCharges } from './src/chargePresets.js';
 export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
 export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
 export { allocate } from './src/ledger/allocate.js';

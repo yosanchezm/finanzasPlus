@@ -101,6 +101,7 @@ describe('finance-core sources', () => {
         'src/advice/advice.js',
         'src/advice/facts.js',
         'src/calendar.js',
+        'src/chargePresets.js',
         'src/charges.js',
         'src/errors.js',
         'src/explain/allowed.js',
@@ -167,6 +168,7 @@ describe('public barrel (index.js)', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
         'ADVICE_DEFAULTS',
+        'CHARGE_PRESET_SPECS',
         'CONVENTIONS',
         'CommitError',
         'DEFAULT_LEGAL',
@@ -184,7 +186,9 @@ describe('public barrel (index.js)', () => {
         'ValidationError',
         'activeEvents',
         'addDays',
+        'addExplicitCharge',
         'addMonthsClamped',
+        'addPresetCharge',
         'advise',
         'allocate',
         'allowedTexts',
@@ -222,6 +226,7 @@ describe('public barrel (index.js)', () => {
         'periodDates',
         'periodicRate',
         'planCommit',
+        'presetCharges',
         'previewChange',
         'project',
         'rateInForce',

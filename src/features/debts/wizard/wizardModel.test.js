@@ -1,4 +1,4 @@
-import { resolveLegal } from '@finance-core';
+import { CHARGE_PRESET_SPECS, resolveLegal } from '@finance-core';
 import { describe, expect, it } from 'vitest';
 import { CHARGE_PRESETS, evaluate, initialWizard, rateEcho, stepsFor, toTerms, wizardReducer } from './wizardModel';
 
@@ -100,6 +100,26 @@ describe('toTerms', () => {
     expect(both.charges).toEqual({ fee: '10000', iva: '19' });
     expect(wizardReducer(both, { type: 'charge', key: 'fee', value: null }).charges).toEqual({});
     expect(CHARGE_PRESETS.map((preset) => preset.key)).toEqual(['life', 'insurance', 'fee', 'iva', 'gmf']);
+  });
+});
+
+describe('CHARGE_PRESETS (the web view of the core presets)', () => {
+  it('spreads the core spec and keeps only the UI fields of its own', () => {
+    expect(CHARGE_PRESETS.map((preset) => preset.key)).toEqual(Object.keys(CHARGE_PRESET_SPECS));
+    for (const preset of CHARGE_PRESETS) {
+      const { defaultValue, ...spec } = CHARGE_PRESET_SPECS[preset.key];
+      expect(preset).toMatchObject(spec);
+      expect(preset.cadence).toBe('per_installment');
+      expect(typeof preset.unit).toBe('string');
+      expect(preset.defaultValue).toBe(defaultValue === undefined ? undefined : String(defaultValue));
+    }
+  });
+
+  it('keeps the placeholders and the default text of the inputs', () => {
+    const byKey = Object.fromEntries(CHARGE_PRESETS.map((preset) => [preset.key, preset]));
+    expect(byKey.life.placeholder).toBe('0,05');
+    expect(byKey.fee.placeholder).toBe('$ 0');
+    expect([byKey.iva.defaultValue, byKey.gmf.defaultValue]).toEqual(['19', '0.4']);
   });
 });
 
