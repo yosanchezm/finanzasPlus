@@ -72,3 +72,15 @@ describe('card wizard model', () => {
     else expect(issue.message.length).toBeGreaterThan(10);
   });
 });
+
+describe('card wizard mora', () => {
+  it('starts a card with the usury mora and carries it in the terms the review checks', () => {
+    expect(card().late).toMatchObject({ mode: 'usury' });
+    expect(toTerms(card()).late).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(evaluate(card()).terms.late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
+  it('keeps the card without mora when it is switched off', () => {
+    expect(toTerms({ ...card(), late: { ...card().late, mode: 'none' } }).late).toBeUndefined();
+  });
+});

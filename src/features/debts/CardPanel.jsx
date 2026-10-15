@@ -34,11 +34,14 @@ export default function CardPanel({ projection }) {
           </li>
         ))}
       </ul>
+      {last && last.lateMinor > 0 && (
+        <p className="text-sm text-ink-muted">Mora en curso: {formatMoney(last.lateMinor)} (se cobra en el corte del {formatDueDate(card.nextStatementOn)})</p>
+      )}
       {last && (
         <div className="flex flex-col gap-2 rounded-sm bg-surface-2 p-4 text-sm">
           <h3 className="text-[13px] font-semibold text-ink-2">Último extracto, corte del {formatDueDate(last.statementOn)}</h3>
           <dl className="flex flex-col gap-2">
-            {[['Intereses', last.interestMinor], ['Cuota de manejo e IVA', last.chargesMinor + last.taxesMinor], ['Cuotas del mes', last.principalMinor]].map(([label, value]) => (
+            {[['Intereses', last.interestMinor], ['Cuota de manejo e IVA', last.chargesMinor + last.taxesMinor], ['Cuotas del mes', last.principalMinor], ...(last.lateInterestMinor > 0 ? [['Mora', last.lateInterestMinor]] : [])].map(([label, value]) => (
               <div key={label} className="flex items-baseline justify-between gap-3">
                 <dt className="text-ink-muted">{label}</dt>
                 <dd className="text-ink tabular-nums">{formatMoney(value)}</dd>

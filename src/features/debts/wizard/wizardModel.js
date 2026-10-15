@@ -131,6 +131,7 @@ function cardTerms(state) {
     system: 'none',
     periodicity: 'monthly',
     charges: cardCharges(card),
+    ...(state.late.mode === 'none' ? {} : { late: lateFromDraft(state.late) }), // a card starts with the usury mora (see defaultLateDraft)
     card: {
       statementDay: num(card.statementDay),
       dueDay: num(card.dueDay),

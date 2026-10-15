@@ -47,6 +47,12 @@ export const makeCard = (overrides = {}) => ({
   principalMinor: 500000, openedOn: '2026-04-01', termsVersion: 1, actorId: 'u1', termsJson: serializeTerms(CARD_TERMS), ...overrides,
 });
 
+// The same card with mora on and the 28.59% EA cap of 2026. Nothing paid, 10 days after the first due date (2026-04-30) the
+// mora on the unmet capital of 125,000 is 861 (2026-05-10); the next statement closes on 2026-05-15, 15 days after the due date.
+export const makeMoraCard = ({ late = { mode: 'usury', graceDays: 0 }, legal = MORA_LEGAL } = {}) => makeCard({
+  termsJson: serializeTerms({ ...CARD_TERMS, ...(late ? { late } : {}) }), legal,
+});
+
 // The same loan with mora on. With the 28.59% EA usury cap of the spec, on 2026-02-15 (10 days after the first due date)
 // the mora on principal 199,505 is 1,375 and the whole row is 391,756.
 export const MORA_FEE = { id: 'fee', kind: 'fee', label: 'Comisión', basis: 'fixed', value: 10000, cadence: 'per_installment' };

@@ -72,6 +72,8 @@ export default function CardStep({ card, dispatch }) {
         )}
       </div>
 
+      <p className="text-[13px] text-ink-muted">Si no pagas el mínimo a tiempo, cobramos mora al tope de usura. Puedes cambiarla después en «Más acciones».</p>
+
       <Purchases items={card.deferred} onChange={(deferred) => set({ deferred })} />
     </div>
   );

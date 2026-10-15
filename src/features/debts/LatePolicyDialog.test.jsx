@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { formatMoney, formatMonthLabel } from '../../shared/lib/format';
 import LatePolicyDialog from './LatePolicyDialog';
-import { DAY_10, MORA_DISBURSEMENT, makeMoraLoan, usuryLegal } from './debtFixtures';
+import { DAY_10, MORA_DISBURSEMENT, makeMoraCard, makeMoraLoan, usuryLegal } from './debtFixtures';
 
 // The reference loan: principal 199,505 of the first installment is overdue since 2026-02-05. Today is 10 days later.
 const DUE_DAY = '2026-02-05';
@@ -165,5 +165,39 @@ describe('LatePolicyDialog', () => {
 
     expect(screen.getByText('Servidor no disponible')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+});
+
+describe('LatePolicyDialog for a card', () => {
+  const setupCard = ({ late = null, today = '2026-05-10' } = {}) => {
+    const debt = makeMoraCard({ late });
+    const onSubmit = vi.fn();
+    render(<LatePolicyDialog debt={debt} events={[]} projection={project(debt, [], today)} today={today} saveState={IDLE} onSubmit={onSubmit} onClose={vi.fn()} />);
+    return { onSubmit, user: userEvent.setup() };
+  };
+
+  it('explains that the mora runs on the unmet capital of the minimum and is billed in the next statement', () => {
+    setupCard();
+
+    expect(screen.getByText('En una tarjeta la mora se cobra sobre el capital del pago mínimo que no pagaste a tiempo, desde el día siguiente al límite de pago, y aparece en el siguiente extracto.')).toBeInTheDocument();
+  });
+
+  it('does not explain it for a loan', () => {
+    setup();
+
+    expect(screen.queryByText(/En una tarjeta la mora/)).not.toBeInTheDocument();
+  });
+
+  it('previews the mora of the unmet minimum (861) and saves one late_policy', async () => {
+    const { user, onSubmit } = setupCard();
+    await user.selectOptions(screen.getByLabelText('Interés de mora'), 'usury');
+    setDate('2026-04-30');
+
+    expect(rowOf('Mora acumulada')).toHaveTextContent(`${formatMoney(0)}${formatMoney(861)}`);
+    expect(rowOf('Mínimo vencido')).toHaveTextContent(`${formatMoney(146102)}${formatMoney(146102)}`);
+    expect(preview().queryByRole('row', { name: /Total vencido/ })).not.toBeInTheDocument();
+    await user.click(save());
+
+    expect(onSubmit).toHaveBeenCalledWith({ kind: 'late_policy', effectiveOn: '2026-04-30', late: { mode: 'usury', graceDays: 0 } });
   });
 });

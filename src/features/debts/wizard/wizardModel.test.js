@@ -259,7 +259,7 @@ describe('mora policy in the wizard', () => {
     expect(grace.issues).toEqual([{ step: 'plan', message: 'Los días de gracia deben ser un número entero de 0 a 90.' }]);
   });
 
-  it('is valid with the default policy and leaves a card without a policy', () => {
+  it('is valid with the default policy; a card starts with the usury mora too and drops it when it is off', () => {
     const loan = fill('consumer', { principal: '10000000' }, [rate({ value: '25' })]);
     expect(evaluate(loan).issues).toEqual([]);
     expect(evaluate(loan).terms.late).toEqual({ mode: 'usury', graceDays: 0 });
@@ -269,6 +269,7 @@ describe('mora policy in the wizard', () => {
       { type: 'set', patch: { name: 'Visa', card: { ...initialWizard(TODAY).card, statementDay: '10', dueDay: '25' } } },
       rate({ value: '28' }),
     ]);
-    expect(toTerms(card).late).toBeUndefined();
+    expect(toTerms(card).late).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(toTerms({ ...card, late: lateOf(card, { mode: 'none' }) }).late).toBeUndefined();
   });
 });

@@ -23,11 +23,13 @@ function withPlan(input, draft, preview) {
 
 /**
  * Preview of a statement: the stated balance is written as an `adjustment` that reconciles the projection.
- * @param {{ debt: object, events: object[], actorId: string, today: string, effectiveOn: string, balance: string, minimum: string }} input
+ * The mora the statement bills is optional (`lateInterest`): it replaces the computed one, and the stated balance stays the truth.
+ * @param {{ debt: object, events: object[], actorId: string, today: string, effectiveOn: string, balance: string, minimum: string,
+ *   lateInterest?: string }} input
  * @returns {{ draft: (object | null), issue: (string | null), preview: ({ computedMinor: number, driftMinor: number, balanceAfterMinor: number } | null) }}
  */
 export function previewStatement(input) {
-  const { effectiveOn, balance, minimum } = input;
+  const { effectiveOn, balance, minimum, lateInterest = '' } = input;
   if (blank(balance)) return NONE;
   const balanceMinor = wholePesos(balance);
   if (balanceMinor === null || balanceMinor < 0) return { ...NONE, issue: 'Escribe el saldo total del extracto en pesos, sin decimales.' };
@@ -37,6 +39,11 @@ export function previewStatement(input) {
     const minimumDueMinor = wholePesos(minimum);
     if (minimumDueMinor === null || minimumDueMinor < 0) return { ...NONE, issue: 'Escribe el pago mínimo en pesos, sin decimales.' };
     draft.minimumDueMinor = minimumDueMinor;
+  }
+  if (!blank(lateInterest)) {
+    const lateInterestMinor = wholePesos(lateInterest);
+    if (lateInterestMinor === null || lateInterestMinor < 0) return { ...NONE, issue: 'Escribe la mora del extracto en pesos, sin decimales.' };
+    draft.lateInterestMinor = lateInterestMinor;
   }
   return withPlan(input, draft, (plan, before) => ({ computedMinor: before, driftMinor: plan.projection.balanceMinor - before, balanceAfterMinor: plan.projection.balanceMinor }));
 }

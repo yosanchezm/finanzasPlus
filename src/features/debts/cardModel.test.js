@@ -72,3 +72,25 @@ describe('previewCharge', () => {
     else expect(result.issue).toBeNull();
   });
 });
+
+describe('previewStatement: the mora of the statement', () => {
+  it('writes the stated mora next to the balance and keeps the stated balance as the truth', () => {
+    const result = previewStatement({ ...base, balance: String(COMPUTED), minimum: '', lateInterest: '900' });
+
+    expect(result.draft).toEqual({ kind: 'adjustment', effectiveOn: '2026-04-15', balanceMinor: COMPUTED, lateInterestMinor: 900, note: 'Extracto' });
+    expect(result.preview.balanceAfterMinor).toBe(COMPUTED);
+  });
+
+  it('leaves the mora out when it is blank or not given', () => {
+    expect(previewStatement({ ...base, balance: String(COMPUTED), minimum: '', lateInterest: '' }).draft).not.toHaveProperty('lateInterestMinor');
+    expect(previewStatement({ ...base, balance: String(COMPUTED), minimum: '' }).draft).not.toHaveProperty('lateInterestMinor');
+    expect(previewStatement({ ...base, balance: String(COMPUTED), minimum: '', lateInterest: '0' }).draft.lateInterestMinor).toBe(0);
+  });
+
+  it.each(['abc', '-5', '10.5'])('gives no draft for the mora %s', (lateInterest) => {
+    const result = previewStatement({ ...base, balance: String(COMPUTED), minimum: '', lateInterest });
+
+    expect(result.draft).toBeNull();
+    expect(result.issue).toContain('Escribe la mora del extracto');
+  });
+});

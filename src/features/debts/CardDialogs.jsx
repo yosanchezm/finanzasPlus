@@ -60,9 +60,10 @@ export function StatementDialog({ debt, events, projection, actorId, today, save
   const [effectiveOn, setEffectiveOn] = useState(last ? last.statementOn : today);
   const [balance, setBalance] = useState('');
   const [minimum, setMinimum] = useState('');
+  const [lateInterest, setLateInterest] = useState('');
   const result = useMemo(
-    () => previewStatement({ debt, events, actorId, today, effectiveOn, balance, minimum }),
-    [debt, events, actorId, today, effectiveOn, balance, minimum],
+    () => previewStatement({ debt, events, actorId, today, effectiveOn, balance, minimum, lateInterest }),
+    [debt, events, actorId, today, effectiveOn, balance, minimum, lateInterest],
   );
   return (
     <CardDialog
@@ -78,6 +79,7 @@ export function StatementDialog({ debt, events, projection, actorId, today, save
       <TextField label="Fecha del extracto" type="date" value={effectiveOn} onChange={(event) => setEffectiveOn(event.target.value)} />
       <TextField label="Saldo total del extracto" {...money} value={balance} onChange={(event) => setBalance(event.target.value)} />
       <TextField label="Pago mínimo del extracto (opcional)" {...money} value={minimum} onChange={(event) => setMinimum(event.target.value)} />
+      <TextField label="Mora del extracto (opcional)" {...money} value={lateInterest} onChange={(event) => setLateInterest(event.target.value)} />
     </CardDialog>
   );
 }

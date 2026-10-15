@@ -14,12 +14,12 @@ import { usuryModality } from './wizard/wizardModel';
 
 const rateText = (ea) => (ea === null ? 'Sin mora' : formatEa(ea));
 
-function Preview({ result, today }) {
+function Preview({ result, today, isCard }) {
   const { before, after, rates, capEA, asOf } = result;
   const rows = [
     { label: 'Tasa de mora', before: rateText(rates.before), after: rateText(rates.after) },
     { label: 'Mora acumulada', before: formatMoney(before.lateInterestMinor), after: formatMoney(after.lateInterestMinor) },
-    { label: 'Total vencido', before: formatMoney(before.pastDueMinor), after: formatMoney(after.pastDueMinor) },
+    { label: isCard ? 'Mínimo vencido' : 'Total vencido', before: formatMoney(before.pastDueMinor), after: formatMoney(after.pastDueMinor) },
   ];
   return (
     <BeforeAfterPreview rows={rows}>
@@ -41,6 +41,7 @@ export default function LatePolicyDialog({ debt, events, projection, today, save
   const saving = saveState.status === 'saving';
   const primaryLabel = saving ? 'Guardando…' : saveState.status === 'error' ? 'Reintentar' : 'Guardar mora';
   const canSave = Boolean(result.draft) && !result.unchanged;
+  const isCard = Boolean(projection.card);
 
   const submit = (event) => {
     event.preventDefault();
@@ -57,6 +58,7 @@ export default function LatePolicyDialog({ debt, events, projection, today, save
               <TextField label="Vigente desde" type="date" value={form.effectiveOn} onChange={(event) => setForm({ ...form, effectiveOn: event.target.value })} disabled={saving} />
               <p className="text-[13px] text-ink-muted">La mora se cobra desde el día siguiente a esta fecha.</p>
             </div>
+            {isCard && <p className="text-[13px] text-ink-muted">En una tarjeta la mora se cobra sobre el capital del pago mínimo que no pagaste a tiempo, desde el día siguiente al límite de pago, y aparece en el siguiente extracto.</p>}
             {result.backdated && <BackdatedNotice impacted={result.impacted} />}
 
             <fieldset disabled={saving} className="contents">
@@ -68,7 +70,7 @@ export default function LatePolicyDialog({ debt, events, projection, today, save
             <LateNotices notices={result.notices} />
 
             {result.issue && <p role="alert" className="text-sm font-medium text-danger">{result.issue}</p>}
-            {result.draft && <Preview result={result} today={today} />}
+            {result.draft && <Preview result={result} today={today} isCard={isCard} />}
             {result.unchanged && <p className="text-[13px] text-ink-muted">Esta política ya está vigente: guardar no cambia la mora.</p>}
             {saveState.status === 'error' && <p role="alert" className="text-sm font-medium text-danger">{saveState.error}</p>}
           </div>

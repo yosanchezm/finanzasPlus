@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../appwrite';
 import DebtDetailContainer from './DebtDetailContainer';
-import { makeCard, makeEvent } from './debtFixtures';
+import { makeCard, makeEvent, makeMoraCard } from './debtFixtures';
 
 vi.mock('../../appwrite', () => ({ debtPort: vi.fn(), getTransactionsInRange: vi.fn(), findDebtEventByDedupe: vi.fn() }));
 
@@ -11,11 +11,12 @@ const port = { ensureCostCategory: vi.fn(), createEvent: vi.fn(), findEventByDed
 const TODAY = '2026-04-20';
 const forCard = (event) => ({ ...event, debtId: 'c1' });
 
-const setup = (events = []) => {
+const setup = (events = [], overrides = {}) => {
   const props = {
     debt: makeCard(), events, today: TODAY, currentOwnerScope: 'you', user: { $id: 'u1' },
     reconcileCosts: vi.fn().mockResolvedValue({ created: 0, updated: 0, removed: 0 }),
     reload: vi.fn().mockResolvedValue(), onRefresh: vi.fn(), onNotify: vi.fn(), onBack: vi.fn(), createNonce: vi.fn().mockReturnValue('n1'),
+    ...overrides,
   };
   const view = render(<DebtDetailContainer {...props} />);
   return { props, view, user: userEvent.setup() };
@@ -129,7 +130,7 @@ describe('DebtDetailContainer card charge change', () => {
   it('offers the charge change in the card menu, compares the minimum payment and writes a charge_change without a mode', async () => {
     const { user } = setup([forCard(makeEvent('p1', 'payment', '2026-04-20', 100000))]);
     await user.click(screen.getByRole('button', { name: 'Más acciones' }));
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora']);
     await user.click(screen.getByRole('menuitem', { name: 'Cambiar seguros y cargos' }));
     const fee = within(inDialog().getByRole('group', { name: 'Cuota de manejo' })).getByLabelText('Valor');
     await user.clear(fee);
@@ -147,5 +148,49 @@ describe('DebtDetailContainer card charge change', () => {
     const payload = JSON.parse(data.payloadJson);
     expect(payload).not.toHaveProperty('mode');
     expect(payload.charges.map((charge) => [charge.id, charge.value])).toEqual([['mgmt_fee', 12000], ['mgmt_iva', 19]]);
+  });
+});
+
+describe('DebtDetailContainer card mora', () => {
+  const TEN_DAYS_LATE = '2026-05-10';
+  const moraCard = (late, today = TEN_DAYS_LATE) => setup([], { debt: makeMoraCard({ late }), today });
+
+  it('configures the mora of a card from Más acciones: previews 861 and writes one late_policy, no cost row', async () => {
+    const { user } = moraCard(null);
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Configurar mora' }));
+    await user.selectOptions(inDialog().getByLabelText('Interés de mora'), 'usury');
+    fireEvent.change(inDialog().getByLabelText('Vigente desde'), { target: { value: '2026-04-30' } });
+
+    expect(inDialog().getByRole('row', { name: /Mora acumulada/ })).toHaveTextContent('$ 0$ 861');
+    await user.click(inDialog().getByRole('button', { name: 'Guardar mora' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ debtId: 'c1', kind: 'late_policy', effectiveOn: '2026-04-30', amountMinor: 0 });
+    expect(JSON.parse(data.payloadJson)).toEqual({ late: { mode: 'usury', graceDays: 0 } });
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('writes the mora the statement shows next to its balance', async () => {
+    const { user } = moraCard({ mode: 'usury', graceDays: 0 }, '2026-05-20');
+    await user.click(screen.getByRole('button', { name: 'Registrar extracto' }));
+    await fillIn(user, 'Saldo total del extracto', '1900000');
+    await fillIn(user, 'Mora del extracto (opcional)', '1300');
+    await user.click(inDialog().getByRole('button', { name: 'Registrar extracto' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ kind: 'adjustment', effectiveOn: '2026-05-15', amountMinor: 0 });
+    expect(JSON.parse(data.payloadJson)).toMatchObject({ balanceMinor: 1900000, lateInterestMinor: 1300 });
+  });
+
+  it('offers the stated mora field in the statement form', async () => {
+    const { user } = moraCard({ mode: 'usury', graceDays: 0 }, '2026-05-20');
+    await user.click(screen.getByRole('button', { name: 'Registrar extracto' }));
+
+    expect(inDialog().getByLabelText('Mora del extracto (opcional)')).toBeInTheDocument();
   });
 });

@@ -110,7 +110,7 @@ export function buildDebtDetail({ debt, events, asOf }) {
   const interestMinor = totals.interestPaid + totals.remainingInterest;
   const chargesMinor = totals.chargesPaid + totals.remainingCharges;
   const taxesMinor = totals.taxesPaid + totals.remainingTaxes;
-  const lateMinor = (totals.lateInterestPaid ?? 0) + (totals.remainingLateInterest ?? 0); // mora paid plus what has accrued and is still owed (a card has no remaining part yet)
+  const lateMinor = (totals.lateInterestPaid ?? 0) + (totals.remainingLateInterest ?? 0); // mora paid plus what has accrued and is still owed (a card's includes the mora billed and unpaid plus the part still accruing)
   return {
     projection,
     history,

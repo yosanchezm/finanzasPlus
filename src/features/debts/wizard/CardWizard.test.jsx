@@ -75,3 +75,23 @@ describe('DebtWizard card step', () => {
     expect(onSubmit.mock.calls[0][0].terms.charges.map((charge) => charge.id)).toEqual(['mgmt_fee']);
   });
 });
+
+describe('DebtWizard card mora', () => {
+  it('tells the user the card charges mora at the usury cap by default and where to change it', async () => {
+    const { user } = setup();
+    await toCardStep(user);
+
+    expect(screen.getByText('Si no pagas el mínimo a tiempo, cobramos mora al tope de usura. Puedes cambiarla después en «Más acciones».')).toBeInTheDocument();
+  });
+
+  it('saves the card with the usury mora in its terms', async () => {
+    const { user, onSubmit } = setup();
+    await toCardStep(user);
+    await fillIn(user, 'Día de corte', '15');
+    await fillIn(user, 'Día límite de pago', '30');
+    await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+});

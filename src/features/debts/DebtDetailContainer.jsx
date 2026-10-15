@@ -125,7 +125,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onOpenSettings={onOpenSettings} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} onLatePolicy={detail && !isCard ? () => latePolicy.open() : undefined} onRestructure={canRestructure ? () => restructure.open() : undefined} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onOpenSettings={onOpenSettings} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} onLatePolicy={detail ? () => latePolicy.open() : undefined} onRestructure={canRestructure ? () => restructure.open() : undefined} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}

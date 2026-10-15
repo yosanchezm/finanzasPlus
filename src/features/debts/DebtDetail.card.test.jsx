@@ -3,11 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import DebtDetail from './DebtDetail';
 import { buildDebtDetail } from './debtDetailModel';
-import { makeCard, makeEvent } from './debtFixtures';
+import { makeCard, makeEvent, makeMoraCard } from './debtFixtures';
 
 const pay = (id, on, amount) => makeEvent(id, 'payment', on, amount);
-const renderCard = (events, asOf, props = {}) => {
-  const debt = makeCard();
+const renderCard = (events, asOf, props = {}, debt = makeCard()) => {
   return render(<DebtDetail debt={debt} detail={buildDebtDetail({ debt, events: events.map((e) => ({ ...e, debtId: 'c1' })), asOf })} currentOwnerScope="you" onBack={vi.fn()} {...props} />);
 };
 
@@ -67,5 +66,33 @@ describe('DebtDetail for a credit card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Más acciones' }));
 
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora']);
+  });
+});
+
+describe('DebtDetail for a credit card with mora', () => {
+  const panel = () => screen.getByRole('region', { name: 'Tu tarjeta' });
+
+  it('shows the mora running on the unmet capital and when it will be billed', () => {
+    renderCard([], '2026-05-10', {}, makeMoraCard());
+
+    expect(within(panel()).getByText('Mora en curso: $ 861 (se cobra en el corte del 15 may)')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByText('Mora acumulada')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('con $ 861 de mora');
+  });
+
+  it('shows the mora billed in the last statement as its own line', () => {
+    renderCard([], '2026-05-20', {}, makeMoraCard());
+
+    expect(within(panel()).getByText('Último extracto, corte del 15 may')).toBeInTheDocument();
+    const mora = within(panel()).getByText('Mora');
+    expect(mora.nextSibling).toHaveTextContent('$ 1.292');
+    expect(within(panel()).queryByText(/Mora en curso/)).not.toBeInTheDocument();
+  });
+
+  it('shows no mora line for a card without mora, even when it is past due', () => {
+    renderCard([], '2026-05-20', {}, makeCard());
+
+    expect(within(panel()).queryByText('Mora')).not.toBeInTheDocument();
+    expect(within(panel()).queryByText(/Mora en curso/)).not.toBeInTheDocument();
   });
 });
