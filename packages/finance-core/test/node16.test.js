@@ -105,6 +105,8 @@ describe('finance-core sources', () => {
         'src/errors.js',
         'src/explain/copy.js',
         'src/explain/explain.js',
+        'src/explain/facts/allocation.js',
+        'src/explain/facts/mora.js',
         'src/explain/facts/rates.js',
         'src/explain/facts/usury.js',
         'src/explain/format.js',

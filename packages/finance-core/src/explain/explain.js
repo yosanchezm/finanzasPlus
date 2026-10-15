@@ -1,6 +1,8 @@
 import { debtKindOf, project } from '../ledger/project.js';
 import { legalOf } from '../legal.js';
 import { EXPLAIN_COPY, assertTopic, releasedTopics, topicCopyKeys } from './copy.js';
+import { allocationFacts } from './facts/allocation.js';
+import { moraFacts } from './facts/mora.js';
 import { ratesFacts } from './facts/rates.js';
 import { usuryFacts } from './facts/usury.js';
 import { TOPIC_KINDS } from './topics.js';
@@ -9,7 +11,7 @@ import { TOPIC_KINDS } from './topics.js';
 // the debt kind is "not_applicable", and a topic whose copy is not released is "under_review". Otherwise the topic's
 // builder adds the figures (`numbers`, and `text` with the same figures pre-formatted). A topic with no builder yet
 // (the card, restructure and prepayment topics of S2 and S3) keeps the generic answer.
-const BUILDERS = { rate_conventions: ratesFacts, usury_ibc: usuryFacts };
+const BUILDERS = { rate_conventions: ratesFacts, usury_ibc: usuryFacts, mora: moraFacts, payment_allocation: allocationFacts };
 
 const sameSource = (a, b) => a.label === b.label && a.url === b.url;
 const uniqueSources = (entries) =>
