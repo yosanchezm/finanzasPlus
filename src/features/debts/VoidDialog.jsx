@@ -16,8 +16,9 @@ const LABELS = {
   charge_change: { noun: 'cambio de cargos' },
   late_policy: { noun: 'política de mora', feminine: true },
   restructure: { noun: 'reestructuración', feminine: true },
+  terms_correction: { noun: 'corrección de datos', feminine: true },
 };
-const PLAN_CHANGES = ['rate_change', 'charge_change', 'late_policy', 'restructure'];
+const PLAN_CHANGES = ['rate_change', 'charge_change', 'late_policy', 'restructure', 'terms_correction'];
 
 function Blocked({ entry, onClose }) {
   const { noun } = LABELS[entry.kind];

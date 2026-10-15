@@ -3,10 +3,10 @@ import { summarizeEvent } from './eventSummary';
 
 // Payments, the card's statements and purchases, and the changes to rate, charges and late-interest policy can be voided
 // from the history. A restructure is voidable only through the guarded flow; a disbursement never is.
-const VOIDABLE = ['payment', 'extra_payment', 'charge', 'adjustment', 'rate_change', 'charge_change', 'late_policy'];
+const VOIDABLE = ['payment', 'extra_payment', 'charge', 'adjustment', 'rate_change', 'charge_change', 'late_policy', 'terms_correction'];
 const GUARDED = 'restructure';
 // A restructure cannot be voided once any of these sorts after it: they were computed on top of it.
-const BLOCKS_RESTRUCTURE_VOID = ['payment', 'extra_payment', 'rate_change', 'charge_change', 'late_policy', 'restructure'];
+const BLOCKS_RESTRUCTURE_VOID = ['payment', 'extra_payment', 'rate_change', 'charge_change', 'late_policy', 'restructure', 'terms_correction'];
 
 const VOID_MESSAGES = {
   payment: 'Pago anulado.',
@@ -17,13 +17,14 @@ const VOID_MESSAGES = {
   late_policy: 'Política de mora anulada.',
   adjustment: 'Extracto anulado.',
   charge: 'Compra anulada.',
+  terms_correction: 'Corrección anulada.',
 };
 
 /** Toast shown once a void of an event of this kind was saved. */
 export const voidSuccessMessage = (kind) => VOID_MESSAGES[kind] ?? 'Movimiento anulado.';
 
 /** Events whose save or void changes the cost of other events, so the cost rows are reconciled afterwards (AD16). */
-export const PLAN_CHANGE_KINDS = ['rate_change', 'charge_change', 'restructure', 'late_policy'];
+export const PLAN_CHANGE_KINDS = ['rate_change', 'charge_change', 'restructure', 'late_policy', 'terms_correction'];
 
 /**
  * Adds to a success toast what the reconcile after a plan change did. `after` is what `useCommitDialog` hands to the message:

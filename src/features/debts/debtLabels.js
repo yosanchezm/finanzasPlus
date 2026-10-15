@@ -1,3 +1,4 @@
+import { CONVENTIONS } from '@finance-core';
 import { Banknote, Car, CircleHelp, CreditCard, Handshake, HandCoins, House, Landmark, Users } from 'lucide-react';
 import { formatDate } from '../../shared/lib/format';
 
@@ -23,6 +24,16 @@ export const formatDecimal = (value) => percent.format(value);
 
 /** "28,32 % E.A." or "Sin intereses". */
 export const formatEa = (eaPercent) => (eaPercent > 0 ? `${formatDecimal(eaPercent)} % E.A.` : 'Sin intereses');
+
+const CONVENTION_NAMES = [['EA', 'E.A.'], ['NAMV', 'N.M.V.'], ['MV', 'M.V.'], ['NATV', 'N.T.V.'], ['NATA', 'N.T.A.'], ['NAMA', 'N.M.A.']];
+const PERIOD_WORDS = { weekly: 'semanal', biweekly: 'cada 14 días', monthly: 'mensual', bimonthly: 'bimestral', quarterly: 'trimestral', semiannual: 'semestral', annual: 'anual' };
+
+/** "25,2 % N.M.V." or "28,32 % E.A.": a rate as the lender states it, with its convention (a custom one is spelled out). */
+export function formatStatedRate(rate) {
+  const named = CONVENTION_NAMES.find(([name]) => ['basis', 'periodicity', 'timing'].every((key) => CONVENTIONS[name][key] === rate[key]));
+  if (named) return `${formatDecimal(rate.value)} % ${named[1]}`;
+  return `${formatDecimal(rate.value)} % ${rate.basis === 'nominal' ? 'nominal' : 'efectiva'} ${PERIOD_WORDS[rate.periodicity]}${rate.timing === 'advance' ? ' anticipada' : ''}`;
+}
 
 /** Short date ("5 nov") of a stored YYYY-MM-DD, free of time-zone drift. */
 export const formatDueDate = (isoDate) => formatDate(`${isoDate}T12:00:00`);

@@ -100,6 +100,12 @@ describe('voidRuleOf', () => {
     expect(voidRuleOf(restructure, [sameDayBefore, restructure, sameDayAfter]).voidBlocked.events.map((entry) => entry.id)).toEqual(['p2']);
     expect(voidRuleOf(restructure, [sameDayBefore, restructure]).voidBlocked).toBeNull();
   });
+
+  it('lets a terms correction be voided at any time, even when later events exist', () => {
+    const correction = at('tc', 'terms_correction', '2026-03-01');
+    expect(voidRuleOf(correction, [correction])).toEqual(FREE);
+    expect(voidRuleOf(correction, [correction, at('later', 'payment', '2026-04-01'), at('rc', 'rate_change', '2026-05-01')])).toEqual(FREE);
+  });
 });
 
 describe('voidSuccessMessage', () => {
@@ -112,6 +118,7 @@ describe('voidSuccessMessage', () => {
     expect(voidSuccessMessage('late_policy')).toBe('Política de mora anulada.');
     expect(voidSuccessMessage('adjustment')).toBe('Extracto anulado.');
     expect(voidSuccessMessage('charge')).toBe('Compra anulada.');
+    expect(voidSuccessMessage('terms_correction')).toBe('Corrección anulada.');
     expect(voidSuccessMessage('whatever')).toBe('Movimiento anulado.');
   });
 });
@@ -164,6 +171,34 @@ describe('buildDebtDetail: plan-change history', () => {
 });
 
 
+describe('buildDebtDetail: terms corrections (WM2, DL4)', () => {
+  const NAMV = { value: 25.2, basis: 'nominal', periodicity: 'monthly', timing: 'arrears' };
+  const EA = (value) => ({ value, basis: 'effective', periodicity: 'annual', timing: 'arrears' });
+  const fix = makeEvent('tc1', 'terms_correction', '2026-06-01', 0, { fields: { rate: NAMV }, previous: { rate: EA(24) }, appliesTo: 'opening' });
+  const newTerms = { kind: 'consumer', principalMinor: 900000, openedOn: '2026-03-01', system: 'french', periodicity: 'monthly', n: 24, firstDueOn: '2026-04-05', rate: EA(24) };
+
+  it('is voidable, summarized with both values and applied to the projection', () => {
+    const { history, projection } = buildDebtDetail({ debt: makeDebt(), events: [disbursement, fix], asOf: '2026-06-10' });
+    expect(history[0]).toMatchObject({ id: 'tc1', kind: 'terms_correction', summary: 'Corrección: tasa 24 % E.A. → 25,2 % N.M.V.', canVoid: true, guardedVoid: false, voidBlocked: null, amountMinor: 0 });
+    expect(projection.terms.rate).toEqual(NAMV);
+    expect(projection.corrections).toEqual([{ eventId: 'tc1', appliesTo: 'opening' }]);
+  });
+
+  it('returns the projection to the one before the correction once it is voided, and keeps it in the history as voided', () => {
+    const before = buildDebtDetail({ debt: makeDebt(), events: [disbursement], asOf: '2026-06-10' });
+    const voided = buildDebtDetail({ debt: makeDebt(), events: [disbursement, fix, makeEvent('v1', 'void', '2026-06-02', 0, { targetEventId: 'tc1', reason: 'x' })], asOf: '2026-06-10' });
+    expect(voided.projection).toEqual(before.projection);
+    expect(voided.history[0]).toMatchObject({ id: 'tc1', voided: true, canVoid: false });
+  });
+
+  it('blocks voiding a restructure while a correction recorded after it is active', () => {
+    const restructure = makeEvent('rs1', 'restructure', '2026-03-01', 0, { terms: newTerms });
+    const bound = makeEvent('tc2', 'terms_correction', '2026-06-01', 0, { fields: { rate: NAMV }, previous: { rate: EA(24) }, appliesTo: 'rs1' });
+    const { history } = buildDebtDetail({ debt: makeDebt(), events: [disbursement, restructure, bound], asOf: '2026-06-10' });
+    expect(history.find((item) => item.id === 'rs1').voidBlocked).toEqual({ code: 'later_events', events: [{ id: 'tc2', kind: 'terms_correction', effectiveOn: '2026-06-01' }] });
+  });
+});
+
 describe('withReconcileNote', () => {
   it('adds the number of cost rows the reconcile changed, singular and plural', () => {
     expect(withReconcileNote('Cambio de tasa registrado.', { value: { created: 0, updated: 2, removed: 0 } })).toBe('Cambio de tasa registrado. Se actualizaron 2 filas de Costos financieros.');
@@ -184,7 +219,7 @@ describe('withReconcileNote', () => {
 
 describe('PLAN_CHANGE_KINDS', () => {
   it('names the events whose save or void moves the cost of other events', () => {
-    expect(PLAN_CHANGE_KINDS).toEqual(['rate_change', 'charge_change', 'restructure', 'late_policy']);
+    expect(PLAN_CHANGE_KINDS).toEqual(['rate_change', 'charge_change', 'restructure', 'late_policy', 'terms_correction']);
     expect(PLAN_CHANGE_KINDS).not.toContain('payment');
   });
 });

@@ -1,6 +1,7 @@
 import { toEffectiveAnnual } from '@finance-core';
 import { formatMoney } from '../../shared/lib/format';
 import { formatDecimal, formatDueDate } from './debtLabels';
+import { describeCorrection } from './termsCorrectionModel';
 
 // One-line summaries of the plan-change events for the history, so they do not show up as "$ 0".
 
@@ -47,7 +48,17 @@ function lateSummary(event) {
   return `Mora: ${policy} desde ${formatDueDate(event.effectiveOn)}${grace}`;
 }
 
-const SUMMARIES = { rate_change: rateSummary, charge_change: chargesSummary, restructure: restructureSummary, late_policy: lateSummary };
+// "Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %": each corrected field with the value it replaced (only the new one when unknown).
+function correctionSummary(event) {
+  const { fields, previous = {} } = event.payload;
+  const parts = describeCorrection(fields, previous).map(({ label, before, after }) => {
+    const name = `${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+    return before === null ? `${name} ${after}` : `${name} ${before} → ${after}`;
+  });
+  return `Corrección: ${parts.join(' · ')}`;
+}
+
+const SUMMARIES = { rate_change: rateSummary, charge_change: chargesSummary, restructure: restructureSummary, late_policy: lateSummary, terms_correction: correctionSummary };
 
 /**
  * One-line summary of a plan-change event, or null for the kinds that carry an amount.
@@ -68,6 +79,7 @@ const BLOCKER_LABELS = {
   charge_change: 'el cambio de cargos',
   late_policy: 'la política de mora',
   restructure: 'la reestructuración',
+  terms_correction: 'la corrección de datos',
 };
 
 /** "el pago del 5 nov y el cambio de tasa del 1 dic": the events that block a guarded void. */

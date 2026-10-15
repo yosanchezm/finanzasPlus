@@ -75,6 +75,28 @@ describe('summarizeEvent: other kinds', () => {
   });
 });
 
+describe('summarizeEvent: terms_correction', () => {
+  const correction = (fields, previous) => event('terms_correction', '2026-06-01', { fields, previous, appliesTo: 'opening' });
+
+  it('lists each changed field with its old and new value, never an amount of 0', () => {
+    const fixed = correction({ card: { statementDay: 20, minPayment: { pct: 3 } } }, { card: { statementDay: 15, minPayment: { pct: 5 } } });
+    expect(summarizeEvent(fixed)).toBe('Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %');
+    expect(summarizeEvent(fixed)).not.toMatch(/[$] ?0/);
+  });
+
+  it('shows the rate with the convention the bank states it, the modality and the floor', () => {
+    const fixed = correction(
+      { rate: { value: 25.2, basis: 'nominal', periodicity: 'monthly', timing: 'arrears' }, modality: 'mortgage', card: { minPayment: { floorMinor: 10000 } } },
+      { rate: EA(28.32), modality: 'consumer', card: { minPayment: { floorMinor: 20000 } } },
+    );
+    expect(summarizeEvent(fixed)).toBe('Corrección: tasa 28,32 % E.A. → 25,2 % N.M.V. · modalidad Consumo → Hipotecario · piso del pago mínimo $ 20.000 → $ 10.000');
+  });
+
+  it('shows only the new value when the previous one was not recorded', () => {
+    expect(summarizeEvent(correction({ card: { dueDay: 25 } }, {}))).toBe('Corrección: día de pago 25');
+  });
+});
+
 describe('describeBlockers', () => {
   it('names each blocking event with its date, joined in prose', () => {
     expect(describeBlockers([{ id: 'p', kind: 'payment', effectiveOn: '2026-11-05' }])).toBe('el pago del 5 nov');
@@ -88,5 +110,9 @@ describe('describeBlockers', () => {
       { id: 'c', kind: 'late_policy', effectiveOn: '2026-12-01' },
       { id: 'd', kind: 'restructure', effectiveOn: '2026-12-10' },
     ])).toBe('el abono extra del 5 nov, el cambio de cargos del 20 nov, la política de mora del 1 dic y la reestructuración del 10 dic');
+  });
+
+  it('names a correction that blocks a restructure void', () => {
+    expect(describeBlockers([{ id: 'c', kind: 'terms_correction', effectiveOn: '2026-06-01' }])).toBe('la corrección de datos del 1 jun');
   });
 });

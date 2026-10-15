@@ -53,6 +53,22 @@ describe('VoidDialog: payments and plan changes', () => {
     }
   });
 
+  it('asks for confirmation before voiding a terms correction and shows both of its values', async () => {
+    const { user, onConfirm } = setup({
+      kind: 'terms_correction', effectiveOn: '2026-06-01', amountMinor: 0, costMinor: 0,
+      summary: 'Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %',
+    });
+    const dialog = screen.getByRole('alertdialog');
+
+    expect(within(dialog).getByText('¿Anular esta corrección de datos?')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %');
+    expect(dialog).toHaveTextContent('El saldo y el plan vuelven a como estaban antes');
+    expect(dialog).not.toHaveTextContent('$ 0');
+    expect(onConfirm).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Anular corrección de datos' }));
+    expect(onConfirm).toHaveBeenCalledWith('Anulado desde la web');
+  });
+
   it('shows a failed save with a retry and disables the actions while saving', () => {
     const { unmount } = render(<VoidDialog entry={entry()} saveState={{ status: 'error', error: 'Servidor no disponible', locked: false }} onConfirm={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Servidor no disponible');

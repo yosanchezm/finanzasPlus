@@ -32,6 +32,22 @@ describe('EventHistory', () => {
     expect(screen.queryByText(/Costo financiero/)).not.toBeInTheDocument();
   });
 
+  it('shows a terms correction with both values instead of an amount, and offers to void it', async () => {
+    const onVoid = vi.fn();
+    const correction = entry({
+      id: 'tc1', kind: 'terms_correction', effectiveOn: '2026-06-01', amountMinor: 0, costMinor: 0,
+      summary: 'Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %',
+    });
+    render(<EventHistory history={[correction]} onVoid={onVoid} />);
+
+    const item = screen.getByRole('listitem');
+    expect(within(item).getByText('Corrección de datos')).toBeInTheDocument();
+    expect(within(item).getByText('Corrección: día de corte 15 → 20 · pago mínimo 5 % → 3 %')).toBeInTheDocument();
+    expect(within(item).queryByText('$ 0')).not.toBeInTheDocument();
+    await userEvent.click(within(item).getByRole('button', { name: 'Anular corrección de datos del 1 jun' }));
+    expect(onVoid).toHaveBeenCalledWith(correction);
+  });
+
   it('shows the summary of a plan change instead of an amount of $ 0, and still offers to void it', async () => {
     const onVoid = vi.fn();
     const change = entry({

@@ -244,6 +244,7 @@ describe('public barrel (index.js)', () => {
         'usuryNotice',
         'validateEvent',
         'validateTerms',
+        'versionTermsAt',
       ].sort(),
     );
   });

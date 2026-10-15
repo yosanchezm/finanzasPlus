@@ -42,7 +42,7 @@ export { buildSchedule, summarizeSchedule } from './src/schedule/index.js';
 export { EVENT_KINDS, activeEvents, sortEvents, validateEvent } from './src/ledger/events.js';
 export { allocate } from './src/ledger/allocate.js';
 export { cycleDates, minimumPayment } from './src/card/card.js';
-export { buildCorrection } from './src/ledger/correction.js';
+export { buildCorrection, versionTermsAt } from './src/ledger/correction.js';
 export { project, registerProjector } from './src/ledger/project.js';
 export { buildCostRow, commitPlan, planCommit } from './src/ledger/commit.js';
 export { rateInForce } from './src/ledger/rateInForce.js';

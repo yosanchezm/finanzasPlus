@@ -14,6 +14,7 @@ const KIND_LABELS = {
   adjustment: 'Extracto',
   charge: 'Compra',
   late_policy: 'Política de mora',
+  terms_correction: 'Corrección de datos',
 };
 const STRATEGY_LABELS = { reduce_term: 'reducir plazo', reduce_installment: 'reducir cuota', advance_installments: 'adelantar cuotas' };
 
