@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveLegal, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
@@ -13,7 +14,13 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const debtRow = (terms = loanTerms, extra = {}) => ({ $id: 'd1', householdId: 'h1', name: 'Crédito Vehículo', kind: terms.kind, ownerScope: 'shared', status: 'active', lender: '', termsJson: serializeTerms(terms), ...extra });
 const event = (id, kind, effectiveOn, amountMinor, payload = {}) => ({ $id: id, debtId: 'd1', householdId: 'h1', kind, effectiveOn, amountMinor, payloadJson: JSON.stringify(payload), actorId: 'telegram:1', source: 'telegram', dedupeKey: `seed:${id}`, $createdAt: `${effectiveOn}T12:00:00.000Z` });
 const disbursement = event('e0', 'disbursement', '2026-09-10', 10000000);
-const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: EA(28), card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+// The card golden of the core (card.late.test.js): statement on the 20th, due on the 10th of the next month. The first minimum is 146,102,
+// 21,102 of it interest, fees and taxes, so 125,000 of capital stays unmet when nothing is paid; 10 days at the 28.59% cap are 861.
+const fixture = JSON.parse(readFileSync(new URL('../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+const cardTerms = { ...fixture.terms, card: { ...fixture.terms.card, statementDay: 20, dueDay: 10 } };
+const cap = { modality: 'consumer', validFrom: '2026-01-01', validTo: '2026-12-31', capEA: 28.59, source: 'test', verified: true };
+const cardRow = (terms = cardTerms) => debtRow(terms, { kind: 'card', name: 'Visa', legal: resolveLegal([], { usuryTable: [cap] }) });
+const CARD_TODAY = '2026-05-20'; // the statement close that bills the mora of the first minimum
 
 const run = ({ debt = debtRow(), events = [disbursement], today = TODAY, effectiveOn = TODAY, late = { mode: 'usury', graceDays: 0 } } = {}) => previewLatePolicy({ debt, events, today, draft: { effectiveOn, late } });
 const textOf = (result) => {
@@ -122,14 +129,56 @@ describe('previewLatePolicy', () => {
     expect(textOf(run({ events: [disbursement, payment] }))).not.toContain(BACKDATED_NOTE);
   });
 
-  it('refuses a card (its mora is configured elsewhere) and an unreadable debt, writing nothing', () => {
-    const card = run({ debt: debtRow(cardTerms, { kind: 'card' }) });
+  it('refuses an unreadable debt, writing nothing', () => {
     const broken = run({ debt: debtRow(loanTerms, { termsJson: '{' }) });
 
-    expect(card.ok).toBe(false);
-    expect(card.issue).toContain('tarjetas');
     expect(broken).toMatchObject({ ok: false });
     expect(broken.issue).toContain('No pude leer');
+  });
+
+  describe('a card', () => {
+    const runCard = (extra = {}) => run({ debt: cardRow(), events: [], today: CARD_TODAY, effectiveOn: '2026-05-10', ...extra });
+
+    it('golden: 125,000 of unmet capital for 10 days at the 28.59% cap is 861 of mora, billed at the next statement', () => {
+      const result = runCard();
+      const text = textOf(result);
+
+      expect(text).toContain('Mora de Visa');
+      expect(text).toContain('Modo: tasa de usura (el tope legal vigente)');
+      expect(text).toContain('Desde: 2026-05-10');
+      expect(text).toContain('Tope de usura vigente: 28.59% E.A.');
+      expect(text).toContain('Tasa de mora: 28.59% E.A.');
+      expect(text).toContain(`Mora acumulada al ${CARD_TODAY}: ${pesos(0)} → ${pesos(861)}`);
+      expect(text).toContain('se cobra en el próximo extracto');
+      expect(text).toContain('La mora no es retroactiva');
+      expect(text).toContain('¿Quieres registrar la mora así? Aún no se guarda.');
+      expect(result.draft).toEqual({ effectiveOn: '2026-05-10', late: { mode: 'usury', graceDays: 0 } });
+    });
+
+    it('does not say the mora is billed at the next statement for a loan', () => {
+      expect(textOf(run())).not.toContain('próximo extracto');
+    });
+
+    it('echoes the cap when a fixed rate is above it, and accrues nothing when it takes effect today', () => {
+      const text = textOf(runCard({ effectiveOn: CARD_TODAY, late: { mode: 'fixed', graceDays: 0, rate: EA(40) } }));
+
+      expect(text).toContain('Pediste 40% E.A., pero el tope de usura es 28.59% E.A.: se aplicará 28.59% E.A.');
+      expect(text).toContain(`Mora acumulada al ${CARD_TODAY}: ${pesos(0)} → ${pesos(0)}`);
+    });
+
+    it('notes that the policy is already in force', () => {
+      const debt = cardRow({ ...cardTerms, late: { mode: 'usury', graceDays: 0 } });
+
+      expect(textOf(runCard({ debt }))).toContain('Esta política ya está vigente');
+    });
+
+    it('turns the mora off and keeps what accrued', () => {
+      const debt = cardRow({ ...cardTerms, late: { mode: 'usury', graceDays: 0 } });
+      const text = textOf(runCard({ debt, effectiveOn: '2026-05-15', late: { mode: 'none', graceDays: 0 } }));
+
+      expect(text).toContain('Modo: sin mora');
+      expect(text).toContain(`Mora acumulada al ${CARD_TODAY}: ${pesos(861)} → ${pesos(431)}`);
+    });
   });
 });
 
@@ -140,5 +189,14 @@ describe('describeLatePolicy', () => {
 
     expect(text).toContain('✅ Listo: registré la mora de Crédito Vehículo: tasa de usura (el tope legal vigente) desde 2026-10-10');
     expect(text).toContain(`Mora acumulada al 2026-10-20: ${pesos(1375)}`);
+  });
+
+  it('says for a card that the mora is billed at the next statement', () => {
+    const preview = run({ debt: cardRow(), events: [], today: CARD_TODAY, effectiveOn: '2026-05-10' });
+    const text = describeLatePolicy({ debt: cardRow(), draft: preview.draft, figures: preview.figures, today: CARD_TODAY });
+
+    expect(text).toContain('registré la mora de Visa');
+    expect(text).toContain(`Mora acumulada al ${CARD_TODAY}: ${pesos(861)}`);
+    expect(text).toContain('próximo extracto');
   });
 });

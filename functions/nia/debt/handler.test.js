@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
@@ -1612,8 +1613,16 @@ describe('late_policy (F2)', () => {
   const lateAnswer = (late = {}, extra = {}) => ({ action: 'late_policy', debtRef: 'vehiculo', late: { mode: 'usury', ...late }, ...extra });
   const lateEvents = (w) => w.tables.debt_events.filter((event) => event.kind === 'late_policy');
   const money = (value) => plain(pesos(value));
-  const cardTerms = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+  // The card golden of the core, five months later: statement on the 20th, due on the 10th. The first minimum (due 2026-10-10) is 146,102,
+  // 21,102 of it interest, fees and taxes, so 125,000 of capital is unmet; ten days of it at the 28.59% cap are 861 of mora.
+  const fixture = JSON.parse(readFileSync(new URL('../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+  const cardTerms = { ...fixture.terms, openedOn: '2026-09-01', card: { ...fixture.terms.card, statementDay: 20, dueDay: 10 } };
   const cardRow = () => debtRow('c1', 'Visa', { kind: 'card', termsJson: serializeTerms(cardTerms) });
+  const cardWorld = (late = {}) => {
+    const w = tenDaysLate(world({ debts: [cardRow()], answers: [lateAnswer({ effectiveOn: '2026-10-10', ...late }, { debtRef: 'visa' })] }));
+    w.tables.debt_events = [];
+    return w;
+  };
   // Ten days after the first installment (due 2026-10-10): 199,505 of principal overdue at the 28.59% cap is 1,375 of mora.
   const tenDaysLate = (w) => { w.deps.now = () => new Date('2026-10-20T15:00:00Z'); return w; };
 
@@ -1786,15 +1795,40 @@ describe('late_policy (F2)', () => {
     expect(lateEvents(w)).toHaveLength(0);
   });
 
-  it('refuses a card politely and keeps no pending', async () => {
-    const w = world({ debts: [cardRow()], answers: [lateAnswer({}, { debtRef: 'visa' })] });
-    w.tables.debt_events = [];
-    await handleDebt(w.deps, ctx());
+  describe('a card', () => {
+    it('previews the mode, the date, the cap and the 861 of mora billed at the next statement, and writes nothing until confirmed', async () => {
+      const w = cardWorld();
+      const pending = await previewed(w);
 
-    expect(w.sent[0].text).toContain('tarjetas');
-    expect(w.sent[0].keyboard).toBeUndefined();
-    expect(w.sessions[0].pending).toBeNull();
-    expect(lateEvents(w)).toHaveLength(0);
+      expect(w.sent).toHaveLength(1);
+      expect(w.sent[0].text).toContain('Mora de Visa');
+      expect(w.sent[0].text).toContain('Modo: tasa de usura');
+      expect(w.sent[0].text).toContain('Desde: 2026-10-10');
+      expect(w.sent[0].text).toContain('Tope de usura vigente: 28.59% E.A.');
+      expect(w.sent[0].text).toContain(`Mora acumulada al 2026-10-20: ${money(0)} → ${money(861)}`);
+      expect(w.sent[0].text).toContain('próximo extracto');
+      expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+      expect(w.sessions[0].status).toBe('awaiting_confirmation');
+      expect(pending).toMatchObject({ kind: 'debt', id: 'p1', action: 'late_policy', awaiting: 'confirm', debtId: 'c1', draft: { effectiveOn: '2026-10-10', late: { mode: 'usury', graceDays: 0 } } });
+      expect(lateEvents(w)).toHaveLength(0);
+    });
+
+    it('Confirm writes exactly one late_policy event and reports the mora; a repeated Confirm says it was already recorded', async () => {
+      const w = cardWorld();
+      const pending = await previewed(w);
+      await confirmDebt(w.deps, ctx(), pending);
+      await confirmDebt(w.deps, ctx(), pending); // Telegram retry that read the session before the done marker
+      await confirmDebt(w.deps, ctx(), w.lastPending()); // a tap after the first one finished
+
+      expect(lateEvents(w)).toHaveLength(1);
+      expect(lateEvents(w)[0]).toMatchObject({ $id: 'dep1', dedupeKey: 'debt:p1', debtId: 'c1', effectiveOn: '2026-10-10', amountMinor: 0, source: 'telegram', actorId: ACTOR });
+      expect(JSON.parse(lateEvents(w)[0].payloadJson)).toEqual({ late: { mode: 'usury', graceDays: 0 } });
+      expect(costRows(w)).toHaveLength(0);
+      expect(w.sent[1].text).toContain('registré la mora de Visa');
+      expect(w.sent[1].text).toContain(`Mora acumulada al 2026-10-20: ${money(861)}`);
+      expect(w.sent.slice(1).map((call) => /ya estaba registrad/.test(call.text))).toEqual([false, true, true]);
+      expect(w.sent[2].text).toContain('Esta mora ya estaba registrada');
+    });
   });
 
   it('asks which debt first when several match, then previews the chosen one', async () => {

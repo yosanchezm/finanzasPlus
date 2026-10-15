@@ -3,14 +3,14 @@ import { pesos } from './format.js';
 import { BACKDATED_NOTE } from './planChange.js';
 import { describeCoreError } from './preview.js';
 
-// Mora action of Nia (NI4, NI6): `late_policy` sets the late-interest policy of a loan from an effective date. The model only
+// Mora action of Nia (NI4, NI6): `late_policy` sets the late-interest policy of a loan or a card from an effective date. The model only
 // extracts the mode, the rate or multiple, the grace days and the date; every figure comes from the core's `previewChange`
 // (the replay the web "Configurar mora" dialog uses) and the cap from `lateEAOn`, so the preview equals the projection once the
 // event is saved. Nothing here writes. Pure and Node 16 safe.
 
-export const CARD_LATE = 'La mora de las tarjetas todavía no se puede configurar desde aquí. Por ahora está disponible para préstamos.';
 export const NOT_RETROACTIVE_NOTE = 'La mora no es retroactiva: se cobra desde el día siguiente a la fecha de vigencia, no por los días anteriores.';
 const ALREADY_IN_FORCE = 'ℹ️ Esta política ya está vigente: registrarla no cambia la mora.';
+const CARD_BILLING_NOTE = 'La mora de una tarjeta se calcula sobre el capital del pago mínimo sin cubrir y se cobra en el próximo extracto.';
 const MORTGAGE_NOTE = 'ℹ️ Reglas de la Ley 546 no aplicadas: la mora de una hipoteca puede tener reglas propias, así que lo que ves es informativo.';
 const NEW_CAP_HINT = 'Puedes registrar el nuevo tope diciéndome, por ejemplo: “la usura de noviembre es 28.2”.';
 
@@ -66,14 +66,14 @@ const sameLate = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /**
  * Preview of a mora policy: the mode, the effective date, the cap in force, the rate that will apply (the capped one when the
  * request is above the cap), the mora accrued as of today before and after, the legal notices and the note that mora is not
- * retroactive. A card is refused (its mora is not configurable from Nia yet). Read-only.
+ * retroactive. For a card the mora is the one of the card projection (unmet capital of the minimum payment, billed at the next statement),
+ * and the preview says so. Read-only.
  * @param {{ debt: object, events: object[], today: string, draft: { effectiveOn: string, late: object } }} input `debt` is a `debts` row decorated with `legal`.
  * @returns {{ ok: true, draft: { effectiveOn: string, late: object }, figures: ReturnType<typeof previewChange>, text: string } | { ok: false, issue: string }}
  */
 export function previewLatePolicy({ debt, events, today, draft }) {
   try {
     const projection = project(debt, events, today);
-    if (projection.card) return { ok: false, issue: CARD_LATE };
     const late = normalizeLate(draft.late);
     const written = { effectiveOn: draft.effectiveOn, late };
     const figures = previewChange(debt, events, { kind: 'late_policy', ...written }, { on: today });
@@ -90,6 +90,7 @@ export function previewLatePolicy({ debt, events, today, draft }) {
       lines.push(...noticeLines(lateNotices, { cap: rate.cap, ea: rate.ea, late }));
     }
     lines.push(`ℹ️ ${NOT_RETROACTIVE_NOTE}`);
+    if (projection.card) lines.push(`ℹ️ ${CARD_BILLING_NOTE}`);
     if (sameLate(normalizeLate(terms.late), late)) lines.push(ALREADY_IN_FORCE);
     if (figures.impacted.length > 0) lines.push(`ℹ️ ${BACKDATED_NOTE}`);
     lines.push('', '¿Quieres registrar la mora así? Aún no se guarda.');
@@ -109,6 +110,7 @@ export function describeLatePolicy({ debt, draft, figures, today }) {
   const lines = [`✅ Listo: registré la mora de ${debt.name}: ${lateLabel(draft.late)} desde ${draft.effectiveOn}.`];
   lines.push(`Mora acumulada al ${laterOf(today, draft.effectiveOn)}: ${pesos(figures.after.lateInterestMinor)}`);
   lines.push(NOT_RETROACTIVE_NOTE);
+  if (debt.kind === 'card') lines.push('La mora de la tarjeta se cobra en el próximo extracto.');
   if (figures.impacted.length > 0) lines.push(BACKDATED_NOTE);
   return lines.join('\n');
 }

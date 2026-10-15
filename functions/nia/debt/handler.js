@@ -4,7 +4,7 @@ import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
-import { CARD_LATE, describeLatePolicy, previewLatePolicy } from './late.js';
+import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
 import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
@@ -269,9 +269,8 @@ async function startRestructure(deps, ctx, request, debts) {
 }
 
 // A mora policy (NI4): the debt first, then the convention of a fixed rate when it is missing, then the core preview. The pending keeps the
-// policy the user chose (mode, rate or multiple, grace days, date); Confirm rebuilds the figures from the live debt. Cards are refused (F3).
+// policy the user chose (mode, rate or multiple, grace days, date); Confirm rebuilds the figures from the live debt. A card takes it too (its core projector bills the mora at the next statement).
 async function continueLate(deps, ctx, id, debt, draft) {
-  if (debt.kind === 'card') return inform(deps, ctx, CARD_LATE);
   if (draft.rateValue !== undefined) {
     const pending = buildPending({ id, action: 'late_policy', awaiting: 'convention', debtId: debt.$id, draft });
     return say(deps, ctx, { text: conventionQuestion(draft.rateValue), keyboard: conventionKeyboard(), status: STATUS.convention, pending });
@@ -565,7 +564,6 @@ async function commitLatePolicy(deps, ctx, pending) {
   if (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))) return { duplicate: true };
   const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
   if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
-  if (debt.kind === 'card') return { text: CARD_LATE, failed: true };
   const events = await loadEvents(deps, debt.$id);
   const draft = { kind: 'late_policy', ...pending.draft };
   const plan = planCommit(debt, events, draft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
