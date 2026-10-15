@@ -86,17 +86,19 @@ function generatedPackageJson() {
  * @param {string} [options.outDir] bundle directory (default `dist-nia`)
  * @param {string} [options.tarPath] archive path (default `functions/nia.tar.gz`)
  * @param {string} [options.entry] bundle entry (default `functions/nia/index.js`)
+ * @param {object} [options.copy] explain copy to gate (default: the shipped `EXPLAIN_COPY`; injected by tests)
  * @returns {Promise<{outDir: string, tarPath: string}>}
  */
 export async function packageNia({
   outDir = 'dist-nia',
   tarPath = 'functions/nia.tar.gz',
   entry = 'functions/nia/index.js',
+  copy,
 } = {}) {
   const bundleDir = fromRoot(outDir);
   const archivePath = fromRoot(tarPath);
 
-  const copyCheck = checkExplainCopy();
+  const copyCheck = checkExplainCopy(copy === undefined ? {} : { copy });
   if (!copyCheck.ok) throw new Error(copyCheck.lines.join('\n'));
   if (copyCheck.override) console.warn(copyCheck.lines.join('\n'));
   const sourceOffenders = scanSourceDirs();

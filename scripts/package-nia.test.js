@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { scanForbiddenApis, scanSourceDirs } from './package-nia.mjs';
+import { packageNia, scanForbiddenApis, scanSourceDirs } from './package-nia.mjs';
 
 const root = process.cwd();
 const script = resolve(root, 'scripts/package-nia.mjs');
@@ -52,8 +52,17 @@ const importSpecifiers = (source) => {
   return [...found];
 };
 
-// The shipped explain copy is not reviewed yet (gate G), so packaging needs the explicit override; the gate itself is tested in check-explain-copy.test.mjs.
-const run = (args) => execFileSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NIA_ALLOW_UNREVIEWED: '1' } });
+// The shipped explain copy is reviewed (gate G.2), so packaging runs without the override.
+const run = (args) => execFileSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+
+describe('packageNia copy gate', () => {
+  it('refuses to package unreviewed explain copy and writes no archive', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'package-gate-'));
+    const tarPath = join(dir, 'nia.tar.gz');
+    await expect(packageNia({ outDir: join(dir, 'dist'), tarPath, copy: {} })).rejects.toThrow(/Explain copy check FAILED/);
+    expect(existsSync(tarPath)).toBe(false);
+  });
+});
 
 describe('scanForbiddenApis', () => {
   it('reports each Node 16 incompatible API found in the source', () => {
