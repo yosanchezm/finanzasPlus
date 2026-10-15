@@ -1,6 +1,7 @@
 import { compareIso } from '../calendar.js';
 import { toEffectiveAnnual } from '../rates.js';
 import { addCharges, buildSchedule } from '../schedule/index.js';
+import { applyCorrection } from './correction.js';
 import { balanceAt, newRow, payBalanceOnly, payRows, rowDue, rowOutstanding } from './rows.js';
 
 // Events that rewrite the plan (extra payments, rate and charge changes,
@@ -152,7 +153,9 @@ export function carryOf(state, date) {
  */
 export function applyRestructure(state, event) {
   const date = event.effectiveOn;
-  const { terms: next, waiveLate = false } = event.payload;
+  const { terms: opened, waiveLate = false } = event.payload;
+  // Corrections bound to this restructure (G9), already validated against its terms, give the terms it started with.
+  const next = (event.corrections ?? []).reduce((current, fields) => applyCorrection(current, fields), opened);
   const terms = next.late === undefined && state.work.late !== undefined ? { ...next, late: state.work.late } : next;
   const carry = carryOf(state, date);
   const waived = waiveLate ? carry.waivableLateMinor : 0;

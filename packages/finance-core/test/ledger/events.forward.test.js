@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../../src/errors.js';
 import { planCommit } from '../../src/ledger/commit.js';
 import { activeEvents, sortEvents, validateEvent } from '../../src/ledger/events.js';
@@ -140,5 +140,61 @@ describe('writes stay strict', () => {
     const draft = { kind: 'void', effectiveOn: '2026-03-05', amountMinor: 0, payload: { targetEventId: 'lp1' } };
     const ctx = { eventId: 'ev2', dedupeKey: 'web:n2', actorId: 'u1', source: 'web' };
     expect(() => planCommit(debt(), [futureAt('2026-03-01')], draft, ctx)).toThrow(ValidationError);
+  });
+});
+
+// DL5: the web and Nia are released together, so no stale bundle should read uncorrected terms. A bundle from before
+// S4 reads the correction as an event of an unknown kind. The doMock below makes the reader of this build do the same.
+describe('a bundle that does not know terms_correction', () => {
+  afterEach(() => {
+    vi.doUnmock('../../src/ledger/events.js');
+    vi.resetModules();
+  });
+
+  async function oldBundleProject() {
+    vi.resetModules();
+    vi.doMock('../../src/ledger/events.js', async (importOriginal) => {
+      const actual = await importOriginal();
+      const hide = (events) => events.map((event) => (event?.kind === 'terms_correction' ? { ...event, kind: 'terms_correction_unknown_here' } : event));
+      return {
+        ...actual,
+        readEvents: (events) => {
+          const { known, unknown } = actual.readEvents(hide(events));
+          return { known, unknown: unknown.map((entry) => (entry.kind === 'terms_correction_unknown_here' ? { ...entry, kind: 'terms_correction' } : entry)) };
+        },
+      };
+    });
+    return (await import('../../src/ledger/project.js')).project;
+  }
+
+  const correction = (payload) => stored('terms_correction', '2026-06-10', 0, { previous: {}, appliesTo: 'opening', ...payload }, 'c1');
+
+  it('projects a loan on its original terms with one unknown_event_kind notice, and a void of the correction changes nothing', async () => {
+    const oldProject = await oldBundleProject();
+    const known = [pay('2026-02-15', 390_381, 'p1')];
+    const baseline = oldProject(debt(), known, '2026-07-01');
+    const fix = correction({ fields: { rate: { ...EA(18) } } });
+    const projection = oldProject(debt(), [...known, fix], '2026-07-01');
+    expect(projection.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'c1', kind: 'terms_correction' }]);
+    expect(withoutNotices(projection)).toEqual(withoutNotices(baseline));
+    expect(projection.terms.rate).toEqual(EA(24));
+    expect(projection).not.toHaveProperty('corrections');
+    const voided = oldProject(debt(), [...known, fix, stored('void', '2026-06-20', 0, { targetEventId: 'c1' }, 'v1')], '2026-07-01');
+    expect(voided.notices).toEqual(projection.notices);
+    expect(withoutNotices(voided)).toEqual(withoutNotices(baseline));
+  });
+
+  it('does the same for a card, whose statement day stays the original one', async () => {
+    const oldProject = await oldBundleProject();
+    const projection = oldProject(debt(cardTerms), [correction({ fields: { card: { statementDay: 20 } } })], '2026-07-01');
+    expect(projection.card.statementDay).toBe(15);
+    expect(projection.notices).toEqual([{ code: 'unknown_event_kind', eventId: 'c1', kind: 'terms_correction' }]);
+  });
+
+  it('is the build that knows the kind that applies the very same rows', () => {
+    const fix = correction({ fields: { card: { statementDay: 20 } } });
+    const projection = project(debt(cardTerms), [fix], '2026-07-01');
+    expect(projection.card.statementDay).toBe(20);
+    expect(projection.notices).toEqual([]);
   });
 });

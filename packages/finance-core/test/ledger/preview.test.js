@@ -5,6 +5,7 @@ import { periodDates } from '../../src/calendar.js';
 import { removeCharge } from '../../src/charges.js';
 import { ValidationError } from '../../src/errors.js';
 import { planCommit } from '../../src/ledger/commit.js';
+import { buildCorrection } from '../../src/ledger/correction.js';
 import { previewChange } from '../../src/ledger/preview.js';
 import { project } from '../../src/ledger/project.js';
 import { snapshot } from '../../src/ledger/snapshot.js';
@@ -282,5 +283,93 @@ describe('previewChange on a card (CC2 characterization)', () => {
     expect(revolvingAfter.rate).toEqual(EA(35));
     expect(neveraAfter).toEqual(nevera);
     expect(toEffectiveAnnual(neveraAfter.rate)).toBe(0);
+  });
+});
+
+// DL3: a terms_correction is previewed like the other plan changes, and the preview equals the saved projection.
+describe('previewChange: terms_correction', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+  const cardTerms = validateTerms({ ...fixture.terms, late: { mode: 'usury', graceDays: 0 } });
+  const card = (terms = cardTerms) => debt(terms, 'card1');
+  const ON = '2026-06-01';
+  const payment = ev('payment', '2026-05-20', 140_000, {}, 'p1'); // after the first close: the mora of the missed minimum is billed
+  const payloadOf = ({ fields, previous, appliesTo }) => ({ fields, previous, appliesTo });
+  const savedCorrection = (draft, id = 'c1') => ev('terms_correction', draft.effectiveOn, 0, payloadOf(draft), id);
+
+  it('returns the corrected field values and the next statement before and after', () => {
+    const draft = buildCorrection(card(), [], { card: { statementDay: 20 } }, { on: ON });
+    const result = previewChange(card(), [], draft, { on: ON });
+    expect(result.corrected).toEqual({ before: { card: { statementDay: 15 } }, after: { card: { statementDay: 20 } } });
+    const natively = (statementDay) => snapshot(project(card(validateTerms({ ...cardTerms, card: { ...cardTerms.card, statementDay } })), [], ON), ON);
+    expect(result.before).toEqual(natively(15));
+    expect(result.after).toEqual(natively(20));
+    expect(result.after).not.toEqual(result.before);
+    expect(result.backdated).toBe(false);
+    expect(result.payloadChars).toBe(JSON.stringify(payloadOf(draft)).length);
+  });
+
+  it('lists a payment recorded under the wrong minimum with its cost before and after', () => {
+    const draft = buildCorrection(card(), [payment], { card: { minPayment: { pct: 3 } } }, { on: ON });
+    const result = previewChange(card(), [payment], draft, { on: ON });
+    const natively = (pct) => project(card(validateTerms({ ...cardTerms, card: { ...cardTerms.card, minPayment: { ...cardTerms.card.minPayment, pct } } })), [payment], ON).applied[0].costMinor;
+    expect(natively(5)).not.toBe(natively(3));
+    expect(result.impacted).toEqual([{ eventId: 'p1', kind: 'payment', effectiveOn: '2026-05-20', costBeforeMinor: natively(5), costAfterMinor: natively(3) }]);
+    expect(result.corrected.before).toEqual({ card: { minPayment: { pct: 5 } } });
+  });
+
+  it('lists nothing when no past cost changes', () => {
+    const draft = buildCorrection(card(), [], { card: { dueDay: 25 } }, { on: ON });
+    expect(previewChange(card(), [], draft, { on: ON }).impacted).toEqual([]);
+  });
+
+  it('equals the projection after the event is saved (card and loan)', () => {
+    const cardDraft = buildCorrection(card(), [payment], { card: { statementDay: 20, minPayment: { pct: 3 } } }, { on: ON });
+    const cardPreview = previewChange(card(), [payment], cardDraft, { on: ON });
+    const cardPlan = planCommit(card(), [payment], cardDraft, { ...ctx, asOf: ON });
+    expect(cardPreview.after).toEqual(snapshot(cardPlan.projection, ON));
+    const loan = debt(french({ rate: EA(28.32) }));
+    const namv = { convention: 'NAMV', value: 25.2 };
+    const loanDraft = buildCorrection(loan, paid, { rate: namv }, { on: ON });
+    const loanPreview = previewChange(loan, paid, loanDraft, { on: ON });
+    expect(loanPreview.after).toEqual(snapshot(planCommit(loan, paid, loanDraft, { ...ctx, asOf: ON }).projection, ON));
+    expect(loanPreview.after.installmentMinor).not.toBe(loanPreview.before.installmentMinor);
+    expect(loanPreview.corrected.before.rate).toEqual(EA(28.32));
+    expect(loanPreview.impacted.map((entry) => entry.eventId)).toEqual(['on1', 'on2', 'on3']); // the paid installments cost less at 2.1 % per month
+  });
+
+  it('counts the recorded statements and those whose drift the correction changes', () => {
+    const adjustments = [
+      ev('adjustment', '2026-04-15', 0, { balanceMinor: 1_621_102 }, 'a1'),
+      ev('adjustment', '2026-05-15', 0, { balanceMinor: 1_000_000 }, 'a2'),
+    ];
+    const dayDraft = buildCorrection(card(), adjustments, { card: { statementDay: 20 } }, { on: ON });
+    expect(previewChange(card(), adjustments, dayDraft, { on: ON }).statements).toEqual({ recorded: 2, drifted: 2 });
+    const dueDraft = buildCorrection(card(), adjustments, { card: { dueDay: 25 } }, { on: ON });
+    expect(previewChange(card(), adjustments, dueDraft, { on: ON }).statements).toEqual({ recorded: 2, drifted: 0 });
+    const none = buildCorrection(card(), [], { card: { statementDay: 20 } }, { on: ON });
+    expect(previewChange(card(), [], none, { on: ON }).statements).toEqual({ recorded: 0, drifted: 0 });
+  });
+
+  it('applies the correction before projecting, so it throws on terms that cannot be corrected', () => {
+    const draft = buildCorrection(card(), [], { card: { statementDay: 20 } }, { on: ON });
+    expect(codeOf(() => previewChange(debt(french()), [], draft, { on: ON }))).toBe('correction_not_applicable');
+    expect(codeOf(() => previewChange(card(), [], { ...draft, appliesTo: 'gone' }, { on: ON }))).toBe('correction_target_missing');
+    expect(codeOf(() => previewChange(card(), [], { ...draft, fields: { limitMinor: 5 } }, { on: ON }))).toBe('correction_unsupported_field');
+    expect(codeOf(() => previewChange(card(), [], { ...draft, fields: { card: { statementDay: 40 } } }, { on: ON }))).toBe('invalid_card');
+  });
+
+  it('previews on top of a correction already recorded and does not touch its inputs', () => {
+    const first = buildCorrection(card(), [], { card: { statementDay: 18 } }, { on: '2026-05-01' });
+    const events = deepFreeze([savedCorrection(first)]);
+    const second = buildCorrection(card(), events, { card: { statementDay: 22 } }, { on: ON });
+    expect(second.previous).toEqual({ card: { statementDay: 18 } });
+    const result = previewChange(deepFreeze(card()), events, deepFreeze(second), { on: ON });
+    expect(result.corrected).toEqual({ before: { card: { statementDay: 18 } }, after: { card: { statementDay: 22 } } });
+  });
+
+  it('adds nothing of its own to the other plan changes', () => {
+    const result = previewChange(debt(french()), paid, rateDraft(), { on: '2026-05-02' });
+    expect(result).not.toHaveProperty('corrected');
+    expect(result).not.toHaveProperty('statements');
   });
 });

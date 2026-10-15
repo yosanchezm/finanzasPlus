@@ -257,20 +257,35 @@ const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 // know. Only a string kind outside EVENT_KINDS is tolerated; anything else malformed still throws.
 const isUnknownKind = (input) => isObject(input) && typeof input.kind === 'string' && !EVENT_KINDS.includes(input.kind);
 
+// A stored correction whose payload this bundle cannot read (a field a newer build added, say) is set aside
+// like an unknown kind, with the validation code as its reason, instead of making the whole debt unreadable.
+const isReadableId = (input) => typeof (input.id ?? input.$id) === 'string' && (input.id ?? input.$id) !== '';
+
 /**
  * Reader used by `sortEvents`, `activeEvents` and `project`: validates every event of a
  * known kind and sets aside the ones of an unknown kind instead of throwing. Writers keep
  * using `validateEvent`, which stays strict. Internal: not exported by the package barrel.
  * @param {object[]} events Stored or normalized events, any order.
- * @returns {{ known: object[], unknown: { id: string, kind: string }[] }} `known` is normalized, in input order.
+ * @returns {{ known: object[], unknown: { id: string, kind: string, reason?: string }[] }} `known` is normalized, in input order.
+ *   `unknown` also lists a `terms_correction` that does not validate, with the error code as `reason`.
  * @throws {ValidationError} For a malformed event of a known (or missing) kind.
  */
 export function readEvents(events) {
   const known = [];
   const unknown = [];
   for (const input of events) {
-    if (isUnknownKind(input)) unknown.push({ id: input.id ?? input.$id ?? '', kind: input.kind });
-    else known.push(validateEvent(input));
+    if (isUnknownKind(input)) {
+      unknown.push({ id: input.id ?? input.$id ?? '', kind: input.kind });
+    } else if (isObject(input) && input.kind === 'terms_correction' && isReadableId(input)) {
+      try {
+        known.push(validateEvent(input));
+      } catch (error) {
+        if (!(error instanceof ValidationError)) throw error;
+        unknown.push({ id: input.id ?? input.$id, kind: input.kind, reason: error.code });
+      }
+    } else {
+      known.push(validateEvent(input));
+    }
   }
   return { known, unknown };
 }

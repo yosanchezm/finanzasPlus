@@ -5,8 +5,9 @@ import { accrueLate, addLateNotices } from '../late/accrue.js';
 import { lateEAOn, modalityOf, normalizeLate } from '../late/policy.js';
 import { legalOf } from '../legal.js';
 import { buildSchedule } from '../schedule/index.js';
-import { parseTerms, validateTerms } from '../terms.js';
+import { termsOfDebt as debtTerms } from '../terms.js';
 import { BUCKETS, emptyBuckets } from './allocate.js';
+import { attachBound, foldCorrections } from './correction.js';
 import { activeEvents, readEvents, sortEvents } from './events.js';
 import { balanceAt, decorate, newRow, payBalanceOnly, payRows, paySplit, rowDue, rowOutstanding } from './rows.js';
 import { applyAdjustment, applyChargeChange, applyExtra, applyLatePolicy, applyRateChange, applyRestructure } from './tail.js';
@@ -36,12 +37,6 @@ export function registerProjector(kind, projector) {
  */
 export function debtKindOf(debt) {
   return debtTerms(debt).kind;
-}
-
-function debtTerms(debt) {
-  if (debt?.terms) return validateTerms(debt.terms);
-  if (typeof debt?.termsJson === 'string') return parseTerms(debt.termsJson);
-  throw new ValidationError('invalid_debt', 'a debt needs terms or termsJson');
 }
 
 const costOf = (allocation) => (allocation ? allocation.charges + allocation.taxes + allocation.lateInterest + allocation.interest : 0);
@@ -145,13 +140,21 @@ function projectLoan(context) {
   };
 }
 
-// Terms plus the active events dated on or before `asOf`, in chronological order.
+// The terms with the active corrections folded in (G9: every date, voids honoured) plus the active events
+// dated on or before `asOf`, in chronological order. The corrections themselves never reach the projectors (G10).
 function prepare(debt, events, asOf) {
   if (!isIsoDate(asOf)) throw new ValidationError('invalid_date', `asOf must be a real YYYY-MM-DD date, got ${String(asOf)}`);
-  const terms = debtTerms(debt);
   const { known, unknown } = readEvents(events);
-  const dated = known.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
-  return { terms, active: sortEvents(activeEvents(dated)), unknown };
+  const folded = foldCorrections(debtTerms(debt), known);
+  const dated = folded.events.filter((event) => compareIso(event.effectiveOn, asOf) <= 0);
+  const skipped = unknown.filter((entry) => entry.reason !== undefined).map(({ id, reason }) => ({ code: 'terms_correction_skipped', eventId: id, reason }));
+  return {
+    terms: folded.terms,
+    active: attachBound(sortEvents(activeEvents(dated)), folded.bound),
+    unknown: unknown.filter((entry) => entry.reason === undefined),
+    corrections: folded.applied,
+    skipped: folded.skipped.map(({ eventId, reason }) => ({ code: 'terms_correction_skipped', eventId, reason })).concat(skipped),
+  };
 }
 
 /**
@@ -167,12 +170,14 @@ function prepare(debt, events, asOf) {
  * @throws {ValidationError}
  */
 export function project(debt, events, asOf, opts = {}) {
-  const { terms, active, unknown } = prepare(debt, events, asOf);
-  const projection = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts, legal: legalOf(debt, opts) });
-  if (unknown.length === 0) return projection;
+  const { terms, active, unknown, corrections, skipped } = prepare(debt, events, asOf);
+  const base = (PROJECTORS.get(terms.kind) ?? projectLoan)({ debt, terms, events: active, asOf, opts, legal: legalOf(debt, opts) });
+  // Added only when present, so a debt without corrections projects exactly as before.
+  const projection = corrections.length > 0 ? { ...base, corrections } : base;
   // Events written by a newer build are skipped, not guessed at (AD1): one notice each, whatever their date.
-  const skipped = unknown.map(({ id, kind }) => ({ code: 'unknown_event_kind', eventId: id, kind }));
-  return { ...projection, notices: [...(projection.notices ?? []), ...skipped] };
+  const extra = skipped.concat(unknown.map(({ id, kind }) => ({ code: 'unknown_event_kind', eventId: id, kind })));
+  if (extra.length === 0) return projection;
+  return { ...projection, notices: [...(projection.notices ?? []), ...extra] };
 }
 
 /**
