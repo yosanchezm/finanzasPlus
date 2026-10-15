@@ -1,6 +1,6 @@
 # Apply progress: debt-plan-changes
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3), `feat/dpc-f1-nia-restructure` (F1; E1 and E2 live on their own branches in the stack), `feat/dpc-d2-mora-ui` (D2, held for the owner gate D2.0).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. Branches: `feat/dpc-a1-forward-compat` (A1), `feat/dpc-a2-legal-data` (A2), `feat/dpc-a3-ajustes` (A3), `feat/dpc-b1-preview-change` (B1), `feat/dpc-b2-rate-change` (B2), `feat/dpc-b3-charge-change` (B3), `feat/dpc-c1-late-terms` (C1), `feat/dpc-c2-late-accrual` (C2), `feat/dpc-c3-late-policy` (C3), `feat/dpc-f1-nia-restructure` (F1; E1 and E2 live on their own branches in the stack), `feat/dpc-d2-mora-ui` (D2, held for the owner gate D2.0), `feat/dpc-f2-nia-mora` (F2, held for the owner gate F2.0), `feat/dpc-f3-card-mora` (F3, on top of F2).
 
 ## Batch A1 (forward-compatible reader + legal resolve/cap/SMMLV): COMPLETE
 
@@ -890,3 +890,67 @@ Total vs `feat/dpc-d2-mora-ui` before this progress/tasks commit: 14 files, 872 
 ### Remaining
 
 F2.0 (owner gate: confirm the Nia tarball at or after A1 is deployed, then merge and deploy F2; deploy web and Nia together from C2 on). F3 (card mora and card Nia) is not started.
+
+## Batch F3 (card mora in core and web, "Configurar mora" for cards, restructure guard): COMPLETE (last slice)
+
+Branch `feat/dpc-f3-card-mora` (from `feat/dpc-f2-nia-mora` 0c330d7, itself on the held D2 branch). Nothing was merged or pushed. No live Appwrite, Gemini or Telegram was touched; `.env` was never read. Mode: Strict TDD, artifact store hybrid (Engram not available: this file and `tasks.md` carry the record).
+
+### Tasks
+
+- [x] F3a.1 RED `packages/finance-core/test/card/card.late.test.js` (new, 17 tests, all failing before the code)
+- [x] F3a.2 GREEN `card/card.js`, new `card/late.js`, `ledger/events.js`, `ledger/commit.js`, `ledger/preview.js`, `ledger/restructure.js` (shared guard), `ledger/project.js` (`debtKindOf`)
+- [x] F3b.1 RED UI tests (17 failing cases across 7 files)
+- [x] F3b.2 GREEN `wizardModel.js`, `CardStep.jsx`, `cardModel.js`, `CardDialogs.jsx`, `CardPanel.jsx`, `LatePolicyDialog.jsx`, `DebtDetailContainer.jsx`, `debtDetailModel.js` (comment), `debtFixtures.js` (`makeMoraCard`)
+- [x] F3.CP checkpoint: full `npm test -- --maxWorkers=4` 124 files, 1,997 tests passed; `npm run build` exit 0; `npm run package:nia` exit 0. `docs/deploy.md` not changed: no deploy step changes (the card mora rides the same web and Nia bundles as D2 and F2).
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| b069174 `feat(card): accrue mora on the unmet capital of the minimum payment, bill it at the next statement and reject card restructures with a typed error` | F3a | 8 files, 405 insertions, 19 deletions |
+| a6b9036 `feat(debts): configure the mora of a card, show it in the card panel and the statement form, and start new cards with the usury mora` | F3b | 16 files, 203 insertions, 19 deletions |
+
+Total vs `feat/dpc-f2-nia-mora` before this progress/tasks commit: 24 files, 608 insertions, 38 deletions = 646 changed lines (budget 2,000; each commit <= 800: F3a is 424, F3b is 222; design 950, worst case 1,900).
+
+### How the card mora works (as built)
+
+- Each closed statement owns one mora item (a pseudo schedule row) that the loan engine `accrueLate` accrues, so the exact accumulator, the single rounding, the cap segments, the grace days and the `late_cap_*` notices are the loan ones. The item starts at the due-date mark and stops at the next statement close.
+- Base = `min(shortfall, capital part of the minimum)`, where the capital part is the minimum less that statement's interest, fees, taxes and mora line (payments settle those first). Fixture: minimum 146,102, non-capital 21,102, unmet capital 125,000; 10 days at 28.59 % EA = 861 (exact 861.46). A payment re-reads the base from its date (the day of the payment still counts with the old base); covering the shortfall stops it.
+- At the next close the item is billed at its rounded value as the `lateInterest` line of that statement: it goes into the statement total, the contractual minimum, the pay-in-full amount, the balance and `state.accrued.lateInterest` (outside the revolving balance and the interest base, so it accrues nothing more). Payments settle it before interest (allocation order).
+- Replacing revolving interest: the base-days of the unmet capital are kept and, at the close, the revolving interest base is reduced by `baseDays / daysInCycle` (the average excluded capital), capped at the base.
+- Unbilled mora is visible: plan rows gain `lateInterestMinor` (billed line), `lateMinor`, `lateDays`, `lateBaseMinor`; the projection gains `lateInterestMinor` and `totals.remainingLateInterest` (billed and unpaid plus accrued and not billed). The balance moves only when it is billed.
+- `late_policy` is a card handler (the policy applies from the day after its date); `rate_change` also feeds the mora work terms. Mode `none` (or no policy) accrues nothing and the shortfall is still flagged past due.
+- `adjustment.lateInterestMinor` (whole pesos, optional) replaces the billed mora of the latest statement; the difference goes to that line (statement total, pay in full, closing) and is reported as `drift`, never absorbed by the revolving balance. A stated balance in the same adjustment still wins. Golden: computed 861, statement 900, drift +39.
+- `planCommit` and `previewChange` call `assertRestructurable` (new, in `ledger/restructure.js`) before building a `restructure` draft, throwing `ValidationError('restructure_unsupported')` for a card; a stored card `restructure` is skipped with the notice `{ code: 'card_restructure_ignored', eventId }`.
+- Web: "Configurar mora" is wired for cards (the menu lists Cambiar tasa, Cambiar seguros y cargos, Configurar mora; never Reestructurar); the dialog has a card variant (explanation, "Mínimo vencido" row); the statement form has "Mora del extracto (opcional)"; the card panel shows "Mora en curso" and a "Mora" line in the last statement; a new card starts with `late: { mode: 'usury', graceDays: 0 }` and the step says so.
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR / mutation |
+|---|---|---|---|
+| F3a.1 / F3a.2 accrual and billing | `card.late.test.js` 17 of 17 failed (`lateMinor`, `lateInterestMinor`, notices and the guards did not exist) | 17 tests: golden 861 (exact 861.46) billed at the next close; 431 mid-cycle unbilled with the balance unchanged and 0 on the due date; no growth after the close; covered on day 5 bills 431; a 71,102 partial payment lowers the base (125,000 x 5 + 75,000 x 5); minimum paid gives none and not past due; `none`/absent gives none but past due 146,102; statement total, minimum and pay in full carry the line apart from the revolving balance; grace 3 gives 7 days; a policy effective on day 5 gives 431; no cap gives the contract rate and `late_cap_unknown`; a payment settles the billed 861 first | Mutations killed: the interest exclusion removed (1 failed), `refreshLate` removed from payments (1 failed), the paid-mora bucket zeroed (1 failed). Triangulated with 5-day, 7-day and partial-base cases |
+| F3a.1 / F3a.2 override and guards | same file | override 900 shows 900 with drift 39, balance +39 and an unchanged revolving balance; with a stated balance of computed + 39 the revolving balance is untouched; negative and fractional rejected; `restructure` throws `restructure_unsupported` from `planCommit` and `previewChange`; a stored one is skipped with `card_restructure_ignored` and the balance is unchanged; `late_policy` plans and previews on a card (0 to 861) | none needed |
+| F3b.1 / F3b.2 wizard and statement | 7 failed (`wizardModel.test.js`, `cardWizardModel.test.js`, `CardWizard.test.jsx`, `cardModel.test.js` x5) | new cards carry usury and `none` drops it; the card step says so and saves `late` in the terms; the statement draft carries `lateInterestMinor` and rejects `abc`, `-5` and `10.5` | none needed |
+| F3b.1 / F3b.2 panel, dialog, container | 8 failed (`DebtDetail.card.test.jsx` 2, `LatePolicyDialog.test.jsx` 2, `DebtDetailContainer.card.test.jsx` 4 incl. the menu) | panel: "Mora en curso: $ 861 (se cobra en el corte del 15 may)" on day 10 and "Mora $ 1.292" in the last statement on day 20 (15 days to the close), nothing for a card without mora; dialog: card text, 0 to 861, "Mínimo vencido" row, one `late_policy` draft; container: the card menu lists three items, a saved `late_policy` with no cost row, the statement writes `lateInterestMinor` 1,300 | none needed |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core` exit 0: 33 files, 576 tests (baseline 32 files, 559). `npx vitest run src/features/debts` exit 0: 39 files, 538 tests (baseline 39 files, 521). Full `npm test -- --maxWorkers=4`: 124 files, 1,997 tests passed (baseline 123 files, 1,962; the `App.test.jsx` "keeps the shell mounted" jsdom timeout showed once on a first full run and passed on the rerun, as known) |
+| Runtime harness command/scenario and exact result | The projector tests drive the real `project`, `planCommit` and `previewChange` with an injected cap table; the container tests drive the real dialogs, `useCommitDialog`, `planCommit`/`commitPlan` and `previewChange` against a fake debt port. `npm run build` exit 0. `npm run package:nia` exit 0 (`functions/nia.tar.gz` written; not committed) |
+| Rollback boundary | Revert a6b9036 (web: card mora UI, wizard default, statement field), then b069174 (core: `card/late.js`, projector, `adjustment.lateInterestMinor`, restructure guard). Reverting only b069174 would leave the web reading `lateMinor` fields that no longer exist, so revert the web commit first. Stored data is untouched: the new `adjustment` field is dropped by older cores (the normalizer keeps known keys), and `late_policy` events and `terms.late` already exist from D2/F2 |
+
+### Decisions and deviations from design
+
+- Revolving exclusion: the design says the unmet principal is excluded from the revolving interest base. The card interest is a full monthly rate on the balance at the due date (no day count), so the exclusion is prorated by the days the mora ran over the length of the cycle (`baseDays / cycleDays`) and capped at the base. It excludes the whole unmet capital, not only its revolving part (the capital part of a minimum also holds the installment principal that never earned revolving interest); with the fixture and nothing paid this reduces the second statement's interest from 10,392 to 9,526 (125,000 for 10 of 30 days). This is the literal reading of the design; flagging it for verify.
+- Mora billed on an overridden statement changes the cycle's total, pay in full and closing by the difference, but not its minimum (the bank's minimum comes from `minimumDueMinor`).
+- Unbilled mora is shown in `lateInterestMinor` and the totals but not in the balance (it joins the balance when billed at the close).
+- A due date clamped onto the statement day (for example day 30 and 31 in February) is marked right after the close, so its mora starts the next day.
+- The tasks do not include the Nia card refusal (`CARD_LATE` in `functions/nia/debt/late.js` and `handler.js`), so it stays: Nia still refuses `late_policy` on a card and says to use the web. Lifting it is a small follow-up (the core, `planCommit` and `previewChange` already support it).
+- The card wizard has no mora control (the design only asks for the default); the step carries one sentence and "Más acciones" changes it later. `MoreActionsMenu.jsx` needed no change: it was already generic and only the container wiring was missing.
+- `previewChange` and `planCommit` get the card guard through `assertRestructurable` in `ledger/restructure.js` (which already owned the typed error and imports `project.js`), plus `debtKindOf` in `project.js`; none is exported by the package barrel.
+
+### Remaining
+
+Nothing in F3. Owner gates D2.0 and F2.0 are still open (confirm Nia at or after A1 is deployed, then merge and deploy D2, F2 and F3 in order, web and Nia together). Next: `sdd-verify`.

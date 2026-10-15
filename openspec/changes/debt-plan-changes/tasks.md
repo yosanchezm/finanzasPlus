@@ -208,11 +208,11 @@ Groups: F1a rebuild (about 330), F1b handler (about 320).
 ### F3 card mora (design 950) · deps: C3, D2
 Groups: F3a engine + guards (about 480), F3b card UI (about 470).
 
-- [ ] F3a.1 RED `card` tests: 125,000 unmet principal x 10 days gives 861, billed at next statement close; stops at close or when covered; no revolving interest on unmet principal; minimum paid gives none and not past due; `none` gives no mora but flagged past due; `adjustment.lateInterestMinor` 900 overrides 861; `late_policy` handler; `planCommit`/`previewChange` throw `ValidationError('restructure_unsupported')`; stored card `restructure` skipped with `card_restructure_ignored`. Reqs CC1, CC2.
-- [ ] F3a.2 GREEN `card/card.js`, `ledger/events.js`, `ledger/commit.js`, `ledger/preview.js`.
-- [ ] F3b.1 RED UI tests: `StatementDialog` stated mora field; `CardPanel` mora line; card wizard default usury; card menu lists "Cambiar tasa", "Cambiar seguros y cargos", "Configurar mora", no "Reestructurar"; `LatePolicyDialog` card variant. Reqs CC1, WM1, WM2, LI2.
-- [ ] F3b.2 GREEN `cardWizardModel`, `CardStep`, `CardDialogs.jsx`, `CardPanel`, `MoreActionsMenu.jsx`, `LatePolicyDialog.jsx`.
-- [ ] F3.CP final checkpoint: full `npm test -- --maxWorkers=4`, `npm run build`, `npm run package:nia`; update `docs/deploy.md` if flow changed.
+- [x] F3a.1 RED `card` tests: 125,000 unmet principal x 10 days gives 861, billed at next statement close; stops at close or when covered; no revolving interest on unmet principal; minimum paid gives none and not past due; `none` gives no mora but flagged past due; `adjustment.lateInterestMinor` 900 overrides 861; `late_policy` handler; `planCommit`/`previewChange` throw `ValidationError('restructure_unsupported')`; stored card `restructure` skipped with `card_restructure_ignored`. Reqs CC1, CC2.
+- [x] F3a.2 GREEN `card/card.js`, `ledger/events.js`, `ledger/commit.js`, `ledger/preview.js`.
+- [x] F3b.1 RED UI tests: `StatementDialog` stated mora field; `CardPanel` mora line; card wizard default usury; card menu lists "Cambiar tasa", "Cambiar seguros y cargos", "Configurar mora", no "Reestructurar"; `LatePolicyDialog` card variant. Reqs CC1, WM1, WM2, LI2.
+- [x] F3b.2 GREEN `cardWizardModel`, `CardStep`, `CardDialogs.jsx`, `CardPanel`, `MoreActionsMenu.jsx`, `LatePolicyDialog.jsx`.
+- [x] F3.CP final checkpoint: full `npm test -- --maxWorkers=4`, `npm run build`, `npm run package:nia`; update `docs/deploy.md` if flow changed.
 
 ## Requirement to task traceability
 
