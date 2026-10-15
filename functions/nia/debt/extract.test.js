@@ -182,8 +182,11 @@ describe('normaliseDebtExtraction: create', () => {
     expect(norm({ ...loan, rate: { value: -3, period: 'annual' } }).problems).toEqual(['invalid_rate']);
   });
 
-  it('points cards to the web instead of creating them', () => {
-    expect(norm({ ...loan, kind: 'card' }).problems).toEqual(['card_in_web']);
+  it('hands a card to the advisor instead of reading it as a loan (the card_in_web problem is gone)', () => {
+    const result = norm({ ...loan, kind: 'card' });
+    expect(result.problems).toEqual([]);
+    expect(result.create).toBeNull();
+    expect(result.setup).toMatchObject({ kind: 'card', name: 'Moto' });
   });
 
   it('falls back to a monthly French loan for unknown periodicity and system', () => {
@@ -459,7 +462,7 @@ describe('normaliseDebtExtraction: explain', () => {
     expect(prompt).toContain('"topic"');
     for (const topic of EXPLAIN_TOPICS) expect(prompt).toContain(topic);
     expect(ACTIONS).toContain('explain');
-    expect(ACTIONS).not.toContain('setup');
+    expect(ACTIONS).toContain('setup');
     expect(ACTIONS).not.toContain('terms_correction');
   });
 
@@ -513,5 +516,149 @@ describe('normaliseDebtExtraction: explain', () => {
   it('does not add an explain payload to the other actions', () => {
     expect(norm({ action: 'list' }).explain).toBeNull();
     expect(norm({ action: 'pay', amountMinor: 1000 }).explain).toBeNull();
+  });
+});
+
+describe('normaliseDebtExtraction: setup (S5a)', () => {
+  const MV = { value: 2.1, period: 'monthly', compounding: 'effective', timing: 'arrears', rawText: '2,1% MV' };
+  const block = (extra = {}) => ({
+    card: { statementDay: null, dueDay: null, minRule: null, minPct: null, minFloorMinor: null },
+    presets: { fee: 45000, iva: 19 },
+    charges: [],
+    lateStated: null,
+    mentions: [],
+    ...extra,
+  });
+  const bancolombia = (extra = {}, setup = {}) => ({ action: 'setup', kind: 'card', name: 'Tarjeta Bancolombia', lender: 'Bancolombia', rate: MV, setup: block(setup), ...extra });
+
+  it('lists the setup action and its block in the prompt', () => {
+    const prompt = debtPrompt('tarjeta Bancolombia', [], [], { today: TODAY });
+    expect(ACTIONS).toContain('setup');
+    expect(prompt).toContain('setup');
+    expect(prompt).toContain('"presets"');
+    expect(prompt).toContain('refLabel');
+  });
+
+  it('normalizes the described card to request.setup: statement day, due day and the rule stay null, never defaulted', () => {
+    const result = norm(bancolombia());
+    expect(result.action).toBe('setup');
+    expect(result.create).toBeNull();
+    expect(result.missingFields).toEqual([]);
+    expect(result.problems).toEqual([]);
+    expect(result.setup).toMatchObject({
+      kind: 'card',
+      name: 'Tarjeta Bancolombia',
+      lender: 'Bancolombia',
+      rate: { value: 2.1, basis: 'effective', periodicity: 'monthly', timing: 'arrears' },
+      rateValue: 2.1,
+      openedOn: TODAY,
+      system: 'none',
+      card: { statementDay: null, dueDay: null, minRule: null, minPct: null, minFloorMinor: null },
+      presets: { fee: 45000, iva: 19 },
+      charges: [],
+      lateStated: null,
+      mentions: [],
+    });
+  });
+
+  it('reads a card create the same way (kind card on create goes to the advisor)', () => {
+    const viaCreate = norm({ ...bancolombia(), action: 'create' });
+    expect(viaCreate.action).toBe('create');
+    expect(viaCreate.create).toBeNull();
+    expect(viaCreate.problems).toEqual([]);
+    expect(viaCreate.setup).toEqual(norm(bancolombia()).setup);
+  });
+
+  it('reads the statement day, due day, minimum rule, percentage and floor when stated', () => {
+    const { setup } = norm(bancolombia({}, { card: { statementDay: 15, dueDay: 30, minRule: 'installments_due', minPct: 3, minFloorMinor: 50000 } }));
+    expect(setup.card).toEqual({ statementDay: 15, dueDay: 30, minRule: 'installments_due', minPct: 3, minFloorMinor: 50000 });
+  });
+
+  it('keeps «no sé» as the unknown rule and drops a rule outside the catalogue', () => {
+    expect(norm(bancolombia({}, { card: { minRule: 'unknown' } })).setup.card.minRule).toBe('unknown');
+    expect(norm(bancolombia({}, { card: { minRule: 'whatever' } })).setup.card.minRule).toBeNull();
+  });
+
+  it('reports a day outside 1..31 as a problem instead of carrying it', () => {
+    const result = norm(bancolombia({}, { card: { statementDay: 40, dueDay: 0 } }));
+    expect(result.problems).toEqual(['invalid_day']);
+    expect(result.setup.card.statementDay).toBeNull();
+    expect(result.setup.card.dueDay).toBeNull();
+  });
+
+  it('reads the presets: amounts, the IVA included, GMF, and the key only when the user mentioned it (true: without an amount)', () => {
+    const { setup } = norm(bancolombia({}, { presets: { fee: 53550, iva: 19, ivaIncluded: true, life: 0.05, insurance: 12000, gmf: true } }));
+    expect(setup.presets).toEqual({ fee: 53550, iva: 19, ivaIncluded: true, life: 0.05, insurance: 12000, gmf: true });
+    expect(norm(bancolombia({}, { presets: {} })).setup.presets).toEqual({});
+    expect(norm(bancolombia({}, { presets: { fee: true, life: true, gmf: false, insurance: null } })).setup.presets).toEqual({ fee: null, life: null });
+  });
+
+  it('turns an IVA stated with no percentage into the default 19 and never invents an amount (true means mentioned without one)', () => {
+    const { setup } = norm(bancolombia({}, { presets: { fee: 45000, iva: true, life: true } }));
+    expect(setup.presets.iva).toBe(19);
+    expect(setup.presets.life).toBeNull();
+  });
+
+  it('records an invalid preset amount as a problem', () => {
+    expect(norm(bancolombia({}, { presets: { fee: -5 } })).problems).toContain('negative_amount');
+    expect(norm(bancolombia({}, { presets: { insurance: 10.5 } })).problems).toContain('invalid_amount');
+  });
+
+  it('keeps a pctOfCharge charge with the label of the charge it applies to, and no ids', () => {
+    const charges = [
+      { kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 45000 },
+      { kind: 'tax', label: 'IVA', basis: 'pctOfCharge', value: 19, refLabel: 'cuota de manejo' },
+    ];
+    const { setup } = norm(bancolombia({}, { presets: {}, charges }));
+    expect(setup.charges).toEqual([
+      { kind: 'fee', label: 'Cuota de manejo', basis: 'fixed', value: 45000, cadence: 'per_installment' },
+      { kind: 'tax', label: 'IVA', basis: 'pctOfCharge', value: 19, cadence: 'per_installment', refLabel: 'cuota de manejo' },
+    ]);
+  });
+
+  it('drops invalid charges, keeps a valid cadence and caps the list at 6', () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({ kind: 'insurance', label: `Seguro ${index}`, basis: 'fixed', value: 1000, cadence: 'annual' }));
+    const { setup } = norm(bancolombia({}, { presets: {}, charges: [{ kind: 'fee', label: 'Mala', basis: 'weird', value: 1 }, ...many] }));
+    expect(setup.charges).toHaveLength(6);
+    expect(setup.charges[0].cadence).toBe('annual');
+  });
+
+  it('turns a stated card limit into the mention card_limit and never reads limitMinor', () => {
+    const result = norm(bancolombia({ limitMinor: 5000000 }, { mentions: ['card_limit', 'advance_rate', 'bogus', 'card_limit'], limitMinor: 5000000 }));
+    expect(result.setup.mentions).toEqual(['card_limit', 'advance_rate']);
+    expect(result.setup.limitMinor).toBeUndefined();
+    expect(result.setup.card.limitMinor).toBeUndefined();
+  });
+
+  it('reads what the user said about the mora and drops anything else', () => {
+    for (const mode of ['usury', 'fixed', 'none', 'whole_installment']) expect(norm(bancolombia({}, { lateStated: mode })).setup.lateStated).toBe(mode);
+    expect(norm(bancolombia({}, { lateStated: 'weekly' })).setup.lateStated).toBeNull();
+  });
+
+  it('keeps a stated rate with no convention as a bare value and asks for the convention later', () => {
+    const result = norm(bancolombia({ rate: { value: 2, period: 'monthly', compounding: null, timing: null, rawText: '2% mensual' } }));
+    expect(result.setup.rate).toBeNull();
+    expect(result.setup.rateValue).toBe(2);
+    expect(result.needsConvention).toBe(true);
+  });
+
+  it('reads a described loan with its plan, and keeps the opening balance of a card optional', () => {
+    const loan = norm({ action: 'setup', kind: 'consumer', name: 'Libre inversión', principalMinor: 1200000, rate: { value: 0, period: 'annual' }, n: 3, setup: block({ presets: { gmf: true } }) });
+    expect(loan.setup).toMatchObject({ kind: 'consumer', principalMinor: 1200000, n: 3, system: 'french', periodicity: 'monthly', presets: { gmf: true } });
+    expect(norm(bancolombia()).setup.principalMinor).toBe(0);
+    expect(norm(bancolombia({ principalMinor: 500000 })).setup.principalMinor).toBe(500000);
+  });
+
+  it('survives a model that sends no setup block at all', () => {
+    const { setup } = norm({ action: 'setup', kind: 'card', name: 'Visa', rate: MV });
+    expect(setup.presets).toEqual({});
+    expect(setup.card).toEqual({ statementDay: null, dueDay: null, minRule: null, minPct: null, minFloorMinor: null });
+    expect(setup.charges).toEqual([]);
+    expect(setup.mentions).toEqual([]);
+  });
+
+  it('adds no setup payload to the other actions', () => {
+    expect(norm({ action: 'list' }).setup).toBeNull();
+    expect(norm({ action: 'create', kind: 'vehicle', name: 'Moto', principalMinor: 1000000, rate: { value: 24, period: 'annual' }, n: 12 }).setup).toBeNull();
   });
 });

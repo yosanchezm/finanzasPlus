@@ -34,6 +34,7 @@ const PROBLEMS = {
   invalid_amount: 'No entendí el monto. Escríbelo en pesos y sin decimales.',
   future_date: 'La fecha del pago no puede ser futura. ¿Qué día fue?',
   invalid_rate: 'La tasa no es válida: debe ser desde 0 y, si es anticipada, menor a 100 % por periodo. ¿Cuál es?',
+  invalid_day: 'El día debe ser un número del 1 al 31. Escríbelo de nuevo; no guardé nada.',
   card_in_web: 'Las tarjetas se crean desde la web, en la sección Deudas. Aquí puedo registrar abonos a una tarjeta que ya exista.',
   legal_value_out_of_range: 'Ese valor no parece una tasa válida: debe estar entre 5 % y 100 % E.A. y tener máximo dos decimales (por ejemplo, 28.2). Escríbelo de nuevo; no guardé nada.',
   legal_smmlv_out_of_range: 'El salario mínimo debe estar entre $ 100.000 y $ 100.000.000, en pesos enteros. Escríbelo de nuevo; no guardé nada.',
@@ -470,6 +471,7 @@ export async function handleDebt(deps, ctx) {
   const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
+  if (request.setup) return inform(deps, ctx, PROBLEMS.card_in_web); // until the advisor handles a described debt (S5c)
   // G3: a write action of the extraction wins over the router's hint; a read-only list or advise with the hint becomes the explanation.
   if (request.action === 'explain' || (ctx.explainHint && ['list', 'advise'].includes(request.action))) return startExplain(deps, ctx, request, debts, legal);
   if (request.action === 'list') return inform(deps, ctx, listReply(await summaries(deps, debts, asOf)));
