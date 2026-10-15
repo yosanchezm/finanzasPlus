@@ -139,9 +139,9 @@ Groups: S3a topics (about 500); S3b paraphrase (about 300).
 
 ## Gate G: owner copy review (blocks the first deploy of S1 to S3) · deps: S1, S2, S3
 
-- [ ] G.1 OWNER COPY REVIEW (not automated): run `node scripts/check-explain-copy.mjs --print`, review every `EXPLAIN_COPY` entry (legal constants for GMF, usura/IBC, mora, Ley 1555, Ley 546 plus one sample per topic) and approve or amend the text and sources. Done: owner sends the approved keys.
-- [ ] G.2 RED `packages/finance-core/test/explain/copy.release.test.js`: `releasedTopics()` equals the full 9-topic catalogue, so any later unreviewed copy turns the suite red (committed together with G.2 GREEN, because it is red until the hashes are set). Reqs DE4.
-- [ ] G.2 GREEN one commit sets `reviewedOn` and `reviewedHash` (`fnv1a(text + sources)`) for each approved key in `packages/finance-core/src/explain/copy.js`, with the approved edits. Done: the release test passes and `node scripts/check-explain-copy.mjs` exits 0.
+- [x] G.1 OWNER COPY REVIEW (not automated): run `node scripts/check-explain-copy.mjs --print`, review every `EXPLAIN_COPY` entry (legal constants for GMF, usura/IBC, mora, Ley 1555, Ley 546 plus one sample per topic) and approve or amend the text and sources. Done: owner sends the approved keys. Note: approved by the owner on 2026-10-15, all 14 keys, no edits.
+- [x] G.2 RED `packages/finance-core/test/explain/copy.release.test.js`: `releasedTopics()` equals the full 9-topic catalogue, so any later unreviewed copy turns the suite red (committed together with G.2 GREEN, because it is red until the hashes are set). Reqs DE4.
+- [x] G.2 GREEN one commit sets `reviewedOn` and `reviewedHash` (`fnv1a(text + sources)`) for each approved key in `packages/finance-core/src/explain/copy.js`, with the approved edits. Done: the release test passes and `node scripts/check-explain-copy.mjs` exits 0. Note: no edits were approved, so the texts and sources are unchanged; `reviewedHash` is `copyHash(entry)` (fnv1a over the text, a newline and the `label|url` source lines), the exact value the gate verifies.
 - [ ] G.3 OPERATOR (not automated): `npm run package:nia` passes the check without `NIA_ALLOW_UNREVIEWED`, then upload the tarball (deploy of S1 to S3 topics). Done: the owner confirms topics answer with source and disclaimer in Telegram.
 
 ## Phase S4: `terms_correction` (design 1,500 / worst 3,000) · deps: none (applied after S3 by default)

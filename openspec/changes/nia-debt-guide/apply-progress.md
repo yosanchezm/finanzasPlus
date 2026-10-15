@@ -306,3 +306,55 @@ Triangulation: opening and restructure-bound corrections, two corrections and a 
 ### Remaining
 
 S5 to S7 and gate G. S4.CP (owner deploy of web and Nia together) is not part of this batch.
+
+## Batch Gate G (owner copy review): G.1 and G.2 COMPLETE (2/3; G.3 stays open for the owner)
+
+Branch: `chore/ndg-gate-g2-copy-review` (from master 8a4d8be).
+
+### Tasks
+
+- [x] G.1 Owner copy review: approved by the owner on 2026-10-15, all 14 keys, no edits (owner: "Me parece que los textos legales están bien").
+- [x] G.2 RED `packages/finance-core/test/explain/copy.release.test.js` (16 tests failed: nothing was reviewed), then GREEN in `copy.js`: `reviewedOn: '2026-10-15'` and `reviewedHash` for each of the 14 keys, computed by a throwaway node script with the project's own `copyHash(entry)` (not hand-typed). Texts and sources are unchanged.
+- [ ] G.3 OPERATOR (owner packaging and deploy): not part of this batch.
+
+### Commits
+
+- `446b610` feat(explain): record the owner review of the explain copy (13 files, +100/-71): the hashes, the release test and the test expectations tied to the unreviewed state.
+
+### TDD Cycle Evidence
+
+| Task | Test file | RED | GREEN | REFACTOR |
+|---|---|---|---|---|
+| G.2 | `packages/finance-core/test/explain/copy.release.test.js` | 16 failed (`releasedTopics()` empty, 14 `reviewedOn` null) | 16 passed after the hashes were set | Shape, topics, handler, index, flow, render, paraphrase and CLI tests moved off the shipped unreviewed state (below) |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/explain scripts functions/nia` exit 0 (36 files, 951 tests) |
+| Runtime harness | `node scripts/check-explain-copy.mjs` exit 0 ("Explain copy check passed: 14 keys are reviewed."); `npm run package:nia` without `NIA_ALLOW_UNREVIEWED` exit 0 (`functions/nia.tar.gz` written, not committed); `npm run build` exit 0 |
+| Full suite | `npm test -- --maxWorkers=4`: 148 files, 2,531 tests passed (first full run: 3 expected failures in `facts.prepayment`, `facts.restructure` and `topics` tests, fixed below) |
+| Rollback boundary | the 28 review lines in `packages/finance-core/src/explain/copy.js` (set both fields back to null) plus the test changes of commit `446b610`; reverting only the copy makes `copy.release.test.js` red by design |
+
+### Test expectations changed (each was tied to the unreviewed shipped copy)
+
+- `copy.shape.test.js`: the entries are no longer asserted `reviewedOn` null; "releases no topic yet" became "ships exactly the draft keys, reviewed" (`releasedTopics()` equals the catalogue).
+- `topics.test.js`: "starts empty in the shipped skeleton" now asserts every shipped key is reviewed; the under-review fact test and the empty-skeleton test pass `{ copy: {} }` / `releasedTopics({})`.
+- `facts.prepayment.test.js`, `facts.restructure.test.js`: "under review" now uses the shipped entries with the review fields cleared.
+- `allowed.test.js`, `paraphrase.test.js`, `render.test.js`, `flow.test.js`: the under-review cases pass `{ copy: {} }` (flow's `facts` helper does).
+- `handler.test.js`: `world()` injects `explainCopy: {}` by default; the released-topics tests still inject `reviewedCopy()`.
+- `index.test.js`: the entry-point test replaces `EXPLAIN_COPY` with `{}` through `vi.mock` of `explain/copy.js`, because the entry point has no copy injection.
+- `scripts/check-explain-copy.test.mjs`: the CLI now exits 0 with no warning; the "refuses to package while unreviewed" test became "packages without `NIA_ALLOW_UNREVIEWED` and writes the tarball". The refusal itself stays covered by the injected-copy `checkExplainCopy` tests.
+
+### Deviations from design
+
+- Task G.2 says `fnv1a(text + sources)`; the hash is `copyHash(entry)` = `fnv1a(text + "\n" + sources as "label|url" lines)`, which is what `copyStatus` and the gate verify.
+- The "DRAFT for the owner review" comment above `EXPLAIN_COPY` now says the copy was approved on 2026-10-15.
+
+### Issues found
+
+None. Packaging does not check that the explain copy matches what the owner read: any later text edit un-reviews its key (hash), and the release test turns red.
+
+### Remaining
+
+G.3 (owner: `npm run package:nia` without the override, upload the tarball, confirm in Telegram), S4.CP, and S5 to S7.
