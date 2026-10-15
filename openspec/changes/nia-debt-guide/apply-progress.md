@@ -175,6 +175,60 @@ Triangulation: bases (first statement, 300,000 unpaid, 800,000 paid in full, cla
 - Verify W4 (card revolving exclusion prorated `baseDays / cycleDays`) is labelled «aproximado» in every figure that depends on it (`lateExcluded`, `revolving`, the interest without mora and their difference).
 - Quirk, not fixed: when the due date clamps onto the statement day, a payment made after that close and before the next one counts as «excluded» base because the base is the balance at the close (the existing core rule).
 
+## Batch S3 (restructure, prepayment, Ley 1555/546, optional paraphrase): COMPLETE (7/7 tasks and the checkpoint)
+
+S3 branch: `feat/ndg-s3-whatif-topics` (from master d5d59d8). The slice was paused by the owner after the S3a commits and resumed for S3b; the S3a evidence below is read back from its commits and tests.
+
+### Tasks
+
+- [x] S3a.1 to S3a.2 (core facts `restructure_whatif` and `prepayment` with `restructureCarry` with and without the waived mora, the two-strategy comparison, the Ley 1555 notice with the unverified-scope caveat, the Ley 546 notice for a mortgage, the `legal.ley546`, `legal.ley1555`, `restructure_whatif.sample` and `prepayment.sample` draft copy with `reviewedOn: null`)
+- [x] S3a.3 to S3a.4 (the two Nia templates, their follow-ups, the Ley 546 sentence in `usury_ibc` for a mortgage, goldens and the property test with mortgage and 0 % fixtures)
+- [x] S3b.1 to S3b.2 (`explain/paraphrase.js`, `explainReplyParaphrased` in `flow.js`, `sendExplain` in `handler.js` uses it, `config.explainParaphrase` from `NIA_EXPLAIN_PARAPHRASE`, default off)
+- [x] S3.CP checkpoint (tests, build, package with the override, plain package still refuses). Not deployed until gate G.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| f44d66c `feat(explain): build the restructure and prepayment facts and the Ley 546 and Ley 1555 draft copy from core results` | S3a (1/2) | 10 files, 486 insertions, 11 deletions |
+| 0fa25e0 `feat(nia): render the restructure and prepayment topics and the Ley 546 note for mortgages` | S3a (2/2) | 4 files, 239 insertions, 8 deletions |
+| 42191a4 `feat(nia): add the optional guarded explain paraphrase, off by default` | S3b | 7 files, 347 insertions, 3 deletions |
+
+Code total vs master before the bookkeeping commit: 21 files, 1,072 insertions, 22 deletions = 1,094 changed lines (budget 2,000; each commit at most 497; below the 1,500 size-review trigger). The slice came to 1,094 against 800 estimated (1.37x).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S3a.1/2 | `facts.restructure.test.js`, `facts.prepayment.test.js` and the mortgage case of `facts.usury.test.js` written first, with the spec numbers (390,381 unpaid 10 days at 28.59 % EA gives 391,756 carried or 390,381 waiving mora; 1,200,000 at 0 %, 12 installments, 1 paid, extra 300,000 gives 8 installments reduce term and 11 reduce installment) | core `test/explain` green, `copy.shape.test.js` and the node16 source list updated for the new keys and files | None needed |
+| S3a.3/4 | goldens for both topics and the mortgage and 0 % fixtures added to `render.property.test.js` | `functions/nia/debt/explain` green; `flow.test.js` fallback case moved to the next topic with no template | None needed |
+| S3b.1/2 | `paraphrase.test.js` (16 cases) written first; run: the suite failed to load (`./paraphrase.js` missing), the right reason | after `paraphrase.js`, `flow.js` and `handler.js`: 15 of 16 passed; the 16th exposed a wrong test expectation (see deviations); 16/16 after the fix. `functions/nia` 733/733, full suite 2,420/2,420 | None needed |
+
+Triangulation: flag parsing (5 on spellings, 9 off values), flag off (missing, false, the string `'true'`) makes no call, faithful reply keeps the exact footer, the prompt carries `text` and never `numbers` or the footer, invented 42 %, 28,32 changed to 28,23, three spelled-out numbers, the 1,200 cap at the exact boundary (fits, one over, 1,300), Gemini throw, timeout and six unusable answers, aproximado dropped and kept, generic, under review and not applicable send no call, and the handler path (default one call, on two calls, rejected, throwing and hanging all send the flag-off text byte for byte).
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/explain functions/nia/debt/explain` exit 0: 16 files, 279 tests passed (`paraphrase.test.js` 16) |
+| Runtime harness | `NIA_ALLOW_UNREVIEWED=1 npm run package:nia` exit 0 (14 keys listed as unreviewed; `functions/nia.tar.gz` written); plain `npm run package:nia` exit 1 listing the same 14 keys. `node scripts/check-explain-copy.mjs --print` exit 0 prints the 14 draft entries for gate G.1 |
+| Full suite and build | `npm test -- --maxWorkers=4`: 143 files, 2,420 tests passed; `npm run build` exit 0 |
+| Rollback boundary | core `explain/facts/{restructure,prepayment}.js`, their two builders in `explain.js` and the S3 entries of `copy.js`; Nia `render.js` two templates and the Ley 546 sentence; `explain/paraphrase.js`, `explainReplyParaphrased` in `flow.js`, the one call in `sendExplain` (`handler.js`), `explainParaphrase` in `index.js` and its README row. Read-only feature, no data written. Reverting only S3b restores the template-only reply |
+
+### Deviations from design
+
+- The guard also accepts the figures of the rendered template body (law numbers such as 1555, 546, 880, 2012 and 1999 come from the reviewed copy, not from `facts`), because otherwise a faithful paraphrase of the Ley 1555 text would always be rejected. The figures of the debt name are allowed too. Number words stay rejected.
+- The S3b.1 test expected `28,32 % efectiva anual` to be accepted unlabelled, but the core marks that rate conversion `approximate: ['ea']` and the spec says estimated figures MUST be labelled aproximado. The rule is now: if a reply states a figure whose key is in `facts.approximate` it must carry the word aproximado; the test reply was changed to `... (aproximado).` and still proves that 28,32 changed to 28,23 is rejected.
+- The paraphrase works on one rendered part at a time (so Ver mas pages are reworded separately and keep the same buttons) and only for `status: 'ok'`. The reply cap is 1,200 minus the footer (source line and disclaimer, kept byte for byte), so the whole message never passes 1,200 characters.
+- The design names `guardParaphrase`; it is called directly with `maxChars = 1200 - footer - 2`, so there is no new wrapper.
+- The environment variable is `NIA_EXPLAIN_PARAPHRASE` (the design only names `config.explainParaphrase`); only `true`, `1`, `on` and `yes` enable it. `paraphraseExplain` requires the boolean `true` in the config, so a stray string never turns it on.
+- The new `index.test.js` case (flag on, under-review topic, still two prompts) is a characterization test and passed before the wiring: the entry point does not pass `explainCopy` yet (gate G), so every topic is under review there and the flag cannot be observed end to end until then. The flag path is proven in `paraphrase.test.js` through `handleDebt`.
+
+### Issues found
+
+- Enabling the flag adds a third Gemini call per explanation (NA3 forbids it by default), so it ships off and enabling it is the owner decision after gate G.
+- Gate G.1 is open: the owner reviews the 14 draft entries (`node scripts/check-explain-copy.mjs --print`) and sends back the approved keys. The paraphrase prompt asks for 800 characters, which is only a hint: the guard enforces the cap.
+
 ### Remaining
 
-S3 to S7 and gate G (owner copy review G.1 to G.3 blocks the first deploy of S1 to S3).
+S4 to S7 and gate G (owner copy review G.1 to G.3 blocks the first deploy of S1 to S3).

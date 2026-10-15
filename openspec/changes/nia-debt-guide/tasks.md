@@ -129,13 +129,13 @@ Groups: S2a core (about 450); S2b Nia (about 450).
 
 Groups: S3a topics (about 500); S3b paraphrase (about 300).
 
-- [ ] S3a.1 RED `facts.restructure.test.js`, `facts.prepayment.test.js`, `facts.usury.test.js` (mortgage case): installment 390,381 unpaid 10 days at 28.59 % EA gives carried balance 391,756 or 390,381 waiving mora; 1,200,000 at 0 %, 12 installments, 1 paid, extra 300,000 gives reduce term 8 installments and reduce installment 11; Ley 1555 notice with the unverified-scope caveat; mortgage debt explains Ley 546 and states that no computation is made. Reqs DE11, DE6.
-- [ ] S3a.2 GREEN `facts/{restructure,prepayment}.js` (`restructureCarry` with and without `waiveLate`, `compareStrategies`, `ley1555Notice`), Ley 1555 and Ley 546 copy entries with sources, `reviewedOn: null`. Done: S3a.1 passes.
-- [ ] S3a.3 RED `render.test.js` goldens for `restructure_whatif` and `prepayment` and property test extension (mortgage and 0 % fixtures). Reqs DE11, DE2, DE3.
-- [ ] S3a.4 GREEN `render.js` two templates and follow-ups. Done: S3a.3 passes.
-- [ ] S3b.1 RED `functions/nia/debt/explain/paraphrase.test.js`: with `config.explainParaphrase` off (default) the template is sent and no extra Gemini call is made (at most 2); with it on, a faithful paraphrase is sent; invented 42 %, changed 28.32 to 28.23, «cuatro por mil», a reply over the cap, and a Gemini failure or timeout each send the template. Reqs DE13, NA10.
-- [ ] S3b.2 GREEN `explain/paraphrase.js`, `config.explainParaphrase` flag (default false), wiring in `flow.js` via `guardParaphrase`. Done: S3b.1 passes. Note: enabling it adds a third Gemini call, so it stays off until the owner decides.
-- [ ] S3.CP checkpoint (override packaging).
+- [x] S3a.1 RED `facts.restructure.test.js`, `facts.prepayment.test.js`, `facts.usury.test.js` (mortgage case): installment 390,381 unpaid 10 days at 28.59 % EA gives carried balance 391,756 or 390,381 waiving mora; 1,200,000 at 0 %, 12 installments, 1 paid, extra 300,000 gives reduce term 8 installments and reduce installment 11; Ley 1555 notice with the unverified-scope caveat; mortgage debt explains Ley 546 and states that no computation is made. Reqs DE11, DE6.
+- [x] S3a.2 GREEN `facts/{restructure,prepayment}.js` (`restructureCarry` with and without `waiveLate`, `compareStrategies`, `ley1555Notice`), Ley 1555 and Ley 546 copy entries with sources, `reviewedOn: null`. Done: S3a.1 passes.
+- [x] S3a.3 RED `render.test.js` goldens for `restructure_whatif` and `prepayment` and property test extension (mortgage and 0 % fixtures). Reqs DE11, DE2, DE3.
+- [x] S3a.4 GREEN `render.js` two templates and follow-ups. Done: S3a.3 passes.
+- [x] S3b.1 RED `functions/nia/debt/explain/paraphrase.test.js`: with `config.explainParaphrase` off (default) the template is sent and no extra Gemini call is made (at most 2); with it on, a faithful paraphrase is sent; invented 42 %, changed 28.32 to 28.23, «cuatro por mil», a reply over the cap, and a Gemini failure or timeout each send the template. Reqs DE13, NA10.
+- [x] S3b.2 GREEN `explain/paraphrase.js`, `config.explainParaphrase` flag (default false), wiring in `flow.js` via `guardParaphrase`. Done: S3b.1 passes. Note: enabling it adds a third Gemini call, so it stays off until the owner decides.
+- [x] S3.CP checkpoint (override packaging).
 
 ## Gate G: owner copy review (blocks the first deploy of S1 to S3) · deps: S1, S2, S3
 
