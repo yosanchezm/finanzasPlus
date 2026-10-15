@@ -663,3 +663,17 @@ describe('normaliseDebtExtraction: setup (S5a)', () => {
     expect(norm({ action: 'create', kind: 'vehicle', name: 'Moto', principalMinor: 1000000, rate: { value: 24, period: 'annual' }, n: 12 }).setup).toBeNull();
   });
 });
+
+describe('debtPrompt: a debt in progress', () => {
+  it('tells the model which described debt is waiting for answers, only when one is', () => {
+    const open = debtPrompt('el corte es el 15', [], [], { today: TODAY, setup: { kind: 'card', name: 'Tarjeta Bancolombia' } });
+    expect(open).toContain('Hay una configuración de deuda en curso');
+    expect(open).toContain('tarjeta «Tarjeta Bancolombia»');
+    expect(open).toContain('action setup');
+
+    const loan = debtPrompt('a 12 cuotas', [], [], { today: TODAY, setup: { kind: 'consumer', name: 'Libre inversión' } });
+    expect(loan).toContain('deuda «Libre inversión»');
+
+    expect(debtPrompt('el corte es el 15', [], [], { today: TODAY })).not.toContain('configuración de deuda en curso');
+  });
+});

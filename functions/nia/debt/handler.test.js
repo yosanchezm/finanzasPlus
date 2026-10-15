@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPLAIN_TOPICS, normalizeRate, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../packages/finance-core/test/helpers/explainCopy.js';
 import { pesos } from './format.js';
-import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain, loadDebts, loadLegal } from './handler.js';
+import { answersOpenSetup, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, isOpenSetup, lastExplain, loadDebts, loadLegal } from './handler.js';
 import { buildPending } from './pending.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
@@ -2719,5 +2719,34 @@ describe('setup: the proposal (read-only)', () => {
     expect(terms.charges.map((item) => [item.id, item.value])).toEqual([['mgmt_fee', 45000], ['mgmt_iva', 19]]);
     expect(w.sent.slice(-3).map((message) => message.text.includes('ya estaba registrada'))).toEqual([false, true, true]);
     expect(w.prompts).toHaveLength(2); // one extraction per text message and none for the buttons or the Confirm
+  });
+});
+
+describe('setup: the extraction knows which described debt is waiting', () => {
+  it('adds the open setup to the extraction prompt, and nothing for a finished one or for another pending', async () => {
+    const w = world({ debts: [], answers: [setupAnswer(), cardAnswer({ statementDay: 15 }), cardAnswer({})] });
+    await handleDebt(w.deps, ctx());
+    const waiting = w.lastPending();
+    await handleDebt(w.deps, ctx({ previous: waiting }));
+    await handleDebt(w.deps, ctx({ previous: { ...waiting, done: true } }));
+
+    expect(w.prompts[0]).not.toContain('configuración de deuda en curso');
+    expect(w.prompts[1]).toContain('Hay una configuración de deuda en curso: tarjeta «Tarjeta Bancolombia»');
+    expect(w.prompts[2]).not.toContain('configuración de deuda en curso');
+    expect(isOpenSetup(waiting)).toBe(true);
+    expect(isOpenSetup({ ...waiting, done: true })).toBe(false);
+    expect(isOpenSetup({ kind: 'debt', v: 1, id: 'x', action: 'pay', awaiting: 'confirm' })).toBe(false);
+    expect(isOpenSetup(null)).toBe(false);
+  });
+
+  it('recognises a short answer to the open questions: digits or «no sé», not a long text or another pending', () => {
+    const waiting = setupPending(cardCase(), { awaiting: 'answers' });
+    expect(answersOpenSetup(waiting, 'el corte es el 15')).toBe(true);
+    expect(answersOpenSetup(waiting, 'No sé')).toBe(true);
+    expect(answersOpenSetup(waiting, 'no lo sé todavía')).toBe(true);
+    expect(answersOpenSetup(waiting, 'gracias')).toBe(false);
+    expect(answersOpenSetup(waiting, `el corte es el 15 ${'y más '.repeat(40)}`)).toBe(false);
+    expect(answersOpenSetup({ ...waiting, done: true }, 'el corte es el 15')).toBe(false);
+    expect(answersOpenSetup(null, 'el corte es el 15')).toBe(false);
   });
 });

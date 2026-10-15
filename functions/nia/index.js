@@ -4,7 +4,7 @@ import undici from 'undici';
 import { parseThresholds } from './debt/cashflow.js';
 import { paraphraseEnabled } from './debt/explain/paraphrase.js';
 import { glossaryTopic } from './debt/explain/router.js';
-import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
+import { answersOpenSetup, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
 
@@ -469,6 +469,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     'Puedes conversar, explicar conceptos, analizar finanzas y procesar textos, fotos, documentos y notas de voz.',
     'Clasifica cada mensaje con un intent: transaction para gastos, ingresos o transferencias; budget para presupuestos o límites por categoría; goal para metas y progreso; category para categorías; analysis para revisar, resumir, comparar o entender finanzas; debt para préstamos, deudas y tarjetas de crédito (crearlas, registrar un pago o abono, listarlas, simular un abono extra, pedir una recomendación de cómo abonar, registrar una tasa legal: la usura, el IBC o el salario mínimo, cambiar la tasa de una deuda que ya existe, cambiar o quitar un seguro o cargo de una deuda, configurar la mora de una deuda que ya existe, reestructurar una deuda que ya existe, o pedir que te expliquen un concepto de deudas como tasas y sus convenciones, usura, mora, cargos, GMF, corte de la tarjeta o abonos: la acción explain); conversation para preguntas generales, capacidades, identidad o educación financiera.',
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
+    'Si la interpretación pendiente anterior es una solicitud de deuda (kind debt) que espera datos, un mensaje corto que responde sus preguntas (por ejemplo “el corte es el 15” o “no sé”) es debt.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
     'Resuelve referencias como ayer, el viernes pasado o la semana pasada usando la fecha actual y la zona horaria. Si son ambiguas, marca date como faltante.',
@@ -1075,6 +1076,11 @@ async function handleTextOrReceipt(message, updateId, profile) {
       await handleDebt(debtDeps(), { chatId, actorId, profile, text, history, previous, sessionStatus: session?.status, explainHint });
       return;
     }
+    // A short answer to the questions of a described debt that is waiting is a debt message even if the classifier took it for chat.
+    if (!attachment && answersOpenSetup(previous, text)) {
+      await handleDebt(debtDeps(), { chatId, actorId, profile, text, history, previous, sessionStatus: session?.status });
+      return;
+    }
   }
 
   const operation = normaliseOperation(raw, profile);
@@ -1174,7 +1180,7 @@ async function handleUpdate(update) {
       // Stateless and read-only: routed before the stage check, so it needs no pending and leaves the waiting one as it is.
       const session = await getSession(chatId);
       await handleExplainCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), previous: pendingFromSession(session), sessionStatus: session?.status }, callback.data);
-    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|simpay$)/.test(callback.data || '')) {
+    } else if (/^nia:(pick:|strat:|conv:|mode:|chg:|min:|simpay$)/.test(callback.data || '')) {
       const session = await getSession(chatId);
       await handleDebtCallback(debtDeps(), { chatId, actorId, profile, history: historyFromSession(session), pending: pendingFromSession(session) }, callback.data);
     } else if (callback.data === 'nia:edit') await sendMessage(chatId, 'Escribe la corrección, por ejemplo: “fue el lunes y era de transporte”.');

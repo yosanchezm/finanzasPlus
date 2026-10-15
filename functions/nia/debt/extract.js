@@ -31,14 +31,17 @@ const conversationLines = (history) => (history || [])
 
 const debtLine = (debt) => `- ${debt.name} (tipo ${debt.kind}${debt.lender ? `, entidad ${debt.lender}` : ''})`;
 
+// A described debt that Nia is still asking questions about (S5c): without this line a short answer such as «el corte es el 15» could be read as a new request.
+const openSetupLine = ({ kind, name }) => `Hay una configuración de deuda en curso: ${kind === 'card' ? 'tarjeta' : 'deuda'} «${name || 'sin nombre'}» (kind ${kind}). Nia le hizo preguntas al usuario sobre ella. Si el mensaje las responde (día de corte o de pago, cómo se calcula el pago mínimo, la tasa, un monto, “no sé”), usa action setup con kind ${kind} y llena solo lo que el usuario dijo en este mensaje; el resto va en null. Si pide otra cosa, usa la acción que corresponda.`;
+
 /**
  * Prompt of the debt extraction call.
  * @param {string} text The user's message.
  * @param {object[]} debts Existing `debts` rows (names help the model choose `debtRef`).
  * @param {{ role: string, content: string }[]} history Recent chat turns.
- * @param {{ today: string, timezone?: string, currency?: string }} options
+ * @param {{ today: string, timezone?: string, currency?: string, setup?: ({ kind: string, name: string } | null) }} options `setup`: the described debt that is waiting for answers.
  */
-export function debtPrompt(text, debts, history, { today, timezone = 'America/Bogota', currency = 'COP' } = {}) {
+export function debtPrompt(text, debts, history, { today, timezone = 'America/Bogota', currency = 'COP', setup = null } = {}) {
   return [
     'Eres Nia. Extrae los datos de una solicitud sobre deudas (préstamos y tarjetas) de un hogar. Solo extraes: no calcules cuotas, saldos, intereses ni equivalencias de tasa; el sistema lo hace.',
     `La fecha de hoy en ${timezone} es ${today}. La moneda es ${currency}; los montos son enteros en pesos, no centavos.`,
@@ -51,6 +54,7 @@ export function debtPrompt(text, debts, history, { today, timezone = 'America/Bo
     'En legal copia lo que dijo el usuario: kind (usury, ibc o smmlv), modality como la nombró (consumo, hipotecario, productivo rural…) o null, month tal como lo escribió (por ejemplo “noviembre”; no conviertas el mes a número ni le pongas año), year solo si lo dijo, y value (el porcentaje tal cual, 28.2; para el salario mínimo, pesos enteros). Si no es una tasa legal, legal es null.',
     'En planChange, para rate_change: la nueva tasa va en rate (igual que al crear); effectiveOn es la fecha desde la que rige el cambio, tal como la dijo, o null si no la dijo; mode es keep_term si quiere mantener el plazo (la cuota se recalcula), keep_installment si quiere mantener la cuota (el plazo se recalcula) y null si no lo dijo. Para charge_change: chargeRef es el nombre del seguro o cargo tal como lo dijo (por ejemplo “seguro de vida”), op es set para cambiar su valor, remove para quitarlo y add para agregar uno nuevo, y newValue el valor nuevo (pesos enteros si es un monto fijo; el porcentaje tal cual si es un porcentaje); usa null en lo que no dijo. Para restructure: n es el número de cuotas del plan nuevo, system y periodicity solo si los cambia, firstDueOn la fecha de la primera cuota tal como la dijo, waiveLate true solo si pide condonar o perdonar los intereses de mora, y la tasa nueva, si la dice, va en rate; charges solo si dice cuáles seguros o cargos tendrá el plan nuevo (reemplazan los actuales). Si no es un cambio de plan, planChange es null.',
     'Nunca inventes una fecha: usa null si no la dijo. Si falta un dato necesario, añade su nombre en missingFields.',
+    ...(setup ? [openSetupLine(setup)] : []),
     'Devuelve únicamente JSON válido, sin markdown, con exactamente estas claves:',
     SCHEMA,
     debts.length ? `Deudas registradas:\n${debts.map(debtLine).join('\n')}` : 'No hay deudas registradas.',

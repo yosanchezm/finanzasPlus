@@ -470,6 +470,14 @@ const SETUP_KEYBOARDS = { confirm: confirmKeyboard, convention: conventionKeyboa
 /** The pending of a described debt that still waits for the user (not the done marker). */
 export const isOpenSetup = (pending) => Boolean(pending) && pending.kind === 'debt' && pending.action === 'setup' && !pending.done && Boolean(pending.draft && pending.draft.setup);
 
+const SHORT_ANSWER_MAX = 160;
+
+/**
+ * Whether a message looks like the answer to the questions of an open setup (S5c): short, with a figure («el corte es el 15») or a «no sé».
+ * It is the entry point's backstop for a classifier that calls such an answer a conversation; a longer text keeps the classifier's intent.
+ */
+export const answersOpenSetup = (pending, text) => isOpenSetup(pending) && typeof text === 'string' && text.length <= SHORT_ANSWER_MAX && (/\d/.test(text) || /\bno\s+(lo\s+)?(s[eé]|tengo|recuerdo)(?![a-zñáéíóú])/i.test(text));
+
 function setupStage(proposal) {
   if (proposal.draft) return 'confirm';
   if (proposal.questions.some((question) => question.field === 'convention')) return 'convention';
@@ -508,7 +516,8 @@ export async function handleDebt(deps, ctx) {
   const asOf = today(deps);
   const legal = await loadLegal(deps);
   const debts = await loadDebts(deps, legal);
-  const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency }));
+  const open = isOpenSetup(ctx.previous) ? ctx.previous.draft.setup : null;
+  const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency, setup: open && { kind: open.kind, name: open.name } }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
   if (request.setup) return startSetup(deps, ctx, request, legal);

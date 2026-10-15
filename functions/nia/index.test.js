@@ -701,3 +701,118 @@ describe('explain in the Nia entry point', () => {
     expect(writes()).toBe(before);
   });
 });
+
+describe('advisor setup in the Nia entry point', () => {
+  const MV_TEXT = { value: 2.1, period: 'monthly', compounding: 'effective', timing: 'arrears' };
+  const bancolombia = (extra = {}) => ({ action: 'setup', kind: 'card', name: 'Tarjeta Bancolombia', lender: 'Bancolombia', rate: MV_TEXT, setup: { presets: { fee: 45000, iva: true } }, ...extra });
+  const answer = (card) => ({ action: 'setup', kind: 'card', setup: { card } });
+  const classify = { intent: 'debt', action: 'create' };
+  const MIN_BUTTONS = ['nia:min:interest_fees_plus_pct', 'nia:min:installments_due', 'nia:min:pct_balance', 'nia:min:unknown'];
+  const writes = () => fake.posts.length + fake.patches.length;
+  const sessionPending = () => JSON.parse(fake.tables.bot_sessions[0].pendingJson).pending;
+  const OWNER_TEXT = 'tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 + IVA';
+
+  it('sends a described card to the advisor: the proposal has the EA echo, the linked IVA and the rule buttons, and nothing is written', async () => {
+    fake = makeNet([classify, bancolombia()]);
+
+    await run(message(OWNER_TEXT));
+
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].text).toContain('Nueva tarjeta: Tarjeta Bancolombia');
+    expect(sent()[0].text).toContain('2.1% MV ≈ 28.32% EA');
+    expect(sent()[0].text).toContain('IVA: $ 8.550');
+    expect(buttons(sent()[0])).toEqual(MIN_BUTTONS);
+    expect(sessionPending()).toMatchObject({ kind: 'debt', action: 'setup', awaiting: 'minimum', draft: { setup: { name: 'Tarjeta Bancolombia' } } });
+    expect(fake.tables.debts).toHaveLength(0);
+    expect(fake.tables.debt_events).toHaveLength(0);
+    expect(fake.prompts).toHaveLength(2);
+    expect(fake.posts.map((post) => post.table)).toEqual(['bot_sessions']);
+  });
+
+  it('tells the classifier that a short answer to the questions of a debt in progress is a debt message, and shows it the pending', async () => {
+    fake = makeNet([classify, bancolombia(), classify, answer({ statementDay: 15, dueDay: 30 })]);
+    await run(message(OWNER_TEXT));
+    await run(message('el corte es el 15 y el pago el 30'));
+
+    expect(fake.prompts[0]).toContain('el corte es el 15');
+    expect(fake.prompts[2]).toContain('"action":"setup"');
+    expect(fake.prompts[3]).toContain('Hay una configuración de deuda en curso');
+    expect(fake.prompts[3]).toContain('Tarjeta Bancolombia');
+    expect(fake.prompts[1]).not.toContain('configuración de deuda en curso');
+    expect(sent()[1].text).not.toContain('¿Qué día del mes es el corte');
+    expect(sent()[1].text).toContain('¿Cómo calcula el banco tu pago mínimo?');
+    expect(sessionPending()).toMatchObject({ awaiting: 'minimum', draft: { setup: { card: { statementDay: 15, dueDay: 30 } } } });
+  });
+
+  it('still reaches the advisor when the classifier calls «el corte es el 15» a conversation, but leaves other chat alone', async () => {
+    fake = makeNet([classify, bancolombia(), { intent: 'conversation', action: 'none', reply: 'Anotado' }, answer({ statementDay: 15 }), { intent: 'conversation', action: 'none', reply: 'De nada' }]);
+    await run(message(OWNER_TEXT));
+    await run(message('el corte es el 15'));
+
+    expect(sent()[1].text).toContain('¿Qué día del mes es la fecha límite');
+    expect(sent()[1].text).not.toBe('Anotado');
+    expect(sessionPending().draft.setup.card.statementDay).toBe(15);
+
+    await run(message('gracias'));
+    expect(sent()[2].text).toBe('De nada');
+    expect(fake.prompts).toHaveLength(5); // the thanks used the classifier call only
+    expect(sessionPending()).toMatchObject({ action: 'setup' });
+  });
+
+  it('answers a glossary question while the setup waits, and keeps the setup pending as it was', async () => {
+    fake = makeNet([classify, bancolombia(), { intent: 'conversation', action: 'none', reply: 'x' }, { action: 'explain', topic: 'usury_ibc' }]);
+    await run(message(OWNER_TEXT));
+    const waiting = sessionPending();
+    await run(message('¿qué es la usura? ¿es el 28%?'));
+
+    expect(sent()[1].text).not.toContain('Nueva tarjeta');
+    expect(sessionPending()).toEqual(waiting);
+  });
+
+  it('routes nia:min: and nia:conv: buttons to the setup, and Confirm creates exactly one card however many times it arrives', async () => {
+    fake = makeNet([classify, bancolombia({ rate: { value: 2, period: 'monthly' } }), classify, answer({ statementDay: 15, dueDay: 30 })]);
+    await run(message('tarjeta Bancolombia al 2% mensual, cuota de manejo 45.000 + IVA'));
+    expect(buttons(sent()[0])).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+
+    await run(press('nia:conv:MV'));
+    expect(sent()[1].text).toContain('2% MV ≈ 26.82% EA');
+    expect(buttons(sent()[1])).toEqual(MIN_BUTTONS);
+    await run(message('el corte es el 15 y el pago el 30'));
+    await run(press('nia:min:interest_fees_plus_pct'));
+    expect(buttons(sent()[3])).toContain('nia:confirm');
+    expect(fake.tables.debts).toHaveLength(0);
+
+    const confirm = press('nia:confirm');
+    await run(confirm);
+    await run(confirm); // Telegram delivers the same update again
+    await run(press('nia:confirm')); // and the user taps once more
+
+    expect(fake.tables.debts).toEqual([expect.objectContaining({ name: 'Tarjeta Bancolombia', kind: 'card', ownerScope: 'you', actorId: 'u7', principalMinor: 0 })]);
+    expect(JSON.parse(fake.tables.debts[0].termsJson).card).toMatchObject({ statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct' } });
+    expect(fake.tables.debt_events).toHaveLength(0);
+    expect(fake.tables.transactions).toHaveLength(0);
+    expect(sent().slice(4).map((call) => /ya estaba registrada/.test(call.text))).toEqual([false, true, true]);
+    expect(fake.prompts).toHaveLength(4); // two turns, two calls each: the buttons and the Confirms call no model
+  });
+
+  it('ignores a stale nia:min: or nia:conv: button: no pending, or a request that moved on', async () => {
+    fake = makeNet([]);
+    await run(press('nia:min:pct_balance'));
+    await run(press('nia:conv:MV'));
+    expect(sent().map((call) => call.text)).toEqual(['No tengo una solicitud de deuda pendiente.', 'No tengo una solicitud de deuda pendiente.']);
+    expect(writes()).toBe(0);
+
+    fake = makeNet([classify, bancolombia(), classify, answer({ statementDay: 15, dueDay: 30, minRule: 'pct_balance' })]);
+    await run(message(OWNER_TEXT));
+    await run(message('el corte es el 15, el pago el 30 y el mínimo es el 5% del total'));
+    const before = writes();
+    const ready = fake.tables.bot_sessions[0].pendingJson;
+    await run(press('nia:min:installments_due'));
+    await run(press('nia:conv:EA'));
+
+    expect(sent().slice(-2).map((call) => call.text)).toEqual(['Esa opción ya no aplica a la solicitud actual.', 'Esa opción ya no aplica a la solicitud actual.']);
+    expect(writes()).toBe(before);
+    expect(fake.tables.bot_sessions[0].pendingJson).toBe(ready);
+    expect(fake.tables.debts).toHaveLength(0);
+  });
+});
