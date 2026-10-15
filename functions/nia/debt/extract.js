@@ -246,8 +246,8 @@ function readSetup(raw, today, problems) {
       rate: rate ?? null,
       rateValue: rateValue ?? null,
       n: scheduled && isPositiveInteger(raw.n) ? raw.n : null,
-      periodicity: hasKey(PERIODICITIES, raw.periodicity) ? raw.periodicity : 'monthly',
-      system: card || informal ? 'none' : SYSTEMS.includes(raw.system) ? raw.system : 'french',
+      periodicity: hasKey(PERIODICITIES, raw.periodicity) ? raw.periodicity : null,
+      system: card || informal ? 'none' : SYSTEMS.includes(raw.system) ? raw.system : null,
       firstDueOn: isIsoDate(raw.firstDueOn) ? raw.firstDueOn : null,
       card: {
         statementDay: readDay(cardInput.statementDay, problems),

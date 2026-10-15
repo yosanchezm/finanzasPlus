@@ -99,6 +99,12 @@ describe('buildTerms and previewCreate', () => {
     expect(buildTerms({ ...create, firstDueOn: '2026-11-20' }).firstDueOn).toBe('2026-11-20');
   });
 
+  it('writes the mora of the kind unless the caller passes its own policy (the advisor honours «sin mora»)', () => {
+    expect(buildTerms(create).late).toEqual({ mode: 'usury', graceDays: 0 });
+    expect(buildTerms({ ...create, late: { mode: 'none', graceDays: 0 } }).late).toBeUndefined();
+    expect(buildTerms({ ...create, kind: 'family', late: { mode: 'usury', graceDays: 0 } }).late).toEqual({ mode: 'usury', graceDays: 0 });
+  });
+
   it('builds balance-only terms for an informal debt', () => {
     const terms = buildTerms({ ...create, kind: 'informal', system: 'none', n: null, rate: { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' } });
 

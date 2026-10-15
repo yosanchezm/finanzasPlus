@@ -106,8 +106,8 @@ export function buildTerms(create) {
     terms.n = create.n;
     terms.firstDueOn = create.firstDueOn || periodDates(create.openedOn, create.periodicity, 2)[1];
     terms.charges = create.charges;
-    // Same rule as the web wizard: a kind with a default mora writes it, a kind without one writes nothing.
-    const late = defaultLateFor(create.kind);
+    // Same rule as the web wizard: a kind with a default mora writes it, a kind without one writes nothing. The advisor passes its own policy.
+    const late = create.late || defaultLateFor(create.kind);
     if (late.mode !== 'none') terms.late = late;
   }
   return validateTerms(terms);

@@ -644,8 +644,9 @@ describe('normaliseDebtExtraction: setup (S5a)', () => {
 
   it('reads a described loan with its plan, and keeps the opening balance of a card optional', () => {
     const loan = norm({ action: 'setup', kind: 'consumer', name: 'Libre inversión', principalMinor: 1200000, rate: { value: 0, period: 'annual' }, n: 3, setup: block({ presets: { gmf: true } }) });
-    expect(loan.setup).toMatchObject({ kind: 'consumer', principalMinor: 1200000, n: 3, system: 'french', periodicity: 'monthly', presets: { gmf: true } });
-    expect(norm(bancolombia()).setup.principalMinor).toBe(0);
+    expect(loan.setup).toMatchObject({ kind: 'consumer', principalMinor: 1200000, n: 3, system: null, periodicity: null, presets: { gmf: true } }); // unspoken plan choices stay null; the advisor applies the defaults
+    expect(norm({ action: 'setup', kind: 'consumer', name: 'A', system: 'german', periodicity: 'biweekly' }).setup).toMatchObject({ system: 'german', periodicity: 'biweekly' });
+    expect(norm(bancolombia()).setup).toMatchObject({ principalMinor: 0, system: 'none', periodicity: null, n: null });
     expect(norm(bancolombia({ principalMinor: 500000 })).setup.principalMinor).toBe(500000);
   });
 
