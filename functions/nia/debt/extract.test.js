@@ -486,7 +486,7 @@ describe('normaliseDebtExtraction: explain', () => {
     for (const topic of EXPLAIN_TOPICS) expect(prompt).toContain(topic);
     expect(ACTIONS).toContain('explain');
     expect(ACTIONS).toContain('setup');
-    expect(ACTIONS).not.toContain('terms_correction');
+    expect(ACTIONS).toContain('terms_correction');
   });
 
   it('keeps a topic of the closed catalogue, the debt selector, the stated rate and the amount', () => {
@@ -698,5 +698,55 @@ describe('debtPrompt: a debt in progress', () => {
     expect(loan).toContain('deuda «Libre inversión»');
 
     expect(debtPrompt('el corte es el 15', [], [], { today: TODAY })).not.toContain('configuración de deuda en curso');
+  });
+});
+
+describe('normaliseDebtExtraction: terms_correction', () => {
+  const fix = (correction = {}, extra = {}) => ({ action: 'terms_correction', debtRef: 'tarjeta', correction, ...extra });
+
+  it('is an action the model can choose, and the prompt teaches the fields it extracts', () => {
+    const prompt = debtPrompt('el corte es el 20, no el 15', [], [], { today: TODAY });
+
+    expect(ACTIONS).toContain('terms_correction');
+    expect(prompt).toContain('terms_correction');
+    expect(prompt).toContain('"correction"');
+    expect(prompt).toMatch(/estaba mal desde el inicio/i);
+  });
+
+  it('reads the card fields the user corrected and nothing else', () => {
+    const result = norm(fix({ statementDay: 20 }));
+
+    expect(result).toMatchObject({ action: 'terms_correction', debtRef: 'tarjeta', missingFields: [], problems: [], correction: { fields: { card: { statementDay: 20 } }, rateValue: null, mentions: [] } });
+    expect(norm(fix({ dueDay: 5, minRule: 'pct_balance', minPct: 10, minFloorMinor: 30000 })).correction.fields)
+      .toEqual({ card: { dueDay: 5, minPayment: { rule: 'pct_balance', pct: 10, floorMinor: 30000 } } });
+  });
+
+  it('reads the rate as the bank states it, or keeps the bare value until the convention button answers', () => {
+    const stated = norm(fix({}, { rate: { value: 2.1, period: 'monthly', compounding: 'effective', timing: 'arrears' } }));
+    const bare = norm(fix({}, { rate: { value: 2.1, period: 'monthly' } }));
+
+    expect(stated.correction.fields.rate).toMatchObject({ value: 2.1, periodicity: 'monthly' });
+    expect(stated.missingFields).toEqual([]);
+    expect(bare.correction).toMatchObject({ fields: {}, rateValue: 2.1 });
+    expect(bare.missingFields).toEqual([]);
+  });
+
+  it('reads a modality by its name and refuses one it does not know', () => {
+    expect(norm(fix({ modality: 'bajo monto' })).correction.fields).toEqual({ modality: 'low_amount' });
+    expect(norm(fix({ modality: 'productivo rural' })).correction.fields).toEqual({ modality: 'productive_rural' });
+    expect(norm(fix({ modality: 'cripto' })).problems).toEqual(['legal_unknown_modality']);
+  });
+
+  it('keeps what Nia cannot save yet as mentions, and does not ask what to correct when there is one', () => {
+    const result = norm(fix({ mentions: ['card_limit', 'nada'] }));
+
+    expect(result.correction).toMatchObject({ fields: {}, mentions: ['card_limit'] });
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it('asks what to correct when nothing was stated, and flags impossible days', () => {
+    expect(norm(fix({})).missingFields).toEqual(['correction_field']);
+    expect(norm(fix({ statementDay: 40 })).problems).toEqual(['invalid_day']);
+    expect(norm(fix({ minPct: -3, minRule: 'inventada' })).missingFields).toEqual(['correction_field']);
   });
 });

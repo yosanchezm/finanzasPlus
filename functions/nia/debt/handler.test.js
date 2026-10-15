@@ -2817,3 +2817,136 @@ describe('setup: the extraction knows which described debt is waiting', () => {
     expect(answersOpenSetup(null, 'el corte es el 15')).toBe(false);
   });
 });
+
+describe('terms_correction (S6a)', () => {
+  // The card of the core fixture: statement day 15, due day 30, minimum 5 % with a 20,000 floor, mora at the usury cap.
+  const fixtureCard = JSON.parse(readFileSync(new URL('../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+  const CARD = { ...fixtureCard.terms, late: { mode: 'usury', graceDays: 0 } };
+  const visa = (id = 'c1', name = 'Visa') => debtRow(id, name, { kind: 'card', termsJson: serializeTerms(CARD) });
+  const answer = (correction = {}, extra = {}) => ({ action: 'terms_correction', debtRef: 'visa', correction, ...extra });
+  const corrections = (w) => w.tables.debt_events.filter((event) => event.kind === 'terms_correction');
+  const cardWorld = (answers, debts = [visa()]) => {
+    const w = world({ debts, answers });
+    w.tables.debt_events.splice(0); // the helper seeds a loan disbursement for every debt; a card has none
+    return w;
+  };
+  const savedCorrection = (fields, previous) => ({ $id: 'web1', debtId: 'c1', householdId: 'h1', kind: 'terms_correction', effectiveOn: '2026-10-12', amountMinor: 0, payloadJson: JSON.stringify({ fields, previous, appliesTo: 'opening' }), actorId: ACTOR, source: 'web', dedupeKey: 'web:1', $createdAt: '2026-10-12T12:00:00.000Z' });
+  const payment = { $id: 'p1', debtId: 'c1', householdId: 'h1', kind: 'payment', effectiveOn: '2026-05-20', amountMinor: 140000, payloadJson: '{}', actorId: ACTOR, source: 'web', dedupeKey: 'seed:p1', $createdAt: '2026-05-20T12:00:00.000Z' };
+
+  it('previews 15 to 20 with the retroactive note, writes nothing, and Confirm writes exactly one terms_correction, once', async () => {
+    const w = cardWorld([answer({ statementDay: 20 })]);
+    await handleDebt(w.deps, ctx({ text: 'el corte de la tarjeta es el 20, no el 15' }));
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('Corrección de datos en Visa');
+    expect(w.sent[0].text).toContain('Día de corte: 15 → 20');
+    expect(w.sent[0].text).toContain('desde el inicio de la deuda');
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+    expect(w.sessions[0].status).toBe('awaiting_confirmation');
+    expect(w.lastPending()).toMatchObject({ kind: 'debt', action: 'terms_correction', awaiting: 'confirm', debtId: 'c1', draft: { card: { statementDay: 20 } } });
+    expect(Buffer.byteLength(JSON.stringify(w.lastPending()), 'utf8')).toBeLessThan(400);
+    expect(corrections(w)).toHaveLength(0);
+
+    const pending = w.lastPending();
+    await confirmDebt(w.deps, ctx(), pending);
+    await confirmDebt(w.deps, ctx(), pending); // a double tap
+
+    expect(corrections(w)).toHaveLength(1);
+    expect(corrections(w)[0]).toMatchObject({ debtId: 'c1', kind: 'terms_correction', amountMinor: 0, dedupeKey: 'debt:p1', actorId: ACTOR, source: 'telegram' });
+    expect(JSON.parse(corrections(w)[0].payloadJson)).toEqual({ fields: { card: { statementDay: 20 } }, previous: { card: { statementDay: 15 } }, appliesTo: 'opening' });
+    expect(w.sent[1].text).toContain('registré la corrección de datos de Visa');
+    expect(w.sent[2].text).toContain('ya estaba registrada');
+    expect(costRows(w)).toHaveLength(0);
+  });
+
+  it('says nothing changes when the stated day is the stored one, and writes nothing', async () => {
+    const w = cardWorld([answer({ statementDay: 15 })]);
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent[0].text).toContain('no hay nada que corregir');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(corrections(w)).toHaveLength(0);
+  });
+
+  it('rebuilds the event at Confirm from the live debt: a correction saved in between makes the same request a no-op', async () => {
+    const w = cardWorld([answer({ statementDay: 20 })]);
+    await handleDebt(w.deps, ctx());
+    w.tables.debt_events.push(savedCorrection({ card: { statementDay: 20 } }, { card: { statementDay: 15 } }));
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.sent[1].text).toContain('no hay nada que corregir');
+    expect(corrections(w)).toHaveLength(1);
+  });
+
+  it('adds the backdated note to the preview and to the Confirm reply when a recorded payment changes cost', async () => {
+    const w = cardWorld([answer({ minPct: 3 })]);
+    w.tables.debt_events.push(payment);
+    await handleDebt(w.deps, ctx());
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+
+    expect(w.sent[0].text).toContain('Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.');
+    expect(w.sent[0].text).toContain('Porcentaje del pago mínimo: 5 % → 3 %');
+    expect(w.sent[1].text).toContain('Los costos de pagos anteriores se actualizarán cuando abras la deuda en la web.');
+    expect(corrections(w)).toHaveLength(1);
+    expect(costRows(w)).toHaveLength(0); // Nia does not reconcile: the web repairs the cost rows when the debt is opened
+  });
+
+  it('asks for the convention of a rate with buttons, then previews it and writes it as the bank states it', async () => {
+    const w = cardWorld([answer({}, { rate: { value: 2.1, period: 'monthly' } })]);
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:conv:EA', 'nia:conv:NAMV', 'nia:conv:MV', 'nia:conv:NATV', 'nia:conv:NATA']);
+    expect(w.lastPending()).toMatchObject({ action: 'terms_correction', awaiting: 'convention', draft: { rateValue: 2.1 } });
+
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:conv:MV');
+    expect(w.sent[1].text).toContain('Tasa: 28% EA → 2.1% MV ≈ 28.32% EA');
+    expect(w.lastPending()).toMatchObject({ awaiting: 'confirm', draft: { rate: { value: 2.1, periodicity: 'monthly' } } });
+
+    await confirmDebt(w.deps, ctx(), w.lastPending());
+    expect(JSON.parse(corrections(w)[0].payloadJson).fields.rate).toMatchObject({ value: 2.1, periodicity: 'monthly', timing: 'arrears' });
+  });
+
+  it('answers «no soportado aún» for the card limit, writes nothing and offers no Confirm', async () => {
+    const w = cardWorld([answer({ mentions: ['card_limit'] })]);
+    await handleDebt(w.deps, ctx({ text: 'mi cupo es 5 millones' }));
+
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].text).toContain('no soportado aún');
+    expect(w.sent[0].text).toContain('cupo');
+    expect(w.sent[0].keyboard).toBeUndefined();
+    expect(w.sessions[0].pending).toBeNull();
+    expect(corrections(w)).toHaveLength(0);
+  });
+
+  it('says what is not supported and goes on with the part that is: the day is previewed, the limit is not written', async () => {
+    const w = cardWorld([answer({ statementDay: 20, mentions: ['card_limit'] })]);
+    await handleDebt(w.deps, ctx());
+
+    expect(w.sent).toHaveLength(2);
+    expect(w.sent[0].text).toContain('no soportado aún');
+    expect(w.sent[1].text).toContain('Día de corte: 15 → 20');
+    expect(buttons(w.sent[1].keyboard)).toEqual(['nia:confirm', 'nia:edit', 'nia:cancel']);
+  });
+
+  it('refuses card fields on a loan, and asks what to correct when the model gave nothing', async () => {
+    const loan = world({ answers: [answer({ statementDay: 20 }, { debtRef: 'vehiculo' })] });
+    await handleDebt(loan.deps, ctx());
+    const empty = cardWorld([answer({})]);
+    await handleDebt(empty.deps, ctx());
+
+    expect(loan.sent[0].text).toContain('solo existen en tarjetas');
+    expect(loan.sessions[0].pending).toBeNull();
+    expect(empty.sent[0].text).toContain('qué dato quieres corregir');
+  });
+
+  it('asks which debt when two match, and previews the chosen one', async () => {
+    const w = cardWorld([answer({ dueDay: 25 }, { debtRef: 'tarjeta' })], [visa('c1', 'Visa'), visa('c2', 'Mastercard')]);
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:pick:c1', 'nia:pick:c2']);
+    await handleDebtCallback(w.deps, ctx({ pending: w.lastPending() }), 'nia:pick:c2');
+    expect(w.sent[1].text).toContain('Corrección de datos en Mastercard');
+    expect(w.lastPending()).toMatchObject({ action: 'terms_correction', awaiting: 'confirm', debtId: 'c2', draft: { card: { dueDay: 25 } } });
+  });
+});

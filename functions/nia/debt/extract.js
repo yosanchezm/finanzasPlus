@@ -1,12 +1,12 @@
 import { EXPLAIN_TOPICS, LATE_MODES, PERIODICITIES, ValidationError, isIsoDate, normalizeLate, normalizeRate } from '../../../packages/finance-core/index.js';
-import { readLegalRate } from './legal.js';
+import { modalityFrom, readLegalRate } from './legal.js';
 import { SYSTEMS, readChargeChange, readPlanChange, readRestructure } from './planChange.js';
 
 // The second, specialised Gemini call (AD10): the model only EXTRACTS what the
 // user said. Validation, arithmetic and every decision happen in code (NDA-1).
 // Pure and Node 16 safe.
 
-export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list', 'legal_rate', 'rate_change', 'charge_change', 'restructure', 'late_policy', 'explain', 'setup'];
+export const ACTIONS = ['create', 'pay', 'simulate', 'advise', 'list', 'legal_rate', 'rate_change', 'charge_change', 'restructure', 'late_policy', 'explain', 'setup', 'terms_correction'];
 export const STRATEGIES = ['reduce_term', 'reduce_installment', 'advance_installments'];
 export const MAX_CHARGES = 6;
 
@@ -23,7 +23,7 @@ const DEFAULT_IVA = 19;
 const INTEREST_FREE_KINDS = ['family', 'informal'];
 const ZERO_RATE = { value: 0, basis: 'effective', periodicity: 'annual', timing: 'arrears' };
 
-const SCHEMA = '{"action":"create|pay|simulate|advise|list|legal_rate|rate_change|charge_change|restructure|late_policy|explain|setup","topic":"' + EXPLAIN_TOPICS.join('|') + '|null","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"legal":{"kind":"usury|ibc|smmlv|null","modality":"string|null","month":"string|number|null","year":number|null,"value":number|null}|null,"planChange":{"effectiveOn":"YYYY-MM-DD|null","mode":"keep_term|keep_installment|null","chargeRef":"string|null","op":"set|remove|add|null","newValue":number|null,"presets":{"fee":number|true|null,"iva":number|true|null,"ivaIncluded":boolean|null,"life":number|true|null,"insurance":number|true|null,"gmf":boolean|null}|null,"kind":"insurance|fee|tax|other|null","label":"string|null","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal|pctOfCharge|null","cadence":"per_installment|annual|once|null","refLabel":"string|null","n":number|null,"system":"french|german|bullet|interest_only|null","periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","firstDueOn":"YYYY-MM-DD|null","waiveLate":boolean|null}|null,"late":{"mode":"none|usury|fixed|contract_multiple|null","rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"multiple":number|null,"graceDays":number|null,"effectiveOn":"YYYY-MM-DD|null"}|null,"setup":{"card":{"statementDay":number|null,"dueDay":number|null,"minRule":"interest_fees_plus_pct|installments_due|pct_balance|unknown|null","minPct":number|null,"minFloorMinor":number|null},"presets":{"fee":number|true|null,"iva":number|true|null,"ivaIncluded":boolean|null,"life":number|true|null,"insurance":number|true|null,"gmf":boolean|null},"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal|pctOfCharge","value":number,"cadence":"per_installment|annual|once|null","refLabel":"string|null"}],"lateStated":"usury|fixed|none|whole_installment|null","mentions":["card_limit|advance_rate|prepayment_penalty|allocation_order|mora_base"]}|null,"missingFields":["string"]}';
+const SCHEMA = '{"action":"create|pay|simulate|advise|list|legal_rate|rate_change|charge_change|restructure|late_policy|explain|setup|terms_correction","topic":"' + EXPLAIN_TOPICS.join('|') + '|null","debtRef":"string|null","kind":"consumer|vehicle|libranza|mortgage|leasing|family|informal|card|other|null","name":"string|null","lender":"string|null","principalMinor":number|null,"rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"n":number|null,"periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","system":"french|german|bullet|interest_only|null","firstDueOn":"YYYY-MM-DD|null","amountMinor":number|null,"paidOn":"YYYY-MM-DD|null","strategy":"reduce_term|reduce_installment|advance_installments|null","extraMinor":number|null,"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal","value":number}],"legal":{"kind":"usury|ibc|smmlv|null","modality":"string|null","month":"string|number|null","year":number|null,"value":number|null}|null,"planChange":{"effectiveOn":"YYYY-MM-DD|null","mode":"keep_term|keep_installment|null","chargeRef":"string|null","op":"set|remove|add|null","newValue":number|null,"presets":{"fee":number|true|null,"iva":number|true|null,"ivaIncluded":boolean|null,"life":number|true|null,"insurance":number|true|null,"gmf":boolean|null}|null,"kind":"insurance|fee|tax|other|null","label":"string|null","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal|pctOfCharge|null","cadence":"per_installment|annual|once|null","refLabel":"string|null","n":number|null,"system":"french|german|bullet|interest_only|null","periodicity":"monthly|biweekly|weekly|bimonthly|quarterly|semiannual|annual|null","firstDueOn":"YYYY-MM-DD|null","waiveLate":boolean|null}|null,"late":{"mode":"none|usury|fixed|contract_multiple|null","rate":{"value":number|null,"period":"annual|monthly|bimonthly|quarterly|semiannual|weekly|biweekly|null","compounding":"effective|nominal|null","timing":"arrears|advance|null","rawText":"string|null"}|null,"multiple":number|null,"graceDays":number|null,"effectiveOn":"YYYY-MM-DD|null"}|null,"setup":{"card":{"statementDay":number|null,"dueDay":number|null,"minRule":"interest_fees_plus_pct|installments_due|pct_balance|unknown|null","minPct":number|null,"minFloorMinor":number|null},"presets":{"fee":number|true|null,"iva":number|true|null,"ivaIncluded":boolean|null,"life":number|true|null,"insurance":number|true|null,"gmf":boolean|null},"charges":[{"kind":"insurance|fee|tax|other","label":"string","basis":"fixed|pctOutstanding|pctOriginal|pctOfSubtotal|pctOfCharge","value":number,"cadence":"per_installment|annual|once|null","refLabel":"string|null"}],"lateStated":"usury|fixed|none|whole_installment|null","mentions":["card_limit|advance_rate|prepayment_penalty|allocation_order|mora_base"]}|null,"correction":{"statementDay":number|null,"dueDay":number|null,"minRule":"interest_fees_plus_pct|installments_due|pct_balance|null","minPct":number|null,"minFloorMinor":number|null,"modality":"string|null","mentions":["card_limit|advance_rate|prepayment_penalty|allocation_order|mora_base"]}|null,"missingFields":["string"]}';
 
 const conversationLines = (history) => (history || [])
   .map((item) => `${item.role === 'assistant' ? 'Nia' : 'Usuario'}: ${item.content}`)
@@ -48,6 +48,7 @@ export function debtPrompt(text, debts, history, { today, timezone = 'America/Bo
     'action: create para registrar una deuda nueva, pay para un pago o abono, simulate para simular un abono extra, advise para pedir una recomendación y list para ver las deudas. legal_rate registra una tasa legal: la usura, el IBC o el salario mínimo (SMMLV) de un mes o año, por ejemplo “la usura de noviembre es 28.2”. rate_change cambia la tasa de una deuda que ya existe, por ejemplo “bajó la tasa del crédito a 22% EA desde hoy”. charge_change cambia el valor de un seguro o cargo que una deuda ya tiene, o lo quita, por ejemplo “quita el seguro de vida del crédito”; también se usa cuando piden agregar uno nuevo. restructure reestructura una deuda que ya existe: rehace el plan de cuotas con el saldo actual y lo vencido, por ejemplo “reestructura el crédito a 48 cuotas, primera cuota el 2026-12-05”.',
     'explain responde una pregunta o pide explicar un concepto de deudas (tasas y sus convenciones, usura o IBC, mora, abonos, cargos, GMF, corte de la tarjeta, reestructuración, abonos extra); no escribe nada. Con explain, topic es uno de: ' + EXPLAIN_TOPICS.join(', ') + '; usa null si no es claro cuál. Si el usuario da una tasa o un monto para el ejemplo, cópialos en rate y amountMinor tal como los dijo. Si pide registrar, pagar o cambiar algo, no es explain.',
     'setup arma una deuda nueva a partir de un caso que el usuario describe, por ejemplo “tarjeta Bancolombia, extracto 2,1% MV, cuota de manejo 45.000 más IVA”; también se usa create con kind card. Usa los campos comunes (kind, name, lender, rate, principalMinor, n…) y el bloque setup. En setup.card: statementDay y dueDay (día del mes, 1 a 31), minRule (interest_fees_plus_pct si el mínimo es intereses, cuota de manejo y un porcentaje del saldo; installments_due si es intereses, cuota de manejo y cuotas del mes; pct_balance si es un porcentaje del total del extracto; unknown si dice que no sabe) con minPct y minFloorMinor; usa null en lo que no dijo y nunca lo supongas. En setup.presets pon solo las claves que el usuario mencionó (omítelas o usa null si no las mencionó): fee es la cuota de manejo o comisión (pesos), iva su IVA (el porcentaje, o true si dice “más IVA” sin porcentaje), ivaIncluded true si el monto ya incluye el IVA, life el seguro de vida como porcentaje del saldo, insurance otro seguro como monto fijo en pesos, gmf true si cobran el 4 por mil; usa true en fee, life o insurance si lo mencionó sin dar el monto. En setup.charges solo cargos que no son esos presets; un cargo que se calcula como porcentaje de otro (basis pctOfCharge) lleva en refLabel el nombre del cargo al que se aplica. En setup.lateStated copia lo que dijo de la mora (usury, fixed, none, whole_installment si cobran la mora sobre toda la cuota) o null. En setup.mentions pon card_limit si dijo el cupo, advance_rate si dijo la tasa de avances, prepayment_penalty si dijo una penalización por abono, allocation_order si dijo el orden de aplicación de los pagos y mora_base si habló de la base de la mora; nunca pongas el cupo en otro campo.',
+    'terms_correction corrige un dato de una deuda que ya existe y que estaba mal desde el inicio (no es un cambio de hoy), por ejemplo “el corte de la tarjeta es el 20, no el 15” o “la tasa siempre fue 2,1% mensual”. En correction: statementDay y dueDay (día del mes), minRule, minPct y minFloorMinor (el pago mínimo) y modality (consumo, bajo monto, productivo, popular, hipotecario…); la tasa va en rate, tal como el banco la dice. Usa null en lo que no dijo. En correction.mentions pon card_limit si dijo el cupo, advance_rate si dijo la tasa de avances, prepayment_penalty, allocation_order o mora_base si habló de eso: Nia no puede guardarlos todavía. Si el dato cambió de verdad (por ejemplo, el banco bajó la tasa el mes pasado), no es terms_correction: usa rate_change.',
     'late_policy configura la mora (intereses por cuotas vencidas) de una deuda que ya existe, por ejemplo “activa mora a la usura en el crédito del banco” o “quita la mora del préstamo a mi hermano”. En late: mode es usury si la mora va a la tasa máxima legal (usura), fixed si da una tasa fija propia (esa tasa va en late.rate, igual que rate al crear), contract_multiple si es un múltiplo de la tasa del contrato (late.multiple, por ejemplo 1.5 veces), none si no quiere mora; graceDays son los días de gracia que dijo (null si no dijo) y effectiveOn la fecha desde la que rige, tal como la dijo, o null si no la dijo. Si no es una política de mora, late es null.',
     'debtRef es el nombre, entidad o tipo de la deuda tal como lo dijo el usuario; usa null si no menciona ninguna.',
     'En rate copia lo que dijo el usuario: value, period (de cuánto es la tasa), compounding (effective si es efectiva o periódica como “2,1% mensual”, nominal si dice nominal) y timing (arrears si es vencida, advance si es anticipada). Si no lo dijo, usa null; nunca lo supongas.',
@@ -305,6 +306,38 @@ function readLatePolicy(raw, { today }, missingFields, problems) {
   return { needsConvention, latePolicy: { effectiveOn, late, ...(rateValue === undefined ? {} : { rateValue }) } };
 }
 
+// The correction of a described debt (S6a): the card fields, the modality and the rate the user says were wrong from the start. The rate keeps the
+// bare value until the convention buttons answer. A mention of something Nia cannot save yet (the card limit...) is not a field and is only reported.
+function readCorrection(input, problems, missingFields) {
+  const block = input.correction && typeof input.correction === 'object' ? input.correction : {};
+  const fields = {};
+  const stated = Boolean(input.rate) && typeof input.rate.value === 'number' && Number.isFinite(input.rate.value);
+  const { rate, rateValue } = stated ? readRate(input.rate, 'other', problems) : {};
+  if (rate) fields.rate = rate;
+  if (typeof block.modality === 'string' && block.modality.trim() !== '') {
+    const modality = modalityFrom(block.modality);
+    if (modality === null) problems.push('legal_unknown_modality');
+    else fields.modality = modality;
+  }
+  const card = {};
+  const statementDay = readDay(block.statementDay, problems);
+  const dueDay = readDay(block.dueDay, problems);
+  if (statementDay !== null) card.statementDay = statementDay;
+  if (dueDay !== null) card.dueDay = dueDay;
+  const minPayment = {};
+  const pct = readPercent(block.minPct);
+  const floorMinor = readAmount(block.minFloorMinor, problems);
+  if (MIN_RULES.includes(block.minRule)) minPayment.rule = block.minRule;
+  if (pct !== null) minPayment.pct = pct;
+  if (floorMinor !== undefined && floorMinor !== null) minPayment.floorMinor = floorMinor;
+  if (Object.keys(minPayment).length > 0) card.minPayment = minPayment;
+  if (Object.keys(card).length > 0) fields.card = card;
+  const mentions = MENTIONS.filter((mention) => Array.isArray(block.mentions) && block.mentions.includes(mention));
+  const pendingRate = fields.rate ? null : rateValue ?? null;
+  if (Object.keys(fields).length === 0 && pendingRate === null && mentions.length === 0 && problems.length === 0) missingFields.push('correction_field');
+  return { needsConvention: pendingRate !== null, correction: { fields, rateValue: pendingRate, mentions } };
+}
+
 // The explain request (S0): the closed topic (an unknown or missing one means no topic, so Nia shows the menu and never
 // guesses), the rate the user stated for the example, and an optional amount. The debt selector is the common `debtRef`.
 // A stated rate without its convention is kept as a bare `rateValue`; nothing is ever defaulted.
@@ -342,6 +375,7 @@ export function normaliseDebtExtraction(raw, { today }) {
     latePolicy: null,
     explain: null,
     setup: null,
+    correction: null,
     missingFields,
     problems,
   };
@@ -380,6 +414,8 @@ export function normaliseDebtExtraction(raw, { today }) {
     Object.assign(result, readLatePolicy(input.late, { today }, missingFields, problems));
   } else if (action === 'explain') {
     result.explain = readExplain(input, problems);
+  } else if (action === 'terms_correction') {
+    Object.assign(result, readCorrection(input, problems, missingFields));
   } else if (action === 'restructure') {
     const stated = Boolean(input.rate) && typeof input.rate.value === 'number' && Number.isFinite(input.rate.value);
     const { rate, rateValue, needsConvention } = stated ? readRate(input.rate, 'other', problems) : {};

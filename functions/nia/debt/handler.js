@@ -2,7 +2,9 @@ import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies,
 import { buildSetupTerms } from './advisor/cardTerms.js';
 import { mergeCase } from './advisor/merge.js';
 import { proposeSetup } from './advisor/propose.js';
+import { unsupportedText } from './advisor/unsupported.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
+import { describeCorrection, previewCorrection, rebuildCorrection } from './correction.js';
 import { applicableDebts, cardOnly, explainReplyParaphrased, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
@@ -59,6 +61,7 @@ const MISSING = {
   legal_month: 'el mes',
   charge: 'el seguro o cargo',
   charge_spec: 'qué seguro o cargo quieres agregar',
+  correction_field: 'qué dato quieres corregir (el día de corte, el día de pago, el pago mínimo, la tasa o la modalidad)',
   charge_action: 'si quieres cambiar su valor o quitarlo',
   charge_value: 'el nuevo valor',
   late_mode: 'si quieres mora a la tasa de usura, a una tasa fija, como múltiplo de la tasa del contrato, o sin mora',
@@ -270,6 +273,29 @@ async function startChargeChange(deps, ctx, request, debts) {
   if (request.missingFields.length) return inform(deps, ctx, `Para ${op === 'add' ? 'agregar' : 'cambiar'} un seguro o cargo necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
   const draft = op === 'add' ? { effectiveOn, op, add: request.planChange.add } : { effectiveOn, chargeRef, op, newValue };
   return withDebt(deps, ctx, request, debts, { action: 'charge_change', draft, question: '¿A cuál deuda le cambio el seguro o cargo?' }, (id, debt) => continueCharge(deps, ctx, id, debt, draft));
+}
+
+// A terms correction (NA6): data that was wrong from the start. The pending keeps only what the user stated (card fields, modality, rate); the event is
+// rebuilt from the live debt for the preview and again at Confirm. What Nia cannot save yet (the card limit...) is answered first and never written.
+async function continueCorrection(deps, ctx, id, debt, draft) {
+  if (draft.rateValue !== undefined && !draft.rate) {
+    const pending = buildPending({ id, action: 'terms_correction', awaiting: 'convention', debtId: debt.$id, draft });
+    return say(deps, ctx, { text: conventionQuestion(draft.rateValue), keyboard: conventionKeyboard(), status: STATUS.convention, pending });
+  }
+  const preview = previewCorrection({ debt, events: await loadEvents(deps, debt.$id), today: today(deps), draft });
+  if (!preview.ok) return inform(deps, ctx, preview.issue);
+  const pending = buildPending({ id, action: 'terms_correction', awaiting: 'confirm', debtId: debt.$id, draft: preview.draft });
+  return say(deps, ctx, { text: preview.text, keyboard: confirmKeyboard(), status: STATUS.confirm, pending });
+}
+
+async function startTermsCorrection(deps, ctx, request, debts) {
+  if (request.missingFields.length) return inform(deps, ctx, `Para corregir los datos necesito: ${request.missingFields.map((field) => MISSING[field]).join(', ')}.`);
+  const { fields, rateValue, mentions } = request.correction;
+  const unsupported = unsupportedText(mentions);
+  if (Object.keys(fields).length === 0 && rateValue === null) return inform(deps, ctx, unsupported);
+  if (unsupported) await notify(deps, ctx, unsupported);
+  const draft = { ...fields, ...(rateValue === null ? {} : { rateValue }) };
+  return withDebt(deps, ctx, request, debts, { action: 'terms_correction', draft, question: '¿A cuál deuda le corrijo los datos?' }, (id, debt) => continueCorrection(deps, ctx, id, debt, draft));
 }
 
 // A restructure (NI3): the pending keeps only the overrides the user stated (date, number of installments, rate, system, periodicity, first due
@@ -533,6 +559,7 @@ export async function handleDebt(deps, ctx) {
   if (request.action === 'rate_change') return startRateChange(deps, ctx, request, debts);
   if (request.action === 'charge_change') return startChargeChange(deps, ctx, request, debts);
   if (request.action === 'restructure') return startRestructure(deps, ctx, request, debts);
+  if (request.action === 'terms_correction') return startTermsCorrection(deps, ctx, request, debts);
   if (request.action === 'late_policy') return startLatePolicy(deps, ctx, request, debts);
   return startAnalysis(deps, ctx, request, debts);
 }
@@ -553,6 +580,7 @@ const CONVENTION_NEXT = {
   create: (deps, ctx, pending, convention) => finishCreate(deps, ctx, pending.id, withConvention(pending.draft.create, convention)),
   rate_change: withStatedRate(continueRate),
   restructure: withStatedRate(continueRestructure),
+  terms_correction: withStatedRate(continueCorrection),
   setup: async (deps, ctx, pending, convention) => {
     const { setup } = pending.draft;
     let rate;
@@ -600,6 +628,7 @@ export async function handleDebtCallback(deps, ctx, data) {
   if (pending.action === 'rate_change') return continueRate(deps, ctx, pending.id, debt, action.type === 'mode' ? { ...pending.draft, mode: action.value } : pending.draft);
   if (pending.action === 'charge_change') return continueCharge(deps, ctx, pending.id, debt, action.type === 'charge' ? { ...pending.draft, chargeId: pending.candidates[action.value] } : pending.draft);
   if (pending.action === 'restructure') return continueRestructure(deps, ctx, pending.id, debt, pending.draft);
+  if (pending.action === 'terms_correction') return continueCorrection(deps, ctx, pending.id, debt, pending.draft);
   if (pending.action === 'late_policy') return continueLate(deps, ctx, pending.id, debt, pending.draft);
   if (action.type === 'pick' && pending.action !== 'pay') return runAnalysis(deps, ctx, pending.action, pending.id, debt, pending.draft, debts);
   // A simulation becomes a payment dated today with the strategy it was simulated with. The pending id stays, so the dedupe key does too.
@@ -745,6 +774,23 @@ async function commitRestructure(deps, ctx, pending) {
   return { duplicate: false, text: describeRestructure(debt, built) };
 }
 
+// A correction is rebuilt from the live debt and its events: what is written is what the user stated, bound by the core to the terms version in force,
+// and a value that became the stored one in the meantime is refused. The dedupe key is checked first, like the other plan changes. Nia does not
+// reconcile: the reply carries the backdated note when a past cost changes.
+async function commitTermsCorrection(deps, ctx, pending) {
+  const asOf = today(deps);
+  if (await debtPort(deps).findEventByDedupe(dedupeKeyOf(pending))) return { duplicate: true };
+  const debt = (await loadDebts(deps)).find((item) => item.$id === pending.debtId);
+  if (!debt) return { text: 'No encontré esa deuda. Escríbeme de nuevo qué quieres registrar.', failed: true };
+  const events = await loadEvents(deps, debt.$id);
+  const built = rebuildCorrection({ debt, events, today: asOf, draft: pending.draft });
+  if (!built.ok) return { text: built.issue, failed: true };
+  const plan = planCommit(debt, events, built.eventDraft, { eventId: eventIdOf(pending), dedupeKey: dedupeKeyOf(pending), actorId: ctx.profile.appwriteUserId, source: 'telegram', asOf });
+  const { duplicate } = await commitPlan(debtPort(deps), plan);
+  if (duplicate) return { duplicate };
+  return { duplicate: false, text: describeCorrection(debt, built) };
+}
+
 // A mora policy is rebuilt from the live debt: the figures in the reply are those of the debt as it is now. The dedupe key is checked first,
 // like the other plan changes, so a repeated Confirm answers that it was already recorded without reading the debt again.
 async function commitLatePolicy(deps, ctx, pending) {
@@ -760,8 +806,8 @@ async function commitLatePolicy(deps, ctx, pending) {
   return { duplicate: false, text: describeLatePolicy({ debt, draft: pending.draft, figures: previewChange(debt, events, draft, { on: asOf }), today: asOf }) };
 }
 
-const COMMIT = { create: commitCreate, setup: commitSetup, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure, late_policy: commitLatePolicy };
-const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', setup: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.', late_policy: 'Esta mora ya estaba registrada. No la repetí.' };
+const COMMIT = { create: commitCreate, setup: commitSetup, legal_rate: commitLegalRate, rate_change: commitRateChange, charge_change: commitChargeChange, restructure: commitRestructure, terms_correction: commitTermsCorrection, late_policy: commitLatePolicy };
+const ALREADY = { pay: 'Este abono ya estaba registrado. No lo repetí.', create: 'Esta deuda ya estaba registrada. No la repetí.', setup: 'Esta deuda ya estaba registrada. No la repetí.', legal_rate: 'Esta tasa ya estaba registrada. No la repetí.', rate_change: 'Este cambio de tasa ya estaba registrado. No lo repetí.', charge_change: 'Este cambio de cargos ya estaba registrado. No lo repetí.', restructure: 'Esta reestructuración ya estaba registrada. No la repetí.', terms_correction: 'Esta corrección ya estaba registrada. No la repetí.', late_policy: 'Esta mora ya estaba registrada. No la repetí.' };
 
 /**
  * Confirm button (or /confirmar) for a debt pending. Exactly once: the event is unique by its

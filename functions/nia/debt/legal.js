@@ -7,7 +7,7 @@ import { pesos } from './format.js';
 
 const KINDS = ['usury', 'ibc', 'smmlv'];
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-const MODALITY_LABELS = {
+export const MODALITY_LABELS = {
   consumer: 'consumo y ordinario',
   low_amount: 'consumo de bajo monto',
   productive: 'productivo',
@@ -70,7 +70,7 @@ export function resolveMonth(month, year, today) {
   return { year: Math.floor(index / 12), month: (index % 12) + 1 };
 }
 
-function modalityFrom(text) {
+export function modalityFrom(text) {
   const name = fold(text).replace(/_/g, ' ');
   if (name === '') return 'consumer';
   const canonical = LEGAL_MODALITIES.find((modality) => modality.replace(/_/g, ' ') === name);
