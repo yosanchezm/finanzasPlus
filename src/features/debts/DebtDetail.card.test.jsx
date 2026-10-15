@@ -106,3 +106,41 @@ describe('DebtDetail for a credit card with mora', () => {
     expect(within(panel()).queryByText(/Mora en curso/)).not.toBeInTheDocument();
   });
 });
+
+describe('DebtDetail card explain popovers', () => {
+  const DISCLAIMER = 'Información educativa con tus datos; no es asesoría financiera.';
+
+  it('explains the minimum payment next to its figure and the last statement in the card panel, writing nothing', async () => {
+    const onPay = vi.fn();
+    const user = userEvent.setup();
+    renderCard([], '2026-04-20', { onPay });
+
+    await user.click(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByRole('button', { name: '¿Qué es esto? Pago mínimo' }));
+    const minimum = screen.getByRole('dialog', { name: 'Pago mínimo' });
+    expect(minimum).toHaveTextContent('Pago mínimo: $ 146.102');
+    expect(minimum).toHaveTextContent(DISCLAIMER);
+    await user.keyboard('{Escape}');
+
+    await user.click(within(screen.getByRole('region', { name: 'Tu tarjeta' })).getByRole('button', { name: '¿Qué es esto? Último extracto' }));
+    expect(screen.getByRole('dialog', { name: 'Extracto de la tarjeta' })).toHaveTextContent(DISCLAIMER);
+    expect(onPay).not.toHaveBeenCalled();
+  });
+
+  it('explains the mora of the card next to its figure', async () => {
+    const user = userEvent.setup();
+    const debt = makeMoraCard();
+    renderCard([], '2026-05-10', {}, debt);
+
+    await user.click(within(screen.getByRole('region', { name: 'Tu tarjeta' })).getByRole('button', { name: '¿Qué es esto? Mora en curso' }));
+
+    expect(screen.getByRole('dialog', { name: 'Intereses de mora' })).toHaveTextContent('(aproximado)');
+  });
+
+  it('shows no trigger for a topic that is not released', () => {
+    const debt = makeCard();
+    const detail = buildDebtDetail({ debt, events: [], asOf: '2026-04-20' });
+    render(<DebtDetail debt={debt} detail={{ ...detail, explain: {} }} currentOwnerScope="you" onBack={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /¿Qué es esto\?/ })).not.toBeInTheDocument();
+  });
+});

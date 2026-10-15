@@ -219,3 +219,76 @@ describe('DebtDetail mora', () => {
     expect(within(screen.getByRole('region', { name: 'Historial' })).getByText(/^Mora: tasa de usura desde /)).toBeInTheDocument();
   });
 });
+
+describe('DebtDetail explain popovers', () => {
+  const DISCLAIMER = 'Información educativa con tus datos; no es asesoría financiera.';
+  const moraDetail = (options = {}) => {
+    const debt = makeMoraLoan(options);
+    return { debt, detail: buildDebtDetail({ debt, events: [MORA_DISBURSEMENT], asOf: DAY_10 }) };
+  };
+  const without = (detail, ...figures) => ({ ...detail, explain: Object.fromEntries(Object.entries(detail.explain).filter(([figure]) => !figures.includes(figure))) });
+
+  it('opens the mora explanation with its disclaimer next to the mora figure and writes nothing', async () => {
+    const handlers = { onPay: vi.fn(), onVoid: vi.fn(), onSimulate: vi.fn(), onRateChange: vi.fn(), onChargeChange: vi.fn(), onLatePolicy: vi.fn(), onTermsCorrection: vi.fn(), onRestructure: vi.fn() };
+    const user = userEvent.setup();
+    renderDetail({ ...moraDetail(), ...handlers });
+    const state = screen.getByRole('region', { name: 'Estado de la deuda' });
+
+    await user.click(within(state).getByRole('button', { name: '¿Qué es esto? Mora acumulada' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Intereses de mora' });
+    expect(within(dialog).getByText(/Mora acumulada: \$ 1\.375 por 10 días|Mora acumulada: \$ 1\.375 por 10 días/)).toBeInTheDocument();
+    expect(within(dialog).getByText(DISCLAIMER)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Fuente: Crédito de consumo · cálculo de mora/)).toBeInTheDocument();
+    Object.values(handlers).forEach((handler) => expect(handler).not.toHaveBeenCalled());
+  });
+
+  it('offers the rate and charges explanations next to their figures', async () => {
+    const user = userEvent.setup();
+    renderDetail({ ...moraDetail() });
+
+    await user.click(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByRole('button', { name: '¿Qué es esto? Tasa' }));
+    expect(screen.getByRole('dialog', { name: 'Tu tasa' })).toHaveTextContent(DISCLAIMER);
+    await user.keyboard('{Escape}');
+
+    await user.click(within(screen.getByRole('region', { name: 'Costo real del crédito' })).getByRole('button', { name: '¿Qué es esto? Cargos y seguros' }));
+    expect(screen.getByRole('dialog', { name: 'Cargos, seguros e impuestos' })).toHaveTextContent(DISCLAIMER);
+  });
+
+  it('keeps the figure value as the sibling of its label', () => {
+    renderDetail({ ...moraDetail() });
+
+    expect(within(screen.getByRole('region', { name: 'Estado de la deuda' })).getByText('Mora acumulada').nextSibling).toHaveTextContent(formatMoney(1375));
+  });
+
+  it('shows no trigger for a topic that is not released', () => {
+    const { debt, detail } = moraDetail();
+    renderDetail({ debt, detail: without(detail, 'mora', 'charges') });
+
+    expect(screen.queryByRole('button', { name: '¿Qué es esto? Mora acumulada' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '¿Qué es esto? Cargos y seguros' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '¿Qué es esto? Tasa' })).toBeInTheDocument();
+  });
+
+  it('shows no trigger at all when the detail carries no explanations', () => {
+    const { debt, detail } = moraDetail();
+    renderDetail({ debt, detail: { ...detail, explain: undefined } });
+
+    expect(screen.queryByRole('button', { name: /¿Qué es esto\?/ })).not.toBeInTheDocument();
+  });
+
+  it('offers the mora explanation next to the legal notices of the mora', async () => {
+    const user = userEvent.setup();
+    renderDetail({ ...moraDetail({ legal: usuryLegal(['2025-01-01', '2026-01-31', 28.59]) }) });
+
+    await user.click(screen.getByRole('button', { name: '¿Qué es esto? Aviso de mora' }));
+
+    expect(screen.getByRole('dialog', { name: 'Intereses de mora' })).toHaveTextContent(DISCLAIMER);
+  });
+
+  it('has no mora notice trigger without a notice', () => {
+    renderDetail({ ...moraDetail() });
+
+    expect(screen.queryByRole('button', { name: '¿Qué es esto? Aviso de mora' })).not.toBeInTheDocument();
+  });
+});

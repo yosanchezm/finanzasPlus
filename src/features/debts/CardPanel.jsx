@@ -1,6 +1,7 @@
 import { toEffectiveAnnual } from '@finance-core';
 import { formatMoney } from '../../shared/lib/format';
 import { formatDueDate, formatEa } from './debtLabels';
+import WhatIsThis from './explain/WhatIsThis';
 
 const KIND_TEXT = { revolving: 'Compras y saldo sin cuotas', advance: 'Avance en efectivo' };
 
@@ -12,9 +13,10 @@ function describeTranche(tranche) {
 
 /**
  * Card-specific part of the detail: the cut-off and due dates, each tranche with its own rate, and what the
- * last statement billed. Presentational; everything comes from the card projection.
+ * last statement billed. Presentational; everything comes from the card projection. `explain` holds the «¿Qué es esto?»
+ * popovers by figure (`mora`, `statement`); a figure without one shows no trigger.
  */
-export default function CardPanel({ projection }) {
+export default function CardPanel({ projection, explain = {} }) {
   const { card, tranches, plan } = projection;
   const last = plan.length > 0 ? plan[plan.length - 1] : null;
 
@@ -35,11 +37,17 @@ export default function CardPanel({ projection }) {
         ))}
       </ul>
       {last && last.lateMinor > 0 && (
-        <p className="text-sm text-ink-muted">Mora en curso: {formatMoney(last.lateMinor)} (se cobra en el corte del {formatDueDate(card.nextStatementOn)})</p>
+        <p className="flex items-center gap-1 text-sm text-ink-muted">
+          <span>Mora en curso: {formatMoney(last.lateMinor)} (se cobra en el corte del {formatDueDate(card.nextStatementOn)})</span>
+          <WhatIsThis popover={explain.mora} subject="Mora en curso" />
+        </p>
       )}
       {last && (
         <div className="flex flex-col gap-2 rounded-sm bg-surface-2 p-4 text-sm">
-          <h3 className="text-[13px] font-semibold text-ink-2">Último extracto, corte del {formatDueDate(last.statementOn)}</h3>
+          <h3 className="flex items-center gap-1 text-[13px] font-semibold text-ink-2">
+            <span>Último extracto, corte del {formatDueDate(last.statementOn)}</span>
+            <WhatIsThis popover={explain.statement} subject="Último extracto" />
+          </h3>
           <dl className="flex flex-col gap-2">
             {[['Intereses', last.interestMinor], ['Cuota de manejo e IVA', last.chargesMinor + last.taxesMinor], ['Cuotas del mes', last.principalMinor], ...(last.lateInterestMinor > 0 ? [['Mora', last.lateInterestMinor]] : [])].map(([label, value]) => (
               <div key={label} className="flex items-baseline justify-between gap-3">

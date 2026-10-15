@@ -1,5 +1,6 @@
 import { activeEvents, parseTerms, project, sortEvents, validateTerms } from '@finance-core';
 import { summarizeEvent } from './eventSummary';
+import { popoversOf } from './explain/popoverModel';
 
 // Payments, the card's statements and purchases, and the changes to rate, charges and late-interest policy can be voided
 // from the history. A restructure is voidable only through the guarded flow; a disbursement never is.
@@ -73,7 +74,8 @@ function summariesOf({ debt, sorted, active, applied, isCard }) {
 /**
  * Pure view model of one debt: the projection (rendered as is), the real cost over the whole
  * plan and the event history, newest first. Voided events stay in the list, flagged with their
- * reason; the `void` events themselves are folded into that flag.
+ * reason; the `void` events themselves are folded into that flag. `explain` holds the «¿Qué es esto?» popover of each figure
+ * whose topic is released and fits the debt (see `popoversOf`).
  * @param {{ debt: object, events: object[], asOf: string }} input `events` are the debt's rows.
  * @throws {Error} When the stored terms cannot be projected.
  */
@@ -115,6 +117,7 @@ export function buildDebtDetail({ debt, events, asOf }) {
   return {
     projection,
     history,
+    explain: popoversOf({ debt, events, today: asOf }),
     cost: {
       interestMinor, chargesMinor, taxesMinor, lateMinor,
       totalMinor: interestMinor + chargesMinor + taxesMinor + lateMinor,

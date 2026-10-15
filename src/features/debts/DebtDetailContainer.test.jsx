@@ -897,3 +897,19 @@ describe('DebtDetailContainer late policy flow', () => {
     expect(port.createEvent).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('DebtDetailContainer explain popovers', () => {
+  it('opens the mora explanation without touching any write port', async () => {
+    const { user, reload, onRefresh, onNotify } = setup({ debt: makeMoraLoan(), events: [MORA_DISBURSEMENT], today: DAY_10 });
+
+    await user.click(screen.getByRole('button', { name: '¿Qué es esto? Mora acumulada' }));
+
+    expect(screen.getByRole('dialog', { name: 'Intereses de mora' })).toHaveTextContent('Información educativa con tus datos; no es asesoría financiera.');
+    Object.values(port).forEach((spy) => expect(spy).not.toHaveBeenCalled());
+    expect(api.getTransactionsInRange).not.toHaveBeenCalled();
+    expect(api.findDebtEventByDedupe).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onNotify).not.toHaveBeenCalled();
+  });
+});
