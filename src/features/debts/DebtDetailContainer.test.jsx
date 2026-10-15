@@ -515,7 +515,7 @@ describe('DebtDetailContainer restructure flow', () => {
     const { user } = setup();
     await user.click(screen.getByRole('button', { name: 'Más acciones' }));
 
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Reestructurar']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos', 'Reestructurar']);
   });
 
   it('writes nothing until the summary is confirmed, then one restructure event with the new terms and no cost row', async () => {
@@ -611,6 +611,132 @@ describe('DebtDetailContainer restructure flow', () => {
   });
 });
 
+describe('DebtDetailContainer terms correction flow', () => {
+  const NONE = { created: 0, updated: 0, removed: 0 };
+  const EA20 = { value: 20, basis: 'effective', periodicity: 'annual', timing: 'arrears' };
+  const openCorrection = async (user) => {
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Corregir datos' }));
+    return screen.getByRole('dialog');
+  };
+  const typeRate = async (user, text) => {
+    const field = screen.getByLabelText('Valor de la tasa');
+    await user.clear(field);
+    await user.type(field, text);
+  };
+  const saveCorrection = (user, name = 'Guardar corrección') => user.click(within(screen.getByRole('dialog')).getByRole('button', { name }));
+  const stateRegion = () => within(screen.getByRole('region', { name: 'Estado de la deuda', hidden: true }));
+
+  it('previews the corrected rate and writes one terms_correction bound to the opening terms, no cost row', async () => {
+    const { user } = setup();
+    await openCorrection(user);
+    await typeRate(user, '20');
+    expect(within(screen.getByRole('group', { name: 'Vista previa' })).getByRole('row', { name: /Tasa/ })).toHaveTextContent('24 % E.A.20 % E.A.');
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before saving
+    await saveCorrection(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { id, data } = port.createEvent.mock.calls[0][0];
+    expect(id).toBe('den1');
+    expect(data).toMatchObject({ debtId: 'd1', kind: 'terms_correction', effectiveOn: TODAY, amountMinor: 0, dedupeKey: 'web:n1', source: 'web', actorId: 'u1' });
+    expect(JSON.parse(data.payloadJson)).toEqual({ fields: { rate: EA20 }, previous: { rate: { ...EA20, value: 24 } }, appliesTo: 'opening' });
+    expect(port.createCostRow).not.toHaveBeenCalled();
+  });
+
+  it('reloads, then reconciles the cost rows on fresh events, then refreshes, and reports the rows it changed', async () => {
+    const calls = [];
+    const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+    const { user, onNotify } = setup({ reconcileCosts });
+    await openCorrection(user);
+    await typeRate(user, '20');
+    await saveCorrection(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+    expect(calls).toEqual(['open', 'reconcile']);
+    expect(onNotify).toHaveBeenCalledWith('Corrección registrada. Se actualizaron 2 filas de Costos financieros.');
+  });
+
+  it('creates one terms_correction when the save button is tapped twice', async () => {
+    const { user } = setup();
+    await openCorrection(user);
+    await typeRate(user, '20');
+    await user.dblClick(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar corrección' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the dialog and the projection when the write fails, and the retry repeats the same event id and key', async () => {
+    port.createEvent.mockRejectedValueOnce(Object.assign(new Error('Servidor no disponible'), { code: 500 }));
+    const { user, createNonce, reload, onNotify } = setup();
+    await openCorrection(user);
+    await typeRate(user, '20');
+    await saveCorrection(user);
+
+    expect(await screen.findByText('Servidor no disponible')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(stateRegion().getByText('24 % E.A.')).toBeInTheDocument(); // the debt still shows the stored rate
+    expect(onNotify).not.toHaveBeenCalledWith(expect.stringContaining('Corrección registrada'));
+
+    await saveCorrection(user, 'Reintentar');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(createNonce).toHaveBeenCalledTimes(1);
+    expect(port.createEvent.mock.calls.map(([call]) => [call.id, call.data.dedupeKey])).toEqual([['den1', 'web:n1'], ['den1', 'web:n1']]);
+  });
+
+  it('keeps the saved correction and says the costs were not refreshed when the reconcile fails', async () => {
+    const reconcileCosts = vi.fn().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('sin red'));
+    const { user, onNotify, reload } = setup({ reconcileCosts });
+    await openCorrection(user);
+    await typeRate(user, '20');
+    await saveCorrection(user);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith('Corrección registrada. No pudimos actualizar los costos financieros: se corregirán al abrir la deuda de nuevo.');
+  });
+
+  describe('with a recorded correction', () => {
+    const CORRECTED = [...EVENTS, makeEvent('tc1', 'terms_correction', '2026-01-20', 0, { fields: { rate: EA20 }, previous: { rate: { ...EA20, value: 24 } }, appliesTo: 'opening' })];
+
+    it('shows both values in the history and the corrected rate in the debt', () => {
+      setup({ events: CORRECTED });
+
+      expect(screen.getByText('Corrección: tasa 24 % E.A. → 20 % E.A.')).toBeInTheDocument();
+      expect(stateRegion().getByText('20 % E.A.')).toBeInTheDocument();
+    });
+
+    it('voids it after confirming, reconciles on fresh events and reports that two rows were updated', async () => {
+      const calls = [];
+      const reconcileCosts = vi.fn(async (...args) => { calls.push(args.length > 1 ? 'reconcile' : 'open'); return args.length > 1 ? { ...NONE, updated: 2 } : NONE; });
+      const { user, onNotify } = setup({ events: CORRECTED, reconcileCosts });
+      await user.click(screen.getByRole('button', { name: 'Anular corrección de datos del 20 ene' }));
+      const dialog = screen.getByRole('alertdialog');
+      expect(within(dialog).getByText('¿Anular esta corrección de datos?')).toBeInTheDocument();
+      expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before confirming
+      await user.click(within(dialog).getByRole('button', { name: 'Anular corrección de datos' }));
+
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+      const { data } = port.createEvent.mock.calls[0][0];
+      expect(data).toMatchObject({ kind: 'void', dedupeKey: 'void:tc1', amountMinor: 0 });
+      expect(JSON.parse(data.payloadJson)).toEqual({ targetEventId: 'tc1', reason: 'Anulado desde la web' });
+      expect(reconcileCosts).toHaveBeenLastCalledWith('d1', { fresh: true });
+      expect(calls).toEqual(['open', 'reconcile']);
+      expect(onNotify).toHaveBeenCalledWith('Corrección anulada. Se actualizaron 2 filas de Costos financieros.');
+    });
+
+    it('starts the dialog on the corrected value, and does not offer a no-op as a change', async () => {
+      const { user } = setup({ events: CORRECTED });
+      await openCorrection(user);
+
+      expect(screen.getByLabelText('Valor de la tasa')).toHaveValue(20);
+      expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar corrección' })).toBeDisabled();
+    });
+  });
+});
+
 describe('DebtDetailContainer simulator', () => {
   const simulate = async (user, amount = '2000000') => {
     await user.click(screen.getByRole('button', { name: 'Simular abono' }));
@@ -694,7 +820,7 @@ describe('DebtDetailContainer late policy flow', () => {
     const { user } = moraSetup();
     await user.click(screen.getByRole('button', { name: 'Más acciones' }));
 
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Reestructurar']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos', 'Reestructurar']);
   });
 
   it('writes one late_policy event (no cost row) equal to the preview: usury effective on the due date gives mora 1,375', async () => {

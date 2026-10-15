@@ -71,11 +71,11 @@ describe('DebtDetail for a credit card', () => {
   });
 
   it('never offers "Reestructurar" in the Más acciones menu of a card', async () => {
-    const wired = { onRateChange: vi.fn(), onChargeChange: vi.fn(), onLatePolicy: vi.fn(), onRestructure: vi.fn() };
+    const wired = { onRateChange: vi.fn(), onChargeChange: vi.fn(), onLatePolicy: vi.fn(), onTermsCorrection: vi.fn(), onRestructure: vi.fn() };
     renderCard([], '2026-04-20', wired);
     await userEvent.click(screen.getByRole('button', { name: 'Más acciones' }));
 
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos']);
   });
 });
 

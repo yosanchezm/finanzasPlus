@@ -8,6 +8,7 @@ import PaymentDialog from './PaymentDialog';
 import PrepaymentSimulator from './PrepaymentSimulator';
 import RateChangeDialog from './RateChangeDialog';
 import RestructureDialog from './RestructureDialog';
+import TermsCorrectionDialog from './TermsCorrectionDialog';
 import VoidDialog from './VoidDialog';
 import { findDebtEventByDedupe } from '../../appwrite';
 import { loadCashflow } from './cashflow';
@@ -99,6 +100,15 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
     save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
   });
 
+  const termsCorrection = useCommitDialog({
+    ...flow,
+    afterSave: reconcileAfter,
+    successMessage: (_input, after) => withReconcileNote('Corrección registrada.', after),
+    alreadySaved: 'La corrección ya se había registrado, así que no se guardó de nuevo. Revisa el historial.',
+    findSaved: ({ nonce }) => findDebtEventByDedupe(`web:${nonce}`),
+    save: ({ input, nonce }) => saveDebtEvent({ debt, events, draft: input, nonce, actorId: user.$id, today }),
+  });
+
   const restructure = useCommitDialog({
     ...flow,
     afterSave: reconcileAfter,
@@ -125,7 +135,7 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
 
   return (
     <>
-      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onOpenSettings={onOpenSettings} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} onLatePolicy={detail ? () => latePolicy.open() : undefined} onRestructure={canRestructure ? () => restructure.open() : undefined} />
+      <DebtDetail debt={debt} detail={detail} currentOwnerScope={currentOwnerScope} notice={repairNotice} legalStatus={legalStatus} onBack={onBack} onOpenSettings={onOpenSettings} onPay={detail ? () => payment.open() : undefined} onSimulate={detail ? openSimulator : undefined} onVoid={voiding.open} onStatement={isCard ? statement.open : undefined} onCharge={isCard ? purchase.open : undefined} onRateChange={detail ? () => rateChange.open() : undefined} onChargeChange={detail ? () => chargeChange.open() : undefined} onLatePolicy={detail ? () => latePolicy.open() : undefined} onTermsCorrection={detail ? () => termsCorrection.open() : undefined} onRestructure={canRestructure ? () => restructure.open() : undefined} />
       {payment.dialog && detail && (
         <PaymentDialog
           debt={debt}
@@ -153,6 +163,9 @@ export default function DebtDetailContainer({ debt, events: allEvents, otherDebt
       )}
       {latePolicy.dialog && detail && (
         <LatePolicyDialog debt={debt} events={events} projection={detail.projection} today={today} saveState={latePolicy.saveState} onSubmit={latePolicy.submit} onClose={latePolicy.close} />
+      )}
+      {termsCorrection.dialog && detail && (
+        <TermsCorrectionDialog debt={debt} events={events} today={today} saveState={termsCorrection.saveState} onSubmit={termsCorrection.submit} onClose={termsCorrection.close} />
       )}
       {restructure.dialog && detail && (
         <RestructureDialog debt={debt} events={events} projection={detail.projection} today={today} saveState={restructure.saveState} onSubmit={restructure.submit} onClose={restructure.close} />

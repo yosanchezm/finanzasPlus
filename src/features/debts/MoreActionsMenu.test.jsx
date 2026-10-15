@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import MoreActionsMenu from './MoreActionsMenu';
 
-const handlers = () => ({ onRateChange: vi.fn(), onChargeChange: vi.fn(), onLatePolicy: vi.fn(), onRestructure: vi.fn() });
+const handlers = () => ({ onRateChange: vi.fn(), onChargeChange: vi.fn(), onLatePolicy: vi.fn(), onTermsCorrection: vi.fn(), onRestructure: vi.fn() });
 const names = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
 const trigger = () => screen.getByRole('button', { name: 'Más acciones' });
 
@@ -21,18 +21,18 @@ describe('MoreActionsMenu', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
-  it('lists the four actions of a loan', async () => {
+  it('lists the five actions of a loan, with Corregir datos before Reestructurar', async () => {
     render(<MoreActionsMenu {...handlers()} />);
     await userEvent.click(trigger());
 
-    expect(names()).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Reestructurar']);
+    expect(names()).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos', 'Reestructurar']);
   });
 
   it('omits "Reestructurar" for a card even when the handler is wired', async () => {
     render(<MoreActionsMenu isCard {...handlers()} />);
     await userEvent.click(trigger());
 
-    expect(names()).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora']);
+    expect(names()).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos']);
   });
 
   it('shows only the actions that have a handler, and nothing when none is wired', async () => {
@@ -54,6 +54,17 @@ describe('MoreActionsMenu', () => {
     expect(wired.onLatePolicy).toHaveBeenCalledTimes(1);
     expect(wired.onRateChange).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('runs onTermsCorrection when Corregir datos is chosen, and offers it to a card too', async () => {
+    const wired = handlers();
+    const { unmount } = render(<MoreActionsMenu isCard {...wired} />);
+    await userEvent.click(trigger());
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Corregir datos' }));
+
+    expect(wired.onTermsCorrection).toHaveBeenCalledTimes(1);
+    expect(wired.onRateChange).not.toHaveBeenCalled();
+    unmount();
   });
 
   it('closes with Escape and gives the focus back to the trigger', async () => {
@@ -87,10 +98,10 @@ describe('MoreActionsMenu', () => {
     await userEvent.keyboard('{ArrowDown}');
     expect(items[1]).toHaveFocus();
     await userEvent.keyboard('{ArrowUp}{ArrowUp}');
-    expect(items[3]).toHaveFocus();
+    expect(items[4]).toHaveFocus();
     await userEvent.keyboard('{Home}');
     expect(items[0]).toHaveFocus();
     await userEvent.keyboard('{End}');
-    expect(items[3]).toHaveFocus();
+    expect(items[4]).toHaveFocus();
   });
 });

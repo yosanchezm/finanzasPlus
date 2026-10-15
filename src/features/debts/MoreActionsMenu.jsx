@@ -9,6 +9,7 @@ const ITEMS = [
   { handler: 'onRateChange', label: 'Cambiar tasa' },
   { handler: 'onChargeChange', label: 'Cambiar seguros y cargos' },
   { handler: 'onLatePolicy', label: 'Configurar mora' },
+  { handler: 'onTermsCorrection', label: 'Corregir datos' },
   { handler: 'onRestructure', label: 'Reestructurar', loansOnly: true },
 ];
 
@@ -16,7 +17,7 @@ const ITEMS = [
  * "Más acciones": a small disclosure menu (AD17), without a dependency. The trigger has `aria-haspopup`; Escape, a click
  * outside or Tab close it, and the arrow keys, Home and End move through the items. Picking an item gives the focus back
  * to the trigger before running the action, so the dialog it opens returns the focus to a control that still exists.
- * Props: `isCard`, and `onRateChange`, `onChargeChange`, `onLatePolicy`, `onRestructure`. With no handler it renders nothing.
+ * Props: `isCard`, and `onRateChange`, `onChargeChange`, `onLatePolicy`, `onTermsCorrection`, `onRestructure`. With no handler it renders nothing.
  */
 export default function MoreActionsMenu({ isCard = false, ...handlers }) {
   const [open, setOpen] = useState(false);

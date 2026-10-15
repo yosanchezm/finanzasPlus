@@ -130,7 +130,7 @@ describe('DebtDetailContainer card charge change', () => {
   it('offers the charge change in the card menu, compares the minimum payment and writes a charge_change without a mode', async () => {
     const { user } = setup([forCard(makeEvent('p1', 'payment', '2026-04-20', 100000))]);
     await user.click(screen.getByRole('button', { name: 'Más acciones' }));
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cambiar tasa', 'Cambiar seguros y cargos', 'Configurar mora', 'Corregir datos']);
     await user.click(screen.getByRole('menuitem', { name: 'Cambiar seguros y cargos' }));
     const fee = within(inDialog().getByRole('group', { name: 'Cuota de manejo' })).getByLabelText('Valor');
     await user.clear(fee);
@@ -148,6 +148,26 @@ describe('DebtDetailContainer card charge change', () => {
     const payload = JSON.parse(data.payloadJson);
     expect(payload).not.toHaveProperty('mode');
     expect(payload.charges.map((charge) => [charge.id, charge.value])).toEqual([['mgmt_fee', 12000], ['mgmt_iva', 19]]);
+  });
+});
+
+describe('DebtDetailContainer card terms correction', () => {
+  it('corrects the cut day from Más acciones: previews 15 to 20 and writes one terms_correction bound to the opening terms, no cost row', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: 'Más acciones' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Corregir datos' }));
+    await fillIn(user, 'Día de corte', '20');
+
+    expect(inDialog().getByRole('row', { name: /Día de corte/ })).toHaveTextContent('1520');
+    expect(port.createEvent).not.toHaveBeenCalled(); // nothing is written before saving
+    await user.click(inDialog().getByRole('button', { name: 'Guardar corrección' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(port.createEvent).toHaveBeenCalledTimes(1);
+    const { data } = port.createEvent.mock.calls[0][0];
+    expect(data).toMatchObject({ debtId: 'c1', kind: 'terms_correction', effectiveOn: TODAY, amountMinor: 0, dedupeKey: 'web:n1' });
+    expect(JSON.parse(data.payloadJson)).toEqual({ fields: { card: { statementDay: 20 } }, previous: { card: { statementDay: 15 } }, appliesTo: 'opening' });
+    expect(port.createCostRow).not.toHaveBeenCalled();
   });
 });
 
