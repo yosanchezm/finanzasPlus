@@ -1,6 +1,6 @@
 # Apply progress: nia-debt-guide
 
-Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f). S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b).
+Mode: Strict TDD (Vitest, `npm test`). Delivery: auto-chain, stacked-to-main. S0 branch: `feat/ndg-s0-explain-plumbing` (from master 72964af). S1 branch: `feat/ndg-s1-loan-topics` (from master faef26b). S2 branch: `feat/ndg-s2-card-topics` (from master ef5b37f). S4 branch: `feat/ndg-s4-terms-correction` (from master 0cad81b). S5 branch: `feat/ndg-s5-advisor-create` (from master 5c31939).
 
 ## Batch S0 (explain plumbing): COMPLETE (18/18 tasks)
 
@@ -358,3 +358,70 @@ None. Packaging does not check that the explain copy matches what the owner read
 ### Remaining
 
 G.3 (owner: `npm run package:nia` without the override, upload the tarball, confirm in Telegram), S4.CP, and S5 to S7.
+
+## Batch S5 (advisor create): PARTIAL (10/14 tasks: S5a and S5b done; S5c and the checkpoint open)
+
+Branch: `feat/ndg-s5-advisor-create` (from master 5c31939). The size-review trigger was reached: the slice stood at 1,566 changed lines before S5c (the last group), so the batch stops at the pre-agreed split S5a+S5b | S5c (tasks.md, "Size rule"). S5c is about 550 lines and would take the slice past the 2,000 work-unit limit.
+
+### Tasks
+
+- [x] S5a.1 to S5a.2 (`chargePresets.js`: `CHARGE_PRESET_SPECS`, `presetCharges`, `addPresetCharge`, `addExplicitCharge`; barrel and node16 lists changed RED-first)
+- [x] S5a.3 to S5a.4 (`wizardModel.js`: `CHARGE_PRESETS` spreads the core spec; `cardCharges` builds through `presetCharges(..., { card: true })`; behaviour neutral)
+- [x] S5a.5 to S5a.6 (`extract.js`: `ACTIONS += setup`, `SetupCase` normalization, card `create` goes to `request.setup`, the `card_in_web` problem is gone)
+- [x] S5b.1 to S5b.2 (`advisor/cardTerms.js`, `advisor/merge.js`)
+- [x] S5b.3 to S5b.4 (`advisor/propose.js`, create mode)
+- [ ] S5c.1 to S5c.4 (handler `startSetup`/answers/`commitSetup`, `pending.js` `nia:min`, `index.js` wiring): NOT started
+- [ ] S5.CP checkpoint: tests, build and package are green for S5a+S5b (below); the owner deploy of Nia and web (action 5) waits for S5c, because until then a card or `setup` request is answered with the old «las tarjetas se crean desde la web» reply.
+
+### Commits
+
+| Commit | Group | Shortstat |
+|---|---|---|
+| becf7ce `feat(core): share the charge presets between the web wizard and Nia with cadence and the IVA link` | S5a (1/2) | 7 files, 348 insertions, 17 deletions |
+| ee1969c `feat(nia): extract a described debt as a setup case and send card creation to the advisor` | S5a (2/2) | 3 files, 270 insertions, 6 deletions |
+| 95de020 `feat(nia): build validated card and loan terms from a described case and merge later answers into it` | S5b (1/2) | 8 files, 473 insertions, 6 deletions |
+| 83a0894 `feat(nia): propose a debt setup with assumptions, blocking questions and a core preview` | S5b (2/2) | 2 files, 454 insertions |
+
+Code total vs master before the bookkeeping commit: 18 files, 1,541 insertions, 25 deletions = 1,566 changed lines (budget 2,000; each group at most 480; size-review trigger of 1,500 crossed after S5b).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| S5a.1/2 | `chargePresets.test.js` (22 cases) failed to load (module missing); node16 source list and barrel exact keys failed (2) | 22/22 and node16 8/8 after `chargePresets.js` and the barrel; all core suites 805/805 | `fold` uses `/\p{M}/gu` like `findDebt.js` instead of a literal combining-mark range |
+| S5a.3/4 | 1 of 2 new `CHARGE_PRESETS` cases failed (no `cadence` from the core); the card charge characterization (ids, labels, cadence, order, blank IVA percentage) passes before and after by design | `src/features/debts` 598/598 | None needed |
+| S5a.5/6 | 19 of the 97 extract cases failed (`setup` unknown, `card_in_web` still raised, ACTIONS) | 97/97 | A second pass made `periodicity` and `system` null when unspoken (merge must not let a default override an earlier answer); test and code changed together |
+| S5b.1/2 | `cardTerms.test.js` (18) and `merge.test.js` (13) failed to load; `buildTerms` mora override failed (1) | 59/59 (18 + 13 + 28 with propose); `preview.test.js` 25/25 | None needed |
+| S5b.3/4 | `propose.test.js` (28 cases) failed to load | 28/28; the first run had 3 failures that were my test helper (`plain` did not map the no-break space), fixed in the test | None needed |
+
+Triangulation: preset keys in any order, `true` default versus a missing amount, IVA included (53,550 and 50,000), IVA linked to a single fee with another id, two fees, label and shape duplicates, explicit charges with folded `refLabel`, dangling and missing reference, minimum rules with and without a stated percentage, statement day before and after today and the 31st, convention versus missing rate, usury notice that never blocks, family loan, stated versus defaulted mora, every unsupported mention once and in catalogue order, unknown cycle fields after one ask versus partial answers, merge of rate, presets, charges, kind and a zero opening balance.
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `npx vitest run packages/finance-core/test/chargePresets.test.js packages/finance-core/test/node16.test.js src/features/debts/wizard functions/nia/debt` exit 0 (included in the full run below) |
+| Runtime harness | `npm run build` exit 0; plain `npm run package:nia` exit 0 (no `NIA_ALLOW_UNREVIEWED`, `functions/nia.tar.gz` written, not committed; the packaging scan covers `functions/nia/debt/advisor`). The advisor has no I/O, so there is no live path until S5c |
+| Full suite | `npm test -- --maxWorkers=4`: 152 files, 2,633 tests passed |
+| Rollback boundary | core `chargePresets.js`, its barrel line and the node16 entries; the preset spread and `cardCharges` in `wizardModel.js`; Nia `advisor/{cardTerms,merge,propose}.js`, the `setup` block and card routing in `extract.js`, the temporary `request.setup` guard and `invalid_day` in `handler.js`, the `late` override in `buildTerms` |
+
+### Deviations from design
+
+- Barrel and node16: the four new keys are `CHARGE_PRESET_SPECS`, `presetCharges`, `addPresetCharge`, `addExplicitCharge`, as designed.
+- `presetCharges` takes `true` for «use the default» (`iva`, `gmf`) and `null` for «mentioned without an amount» (throws `preset_amount_missing`); `undefined` or `false` means not selected. New typed codes beyond the design: `preset_amount_missing`, `unknown_preset`, `charge_ref_ambiguous` (two fees, or two charges with the same label), `charge_value_missing`.
+- `periodicity` and `system` of the `SetupCase` are null when unspoken (the design implied defaults in extraction); `buildLoanTerms` applies French and monthly. This keeps a later answer from overriding an earlier plan choice in `mergeCase`.
+- `SetupCase` carries two extra lists, `asked` (the fields of the last question round) and `unknown` (statement day, due day or minimum rule that stayed unanswered after one ask). The handler (S5c) must set `asked` from `questions` that are not `stuck` after each proposal.
+- `proposeSetup` returns two additive fields: `invalid` (typed issues such as a dangling `refLabel`, with Spanish text; the draft is then null) and per question a `text` and, for the blocked ones, `stuck`. Preview adds `planText` and `firstInstallmentText` for a loan. The unsupported codes are the five mentions plus `mora_fixed`.
+- A pct-based minimum rule with no stated percentage uses 5 % and says so in the assumptions (`min_pct_5`), like the web wizard default; it is the only default and the rule itself is never defaulted.
+- `buildTerms` (create preview) accepts an optional `late` policy so the advisor can honour «sin mora»; the plain create path is unchanged.
+- The `SetupCase` for cards needs no question for the opening balance: it is 0 and listed as the assumption `opening_zero`.
+- Between this batch and S5c, `handleDebt` answers any `request.setup` with the old «las tarjetas se crean desde la web» reply (a one-line guard marked for removal), so a card request never reaches a null `create`.
+
+### Issues found
+
+- A card extraction now cannot reach a Confirm until S5c: the web remains the only way to create a card from this commit range, exactly as before this change. Do not deploy S5a+S5b alone expecting the advisor.
+- The classifier prompt in `index.js` already lists «crearlas» for tarjetas; S5c should check that a short text answer («el corte es el 15») while a setup pending is open is classified as `debt` (the pending is passed to the classifier).
+
+### Remaining
+
+S5c (handler `startSetup`, answers, `commitSetup`, `pending.js` `nia:min` and the `awaiting: 'minimum'` stage, `CONVENTION_NEXT.setup`, `index.js` routing, replies built from `proposeSetup`), S5.CP, then S6, S7.
