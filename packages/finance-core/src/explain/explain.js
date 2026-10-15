@@ -2,6 +2,7 @@ import { debtKindOf, project } from '../ledger/project.js';
 import { legalOf } from '../legal.js';
 import { EXPLAIN_COPY, assertTopic, releasedTopics, topicCopyKeys } from './copy.js';
 import { allocationFacts } from './facts/allocation.js';
+import { cardInterestDropFacts, cardStatementFacts } from './facts/card.js';
 import { chargesFacts } from './facts/charges.js';
 import { moraFacts } from './facts/mora.js';
 import { ratesFacts } from './facts/rates.js';
@@ -11,8 +12,16 @@ import { TOPIC_KINDS } from './topics.js';
 // Facts of an explanation (design G1). Pure and read-only. An unknown topic is rejected, a topic that does not fit
 // the debt kind is "not_applicable", and a topic whose copy is not released is "under_review". Otherwise the topic's
 // builder adds the figures (`numbers`, and `text` with the same figures pre-formatted). A topic with no builder yet
-// (the card, restructure and prepayment topics of S2 and S3) keeps the generic answer.
-const BUILDERS = { rate_conventions: ratesFacts, usury_ibc: usuryFacts, mora: moraFacts, payment_allocation: allocationFacts, charges: chargesFacts };
+// (the restructure and prepayment topics of S3) keeps the generic answer.
+const BUILDERS = {
+  rate_conventions: ratesFacts,
+  usury_ibc: usuryFacts,
+  mora: moraFacts,
+  payment_allocation: allocationFacts,
+  charges: chargesFacts,
+  card_statement: cardStatementFacts,
+  card_interest_drop: cardInterestDropFacts,
+};
 
 const sameSource = (a, b) => a.label === b.label && a.url === b.url;
 const uniqueSources = (entries) =>

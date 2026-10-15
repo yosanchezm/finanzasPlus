@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { explainFacts } from '../../src/explain/explain.js';
 import { DUE_ON, GOLDEN_LEGAL, TEN_DAYS_LATE, goldenDebt } from '../helpers/lateGolden.js';
@@ -9,6 +10,9 @@ import { deepFreeze, ev, french, onTime } from '../helpers/loans.js';
 const copy = reviewedCopy();
 const facts = (row, today, opts = {}, events = []) => explainFacts('payment_allocation', row, events, GOLDEN_LEGAL, today, { copy, ...opts });
 const split = ({ numbers }) => [numbers.charges, numbers.late, numbers.interest, numbers.principal];
+
+const cardTerms = JSON.parse(readFileSync(new URL('../fixtures/card-statement-independent.json', import.meta.url), 'utf8')).terms;
+const card = { $id: 'c1', householdId: 'h1', name: 'Visa', ownerScope: 'shared', terms: cardTerms };
 
 describe('explain facts: payment_allocation', () => {
   it('splits 100,000 on the due date into charges 10,000, interest 90,000 and principal 0', () => {
@@ -78,5 +82,29 @@ describe('explain facts: payment_allocation', () => {
 
     expect(() => facts(deepFreeze(goldenDebt()), DUE_ON, { amountMinor: 100000 }, events)).not.toThrow();
     expect(events).toEqual([]);
+  });
+
+  describe('card', () => {
+    it('splits a payment of 200,000 into fee 9,000, IVA 1,710, interest 10,392 and capital 178,898 as the core does', () => {
+      const result = facts(card, '2026-04-20', { amountMinor: 200000 });
+
+      expect(result).toMatchObject({ status: 'ok', dataSource: 'debt', debt: { kind: 'card' } });
+      expect(result.numbers).toMatchObject({ payment: 200000, charges: 9000, taxes: 1710, late: 0, interest: 10392, principal: 178898, surplus: 0 });
+      expect(result.text).toMatchObject({ payment: '$ 200.000', interest: '$ 10.392', principal: '$ 178.898', paidOn: '20 de abril de 2026', amountSource: 'stated' });
+    });
+
+    it('splits the minimum of the last statement when no amount is given: 21,102 of costs and 125,000 of capital', () => {
+      const result = facts(card, '2026-04-20');
+
+      expect(result.numbers).toMatchObject({ payment: 146102, charges: 9000, taxes: 1710, interest: 10392, principal: 125000 });
+      expect(result.text.amountSource).toBe('next_due');
+    });
+
+    it('has nothing to split before the first statement', () => {
+      const result = facts(card, '2026-04-10');
+
+      expect(result.status).toBe('ok');
+      expect(result.notices).toEqual([{ code: 'nothing_due' }]);
+    });
   });
 });

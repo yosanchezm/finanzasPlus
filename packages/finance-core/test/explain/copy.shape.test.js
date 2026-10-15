@@ -5,12 +5,14 @@ import { explainFacts } from '../../src/explain/explain.js';
 import { reviewedCopy } from '../helpers/explainCopy.js';
 
 // The draft copy of the loan topics (S1): legal constants for the usury and IBC, mora and GMF explanations, plus one
-// sample per topic. Every entry waits for the owner review (gate G), so none carries a date or a hash.
+// sample per topic, and the samples of the two card topics (S2). Every entry waits for the owner review (gate G), so
+// none carries a date or a hash.
 const S1_TOPICS = ['rate_conventions', 'usury_ibc', 'mora', 'payment_allocation', 'charges'];
-const S1_KEYS = ['legal.usury_ibc', 'legal.mora', 'legal.gmf', ...S1_TOPICS.map((topic) => `${topic}.sample`)];
+const S2_TOPICS = ['card_statement', 'card_interest_drop'];
+const DRAFT_KEYS = ['legal.usury_ibc', 'legal.mora', 'legal.gmf', ...S1_TOPICS.map((topic) => `${topic}.sample`), ...S2_TOPICS.map((topic) => `${topic}.sample`)];
 
-describe('shipped explain copy (S1 draft)', () => {
-  it.each(S1_KEYS)('has a draft entry for %s with text, sources and no review', (key) => {
+describe('shipped explain copy (S1 and S2 draft)', () => {
+  it.each(DRAFT_KEYS)('has a draft entry for %s with text, sources and no review', (key) => {
     const entry = EXPLAIN_COPY[key];
 
     expect(entry.text.length).toBeGreaterThan(80);
@@ -43,8 +45,8 @@ describe('shipped explain copy (S1 draft)', () => {
     const status = copyStatus(EXPLAIN_COPY);
 
     expect(status.reviewed).toEqual([]);
-    expect(status.unreviewed).toEqual(expect.arrayContaining(S1_KEYS));
-    expect(Object.keys(EXPLAIN_COPY).sort()).toEqual([...S1_KEYS].sort());
+    expect(status.unreviewed).toEqual(expect.arrayContaining(DRAFT_KEYS));
+    expect(Object.keys(EXPLAIN_COPY).sort()).toEqual([...DRAFT_KEYS].sort());
     expect(releasedTopics()).toEqual([]);
     expect(topicCopyKeys('usury_ibc').filter((key) => !EXPLAIN_COPY[key])).toEqual(['legal.ley546']);
   });

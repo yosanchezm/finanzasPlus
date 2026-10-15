@@ -4,7 +4,9 @@ import { dateText, pesosText } from '../format.js';
 // Facts of `payment_allocation` (spec: Payment allocation topic): how a payment is split into charges and taxes, mora,
 // interest and principal. The split is the one `planCommit` computes for a payment draft (event id 'explain'), a pure
 // preview that writes nothing. The payment is the stated amount, else what is due on the next installment (mora included).
-// A card has its own allocation (S2), so it is answered generically for now. Pure and read-only.
+// A card goes through the same path: the core allocates its charges, taxes, mora and interest first, and the capital
+// last (installments due, then cash advances, then the revolving balance). Without a statement there is nothing due.
+// Pure and read-only.
 
 const KEYS = [
   ['charges', 'charges'],
@@ -16,7 +18,7 @@ const KEYS = [
 ];
 
 export function allocationFacts({ debt, projection, events, legal, today, opts }) {
-  if (!projection || projection.card) return { status: 'generic' };
+  if (!projection) return { status: 'generic' };
   const stated = opts.amountMinor !== undefined && opts.amountMinor !== null;
   const amountMinor = stated ? opts.amountMinor : projection.nextDue && projection.nextDue.outstandingMinor;
   const result = { status: 'ok', dataSource: 'debt', numbers: {}, text: {}, approximate: [], notices: [] };

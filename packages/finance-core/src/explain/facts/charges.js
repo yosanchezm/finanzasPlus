@@ -3,8 +3,8 @@ import { pesosText, percentText } from '../format.js';
 
 // Facts of `charges` (spec: Charges topic): the charge lines of the next installment by kind, the sum over the next 12
 // installments (approximate), the tax lines that point at the charge they tax, and the GMF example from the core. Without
-// a loan the facts are generic and carry the examples only: GMF and IVA, both computed with `evaluateCharges`. A card has
-// its own charge lines (S2), so it gets the generic answer for now. Pure and read-only.
+// a debt the facts are generic and carry the examples only: GMF and IVA, both computed with `evaluateCharges`. A card lists
+// the charges of its last statement and estimates the year as twelve statements like it (approximate). Pure and read-only.
 
 const GMF_RATE_PCT = 0.4; // 4x1000 (Estatuto Tributario)
 const GMF_EXAMPLE_BASE_MINOR = 400000;
@@ -44,12 +44,17 @@ function lineFacts(line, index, termsCharges) {
 }
 
 export function chargesFacts({ projection }) {
-  if (!projection || projection.card) return { status: 'generic', ...examples(true) };
-  const index = projection.plan.findIndex((row) => row.status !== 'paid');
+  if (!projection) return { status: 'generic', ...examples(true) };
+  const isCard = Boolean(projection.card);
+  const index = isCard ? projection.plan.length - 1 : projection.plan.findIndex((row) => row.status !== 'paid');
   const next = index < 0 ? null : projection.plan[index];
   const lines = next ? next.charges : [];
   const shown = lines.slice(0, MAX_LINES);
   const result = { status: 'ok', dataSource: 'debt', ...examples(false), approximate: [], notices: [] };
+  if (isCard && !next) {
+    result.notices.push({ code: 'no_statement_yet' });
+    return result;
+  }
   result.numbers.lines = shown.length;
   if (lines.length > shown.length) {
     result.numbers.hidden = lines.length - shown.length;
@@ -64,7 +69,7 @@ export function chargesFacts({ projection }) {
     result.notices.push({ code: 'no_charges' });
     return result;
   }
-  const rows = projection.plan.slice(index, index + YEAR_ROWS);
+  const rows = isCard ? Array(YEAR_ROWS).fill(next) : projection.plan.slice(index, index + YEAR_ROWS);
   result.numbers.yearRows = rows.length;
   result.numbers.yearTotal = rows.reduce((sum, row) => sum + row.chargesMinor + row.taxesMinor, 0);
   result.text.yearRows = String(rows.length);

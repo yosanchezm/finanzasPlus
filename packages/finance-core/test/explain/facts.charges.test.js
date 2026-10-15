@@ -79,12 +79,35 @@ describe('explain facts: charges', () => {
     expect(result.numbers.lines).toBeUndefined();
   });
 
-  it('gives a card the generic answer until the card topics exist', () => {
-    const result = facts({ $id: 'c1', householdId: 'h1', name: 'Visa', ownerScope: 'shared', terms: cardTerms });
+  describe('card', () => {
+    const card = { $id: 'c1', householdId: 'h1', name: 'Visa', ownerScope: 'shared', terms: cardTerms };
+    const onCard = (today, row = card) => explainFacts('charges', row, [], undefined, today, { copy });
 
-    expect(result).toMatchObject({ status: 'generic', debt: { kind: 'card' } });
-    expect(result.numbers.lines).toBeUndefined();
-    expect(result.numbers.gmf).toBe(1600);
+    it('lists the fee and the IVA of the last statement and points the tax at the fee', () => {
+      const result = onCard('2026-04-20');
+
+      expect(result).toMatchObject({ status: 'ok', dataSource: 'debt', debt: { kind: 'card' } });
+      expect(result.numbers).toMatchObject({ lines: 2, l0: 9000, l1: 1710, gmf: 1600 });
+      expect(result.text).toMatchObject({ 'l0.label': 'Cuota de manejo', 'l0.amount': '$ 9.000', 'l1.label': 'IVA', 'l1.amount': '$ 1.710', 'l1.basis': 'pctOfCharge', 'l1.pct': '19 %', 'l1.ref': 'Cuota de manejo' });
+    });
+
+    it('estimates the year as twelve statements like the last one, marked approximate', () => {
+      const result = onCard('2026-04-20');
+
+      expect(result.numbers).toMatchObject({ yearRows: 12, yearTotal: 128_520 });
+      expect(result.text).toMatchObject({ yearRows: '12', yearTotal: '$ 128.520' });
+      expect(result.approximate).toEqual(['yearTotal']);
+    });
+
+    it('reports a card with no charges, and a card with no statement yet', () => {
+      const free = onCard('2026-04-20', { ...card, terms: { ...cardTerms, charges: [] } });
+      expect(free.notices).toEqual([{ code: 'no_charges' }]);
+      expect(free.numbers.lines).toBe(0);
+      const early = onCard('2026-04-10');
+      expect(early.notices).toEqual([{ code: 'no_statement_yet' }]);
+      expect(early.numbers.lines).toBeUndefined();
+      expect(early.numbers.gmf).toBe(1600);
+    });
   });
 
   it('does not change frozen inputs', () => {

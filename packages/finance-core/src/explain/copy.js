@@ -15,9 +15,10 @@ import { EXPLAIN_TOPICS } from './topics.js';
 const SUPERFINANCIERA = { label: 'Superintendencia Financiera de Colombia: certificación del IBC', url: 'https://www.superfinanciera.gov.co/publicaciones/19130' };
 const CCO_884 = { label: 'Código de Comercio, art. 884 (tope: tasa de usura)' };
 const CC_1653 = { label: 'Código Civil, art. 1653 (imputación del pago)' };
+const CARD_CONTRACT = { label: 'Contrato y extracto de tu tarjeta de crédito' };
 
 // DRAFT for the owner review (gate G): neutral, informational Spanish. Every entry stays unreviewed (`reviewedOn: null`)
-// until the owner approves its exact text and sources. The Ley 546 and Ley 1555 keys arrive with S3, the card samples with S2.
+// until the owner approves its exact text and sources. The Ley 546 and Ley 1555 keys arrive with S3.
 export const EXPLAIN_COPY = {
   'legal.usury_ibc': {
     text:
@@ -87,6 +88,22 @@ export const EXPLAIN_COPY = {
       'Además de los intereses, una deuda puede traer cargos: seguros, comisiones o cuotas de manejo, e impuestos como el IVA. Los cargos se suman a la cuota y no reducen el capital. ' +
       'Un impuesto puede calcularse sobre otro cargo (por ejemplo, el IVA sobre una comisión); en la app queda ligado a ese cargo y se quita con él. Revisa en tu contrato cuáles aplican.',
     sources: [{ label: 'Contrato y extracto de tu entidad financiera' }],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'card_statement.sample': {
+    text:
+      'El extracto es el resumen que tu entidad genera en la fecha de corte de la tarjeta: reúne las compras, las cuotas de las compras diferidas, los intereses, la cuota de manejo y los impuestos del periodo. Tienes hasta la fecha límite de pago para pagarlo. ' +
+      'El pago mínimo es lo menos que debes pagar en esa fecha para no quedar en mora; cada entidad define cómo lo calcula (por ejemplo, intereses, cargos y cuotas más un porcentaje del saldo). El pago total es el valor que cubre todo el extracto.',
+    sources: [CARD_CONTRACT],
+    reviewedOn: null,
+    reviewedHash: null,
+  },
+  'card_interest_drop.sample': {
+    text:
+      'En una tarjeta, los intereses de las compras corrientes se cobran sobre el saldo que quedó sin pagar después de la fecha límite de pago. Si pagas el extracto completo hasta esa fecha, esa parte no genera intereses en el siguiente corte. ' +
+      'Si solo pagas el mínimo, el resto sigue generando intereses y el siguiente extracto los cobra. Por eso los intereses pueden bajar de un extracto al siguiente aunque la tasa no haya cambiado: depende de cuánto pagaste y cuándo.',
+    sources: [CARD_CONTRACT, { label: 'Método de cálculo de la app para tarjetas (aproximado)' }],
     reviewedOn: null,
     reviewedHash: null,
   },
