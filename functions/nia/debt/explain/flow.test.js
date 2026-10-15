@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COPY, EXPLAIN_TOPICS, explainFacts } from '../../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../../packages/finance-core/test/helpers/explainCopy.js';
-import { explainReply, menuReply, pickReply, recoveryReply } from './flow.js';
+import { applicableDebts, explainReply, menuReply, pickReply, recoveryReply } from './flow.js';
 import { TOPIC_LABELS, UNDER_REVIEW_TEXT, renderExplain } from './render.js';
 
 const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-09-10', rate: { convention: 'EA', value: 24 }, system: 'french', periodicity: 'monthly', n: 36, firstDueOn: '2026-10-10' };
@@ -66,7 +66,7 @@ describe('explainReply: nothing is released in S0', () => {
   });
 
   it('falls back to the under review text for a status it has no template for', () => {
-    const released = { ...facts('card_statement', null), status: 'ok' };
+    const released = { ...facts('restructure_whatif', null), status: 'ok' };
 
     expect(explainReply(released).text).toBe(UNDER_REVIEW_TEXT);
     expect(renderExplain(released)).toEqual({ parts: [UNDER_REVIEW_TEXT], followUps: [] });
@@ -81,6 +81,60 @@ describe('pickReply', () => {
     expect(text).toMatch(/cuál deuda/i);
     expect(keyboard.flat().map((button) => button.callback_data)).toEqual(['d0', 'd1', 'd2', 'd3', 'd4', 'd5'].map((id) => `nia:exp:mora:${id}`));
     expect(keyboard.flat()[0].text).toBe('Deuda 0');
+  });
+});
+
+describe('card topics: which debts they apply to', () => {
+  const visa = { $id: 'c1', name: 'Visa', kind: 'card', terms: cardTerms };
+  const mastercard = { $id: 'c2', name: 'Mastercard', kind: 'card', terms: cardTerms };
+  const car = { $id: 'd1', name: 'Carro', kind: 'vehicle', terms: loanTerms };
+
+  it('keeps only the cards for a card topic and every debt for the other topics', () => {
+    expect(applicableDebts('card_statement', [car, visa, mastercard])).toEqual([visa, mastercard]);
+    expect(applicableDebts('card_interest_drop', [car])).toEqual([]);
+    expect(applicableDebts('mora', [car, visa])).toEqual([car, visa]);
+  });
+
+  it('offers only the cards in the pick of a card topic, and says there is no card when there is none', () => {
+    const pick = pickReply('card_statement', [car, visa, mastercard]);
+    const none = pickReply('card_interest_drop', [car]);
+
+    expect(pick.keyboard.flat().map((button) => button.callback_data)).toEqual(['nia:exp:card_statement:c1', 'nia:exp:card_statement:c2']);
+    expect(none.text).toBe('No encuentro una tarjeta de crédito registrada, y ese tema aplica solo a tarjetas.');
+    expect(none.keyboard).toBeUndefined();
+    noDigits(none.text);
+  });
+});
+
+describe('explainReply: card topics', () => {
+  const copy = reviewedCopy();
+  const longId = 'c'.repeat(36);
+  const longCard = { $id: longId, name: 'Visa', kind: 'card', terms: cardTerms };
+  const longSample = { ...EXPLAIN_COPY['card_interest_drop.sample'], text: `${'Primer párrafo del tema con una cifra de $ 1.234.567 y un detalle largo. '.repeat(9)}
+
+${'Segundo párrafo del tema con otra cifra de $ 7.654.321 y más detalle. '.repeat(9)}` };
+  const bytes = (text) => Buffer.byteLength(text, 'utf8');
+
+  it('sends a card explanation with the footer, «Ver más» and related topics, every callback within 64 bytes', () => {
+    const released = explainFacts('card_interest_drop', longCard, [], undefined, '2026-10-13', { copy: reviewedCopy({ ...EXPLAIN_COPY, 'card_interest_drop.sample': longSample }) });
+    const { parts } = renderExplain(released);
+    const { text, keyboard } = explainReply(released, { debtId: longId });
+    const data = keyboard.flat().map((button) => button.callback_data);
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(text).toContain('Fuente: Visa · intereses de tarjeta');
+    expect(data[0]).toBe(`nia:exp:card_interest_drop:-:2`);
+    expect(data.slice(1)).toEqual([`nia:exp:card_statement:${longId}`, `nia:exp:payment_allocation:${longId}`]);
+    for (const callback of data) expect(bytes(callback)).toBeLessThanOrEqual(64);
+    expect(bytes(`nia:exp:card_interest_drop:${longId}`)).toBe(63);
+  });
+
+  it('answers a card statement with the footer and no «Ver más» when it fits in one message', () => {
+    const { text, keyboard } = explainReply(explainFacts('card_statement', { ...longCard, $id: 'c1' }, [], undefined, '2026-04-20', { copy }), { debtId: 'c1' });
+
+    expect(text).toContain('Pago mínimo: $ 146.102.');
+    expect(text.length).toBeLessThanOrEqual(1200);
+    expect(keyboard.flat().map((button) => button.callback_data)).toEqual(['nia:exp:card_interest_drop:c1', 'nia:exp:mora:c1']);
   });
 });
 

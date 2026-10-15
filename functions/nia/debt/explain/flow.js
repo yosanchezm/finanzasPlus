@@ -9,6 +9,10 @@ import { TOPIC_LABELS, renderExplain } from './render.js';
 const MENU_TEXT = 'Elige el tema que quieres que te explique:';
 const MORE_LABEL = 'Ver más';
 const PICK_TEXT = '¿De cuál deuda quieres la explicación?';
+const NO_CARD_TEXT = 'No encuentro una tarjeta de crédito registrada, y ese tema aplica solo a tarjetas.';
+// The topics that fit cards only (the core answers «no aplica» for the others); a pick offers just the debts they fit.
+const CARD_TOPICS = ['card_statement', 'card_interest_drop'];
+const isCard = (debt) => debt.kind === 'card' || Boolean(debt.terms && debt.terms.kind === 'card');
 const RECOVERY = {
   unknown_topic: 'Ese tema ya no está disponible. Pídeme “explícame” y te muestro los temas.',
   debt_gone: 'Esa deuda ya no está disponible. Escríbeme de nuevo qué quieres saber.',
@@ -22,9 +26,19 @@ export function menuReply(debtId = null) {
   return { text: MENU_TEXT, keyboard: EXPLAIN_TOPICS.map((topic) => [explainButton(topic, debtId, 1, TOPIC_LABELS[topic])]) };
 }
 
-/** The pick between debts for an explanation: stateless explain buttons, no pending. */
+/** True for a topic that fits cards only. */
+export const cardOnly = (topic) => CARD_TOPICS.includes(topic);
+
+/** The debts a topic fits: the cards for a card topic, every debt for the other topics. */
+export function applicableDebts(topic, debts) {
+  return cardOnly(topic) ? debts.filter(isCard) : debts;
+}
+
+/** The pick between debts for an explanation: stateless explain buttons, no pending. Only the debts the topic fits are offered. */
 export function pickReply(topic, debts) {
-  return { text: PICK_TEXT, keyboard: debts.slice(0, MAX_PICK_BUTTONS).map((debt) => [explainButton(topic, debt.$id, 1, String(debt.name).slice(0, 40))]) };
+  const fit = applicableDebts(topic, debts);
+  if (fit.length === 0) return { text: NO_CARD_TEXT };
+  return { text: PICK_TEXT, keyboard: fit.slice(0, MAX_PICK_BUTTONS).map((debt) => [explainButton(topic, debt.$id, 1, String(debt.name).slice(0, 40))]) };
 }
 
 /** @param {'unknown_topic'|'debt_gone'} reason */

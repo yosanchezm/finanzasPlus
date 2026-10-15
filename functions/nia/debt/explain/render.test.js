@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_COPY, explainFacts, resolveLegal } from '../../../../packages/finance-core/index.js';
 import { reviewedCopy } from '../../../../packages/finance-core/test/helpers/explainCopy.js';
@@ -255,5 +256,150 @@ describe('renderExplain: splitter', () => {
     expect(all.match(/1\.234\.567/g)).toHaveLength(30);
     expect(all.match(/28,59 % E\.A\./g).length).toBeGreaterThanOrEqual(30);
     expect(all).not.toMatch(/\$\s*\n/);
+  });
+});
+
+// -- card topics (S2) ------------------------------------------------------------------------------------------------
+// Goldens come from the independent card fixture: statement 1 of 121,102, minimum 146,102 (21,102 of interest, fees and
+// taxes plus 125,000 of capital); with mora at 28.59 % EA the 10 days to the next close give 861, and the second statement's
+// interest drops from 10,392 to 9,526.
+const cardFixture = JSON.parse(readFileSync(new URL('../../../../packages/finance-core/test/fixtures/card-statement-independent.json', import.meta.url), 'utf8'));
+const visa = (terms = cardFixture.terms) => ({ $id: 'c1', householdId: 'h1', name: 'Visa', ownerScope: 'shared', terms });
+const moraCard = (late = { mode: 'usury', graceDays: 0 }) => visa({ ...cardFixture.terms, late, card: { ...cardFixture.terms.card, statementDay: 20, dueDay: 10 } });
+const plainCard = (principalMinor) => visa({ ...cardFixture.terms, principalMinor, charges: [], card: { ...cardFixture.terms.card, deferred: [] } });
+const cardPay = (effectiveOn, amountMinor, $id) => ({ $id, debtId: 'c1', kind: 'payment', effectiveOn, amountMinor, payloadJson: '{}', $createdAt: '2026-01-01T00:00:00.000Z' });
+const onCard = (topic, row, today, events = [], opts = {}) => explainFacts(topic, row, events, GOLDEN_LEGAL, today, { copy, ...opts });
+const textOf = (topic, row, today, events, opts) => first(renderExplain(onCard(topic, row, today, events, opts)));
+
+describe('renderExplain: card_statement', () => {
+  it('shows the last statement, its minimum payment and the minimum rule with the footer of the card', () => {
+    const text = textOf('card_statement', visa(), '2026-04-20');
+
+    expect(text).toContain('Tu último extracto cortó el 15 de abril de 2026 y su fecha límite de pago es el 30 de abril de 2026. Lo cobrado en el periodo es $ 121.102:');
+    expect(text).toContain('• Intereses: $ 10.392\n• Cuotas de compras diferidas: $ 100.000\n• Cuota de manejo e impuestos: $ 10.710');
+    expect(text).toContain('Pago mínimo: $ 146.102. Para pagar todo el extracto: $ 621.102.');
+    expect(text).toContain('Según la regla de tu tarjeta, el pago mínimo suma los intereses, los cargos, los impuestos y las cuotas del periodo, más el 5 % del saldo de compras corrientes y avances; nunca es menos de $ 20.000. Nunca supera el total del extracto.');
+    expect(text).toContain('El próximo corte es el 15 de mayo de 2026 y la fecha límite de pago, el 30 de mayo de 2026.');
+    expect(text).toContain('Fuente: Visa · extractos de tarjeta · Contrato y extracto de tu tarjeta de crédito');
+    expect(text).not.toContain('aproximado');
+  });
+
+  it('says what a payment already covered, and that an unpaid minimum is past its date', () => {
+    const partial = textOf('card_statement', visa(), '2026-04-26', [cardPay('2026-04-25', 100_000, 'p1')]);
+    const late = textOf('card_statement', visa(), '2026-05-10');
+    const covered = textOf('card_statement', visa(), '2026-04-26', [cardPay('2026-04-25', 146_102, 'p2')]);
+
+    expect(partial).toContain('Ya abonaste $ 100.000 al mínimo y faltan $ 46.102.');
+    expect(late).toContain('La fecha límite ya pasó y el mínimo sigue sin pagarse: faltan $ 146.102.');
+    expect(covered).toContain('El pago mínimo de este extracto ya está cubierto.');
+  });
+
+  it('describes the other minimum rules with the figures of the card', () => {
+    const rule = (name, pct) => visa({ ...cardFixture.terms, card: { ...cardFixture.terms.card, minPayment: { rule: name, pct, floorMinor: 0 } } });
+
+    expect(textOf('card_statement', rule('installments_due', 0), '2026-04-20')).toContain('el pago mínimo suma solo los intereses, los cargos, los impuestos y las cuotas del periodo.');
+    expect(textOf('card_statement', rule('pct_balance', 10), '2026-04-20')).toContain('el pago mínimo es el 10 % del valor total del extracto.');
+  });
+
+  it('says there is no statement yet, and is generic with an invitation and no figures without a card', () => {
+    const early = textOf('card_statement', visa(), '2026-04-10');
+    const { parts, followUps } = renderExplain(onCard('card_statement', null, '2026-04-20'));
+
+    expect(early).toContain('Esta tarjeta todavía no tiene un extracto registrado. El próximo corte es el 15 de abril de 2026, con fecha límite de pago el 30 de abril de 2026.');
+    expect(parts[0]).toContain('Si me dices de cuál tarjeta hablas, te muestro tu último extracto con tus números.');
+    expect(parts[0]).toContain('Fuente: explicación general · extractos de tarjeta');
+    hasNoMoney(parts[0]);
+    expect(followUps).toEqual(['card_interest_drop', 'mora']);
+  });
+});
+
+describe('renderExplain: card_interest_drop', () => {
+  it('shows the revolving base, the first-cycle approximation and the minimum-only what-if, labelled approximate', () => {
+    const text = renderExplain(onCard('card_interest_drop', visa(), '2026-04-20')).parts.join('\n');
+
+    expect(text).toContain('En tu extracto del 15 de abril de 2026, los intereses fueron $ 10.392 (aproximado).');
+    expect(text).toContain('Los intereses de compras corrientes se calcularon sobre una base de $ 500.000 (aproximado), a 2,08 % mensual (28 % efectiva anual).');
+    expect(text).toContain('Es tu primer extracto: la app cuenta el saldo inicial como ya facturado, por eso estas cifras son aproximadas.');
+    expect(text).toContain('¿Y si pagas solo el mínimo?');
+    expect(text).toContain('Si el 30 de abril de 2026 pagas solo el mínimo ($ 146.102), en el corte del 15 de mayo de 2026 los intereses serían de $ 9.873 (aproximado), sobre una base de $ 475.000 (aproximado).');
+    expect(text).toContain('Si pagas todo el extracto ($ 621.102), serían de $ 0 (aproximado).');
+    expect(text).toContain('Pagar solo el mínimo costaría $ 9.873 (aproximado) más en intereses. Es una estimación: no incluye compras ni pagos nuevos.');
+    expect(text).toContain('Fuente: Visa · intereses de tarjeta · Contrato y extracto de tu tarjeta de crédito · Método de cálculo de la app para tarjetas (aproximado)');
+  });
+
+  it('explains a statement paid in full by its due date as a zero revolving base, with the drop against the last statement', () => {
+    const first1 = onCard('card_interest_drop', plainCard(800_000), '2026-04-20');
+    const paid = onCard('card_interest_drop', plainCard(800_000), '2026-05-20', [cardPay('2026-04-30', 800_000 + first1.numbers.interest, 'full')]);
+    const text = renderExplain(paid).parts.join('\n');
+
+    expect(text).toContain('La parte del extracto anterior que pagaste a tiempo ($ 800.000) no generó intereses.');
+    expect(text).toContain('Como pagaste el extracto completo hasta la fecha límite de pago, la base de intereses de compras corrientes es cero.');
+    expect(text).toContain(`Frente al extracto anterior (${paid.text.previousInterest}), los intereses bajaron ${paid.text.drop}.`);
+    expect(text).not.toContain('Es tu primer extracto');
+  });
+
+  it('explains the part still unpaid after the due date as the revolving base', () => {
+    const text = renderExplain(onCard('card_interest_drop', visa(), '2026-05-20', [cardPay('2026-04-28', 321_102, 'part')])).parts.join('\n');
+
+    expect(text).toContain('La parte del extracto anterior que pagaste a tiempo ($ 200.000) no generó intereses.');
+    expect(text).toContain('sobre una base de $ 300.000');
+    expect(text).not.toContain('es cero');
+  });
+
+  it('explains why the second statement interest dropped from 10,392 to 9,526 when the mora applies', () => {
+    const text = renderExplain(onCard('card_interest_drop', moraCard(), '2026-05-20')).parts.join('\n');
+
+    expect(text).toContain('En tu extracto del 20 de mayo de 2026, los intereses fueron $ 9.526.');
+    expect(text).toContain('En parte del periodo, $ 41.667 (aproximado) del capital del pago mínimo sin pagar estuvo en mora; por esos días se cobra mora en lugar de interés corriente.');
+    expect(text).toContain('Sin eso, los intereses habrían sido de $ 10.392 (aproximado), así que la diferencia es de $ 866 (aproximado).');
+    expect(text).toContain('Frente al extracto anterior ($ 10.392), los intereses bajaron $ 866.');
+  });
+
+  it('has no statement to explain before the first cut-off date, and invites naming a card without one', () => {
+    const early = textOf('card_interest_drop', visa(), '2026-04-10');
+    const generic = textOf('card_interest_drop', null, '2026-04-20');
+
+    expect(early).toContain('Esta tarjeta todavía no tiene un extracto, así que aún no hay intereses por explicar. Tu tasa es 2,08 % mensual (28 % efectiva anual).');
+    expect(generic).toContain('Si me dices de cuál tarjeta hablas, te muestro de dónde salen sus intereses con tus números.');
+    hasNoMoney(generic);
+  });
+});
+
+describe('renderExplain: card mora, allocation and charges', () => {
+  it('explains the mora of a card on the unmet capital of the minimum as approximate: 125,000 for 10 days gives 861', () => {
+    const text = textOf('mora', moraCard(), '2026-05-20');
+
+    expect(text).toContain('La mora de esta deuda se cobra a la tasa de usura vigente: 28,59 % E.A.');
+    expect(text).toContain('Tu pago mínimo es de $ 146.102: $ 21.102 son intereses, cargos e impuestos, que los pagos cubren primero, y $ 125.000 son capital. La mora corre sobre el capital del mínimo que sigue sin pagar: hoy $ 125.000.');
+    expect(text).toContain('Llevas 10 días de atraso y la mora acumulada es $ 861 (aproximado). Se cobra como una línea del extracto del siguiente corte; mientras corre, ese capital no paga interés corriente.');
+    expect(text).not.toContain('de capital vencido');
+  });
+
+  it('gives an approximate example for a card whose minimum is not due yet', () => {
+    const text = textOf('mora', moraCard(), '2026-04-22');
+
+    expect(text).toContain('Ejemplo: si el mínimo de $ 146.102 no se paga, su capital sin pagar de $ 125.000 correría mora 10 días y la mora sería de $ 861 (aproximado).');
+  });
+
+  it('splits a payment on a card into charges, taxes, mora, interest and capital, and says where the capital goes', () => {
+    const stated = textOf('payment_allocation', visa(), '2026-04-20', [], { amountMinor: 200_000 });
+    const minimum = textOf('payment_allocation', visa(), '2026-04-20');
+    const early = textOf('payment_allocation', visa(), '2026-04-10');
+
+    expect(stated).toContain('Con un pago de $ 200.000 el 20 de abril de 2026, el reparto sería:\n• Cargos: $ 9.000\n• Impuestos: $ 1.710\n• Mora: $ 0\n• Intereses: $ 10.392\n• Capital: $ 178.898');
+    expect(stated).toContain('En una tarjeta, el capital se aplica primero a las cuotas de compras diferidas ya facturadas, luego a los avances y al final al saldo de compras corrientes.');
+    expect(minimum).toContain('Si pagas hoy (20 de abril de 2026) el pago mínimo pendiente, $ 146.102, el reparto sería:');
+    expect(minimum).toContain('• Capital: $ 125.000');
+    expect(early).toContain('Esta tarjeta no tiene un pago mínimo pendiente, así que no hay un pago para repartir.');
+  });
+
+  it('lists the fee and the IVA of the last statement with the approximate year, and says when there is no statement', () => {
+    const text = textOf('charges', visa(), '2026-04-20');
+    const early = textOf('charges', visa(), '2026-04-10');
+
+    expect(text).toContain('Cargos de tu último extracto:\n• Cuota de manejo (comisión o cuota): $ 9.000\n• IVA (impuesto): $ 1.710, 19 % de «Cuota de manejo»');
+    expect(text).toContain('Suma aproximada de cargos e impuestos de 12 extractos como el último: $ 128.520 (aproximado).');
+    expect(early).toContain('Esta tarjeta todavía no tiene un extracto, así que aún no hay cargos que mostrar.');
+    expect(early).toContain('Ejemplo del GMF: 0,4 % sobre $ 400.000 son $ 1.600.');
   });
 });

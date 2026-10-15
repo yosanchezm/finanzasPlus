@@ -1,6 +1,6 @@
 import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
-import { explainReply, menuReply, pickReply, recoveryReply } from './explain/flow.js';
+import { applicableDebts, cardOnly, explainReply, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
@@ -410,10 +410,22 @@ async function startExplain(deps, ctx, request, debts, legal) {
   const visible = debts.filter(inScopeFor(ctx.profile.ownerScope));
   const found = findDebt(visible, request.debtRef);
   if (!topic) return say(deps, ctx, { ...menuReply(found.match ? found.match.$id : null), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
-  if (found.candidates) return say(deps, ctx, { ...pickReply(topic, found.candidates), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+  let match = found.match || null;
+  if (found.candidates) {
+    // A card topic among a loan and several cards: the loan is not a candidate, and a single card is the answer.
+    const fit = applicableDebts(topic, found.candidates);
+    if (fit.length !== 1) return say(deps, ctx, { ...pickReply(topic, found.candidates), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+    match = fit[0];
+  } else if (found.none && !request.debtRef && !(hint && hint.fromMarker) && cardOnly(topic)) {
+    // Several debts and none named: a card topic goes to the only card, picks among several, and says so when there is none.
+    const active = visible.filter((item) => item.status === 'active');
+    const cards = applicableDebts(topic, active);
+    if (cards.length === 1 && active.length > 1) match = cards[0];
+    else if (cards.length !== 1 && active.length > 0) return say(deps, ctx, { ...pickReply(topic, cards), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+  }
   const marker = lastExplain(ctx.history);
-  const fromMarker = !found.match && !request.debtRef && hint && hint.fromMarker && marker && marker.topic === topic && marker.debtId;
-  const debt = found.match || (fromMarker ? visible.find((item) => item.$id === marker.debtId) : null) || null;
+  const fromMarker = !match && !request.debtRef && hint && hint.fromMarker && marker && marker.topic === topic && marker.debtId;
+  const debt = match || (fromMarker ? visible.find((item) => item.$id === marker.debtId) : null) || null;
   return sendExplain(deps, ctx, { topic, debt, asked, legal });
 }
 

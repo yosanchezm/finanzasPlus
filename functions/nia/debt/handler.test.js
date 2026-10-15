@@ -2266,6 +2266,52 @@ describe('explain (read-only, session-safe)', () => {
       expect(lastEntry(w, 1).explain).toEqual({ topic: 'mora', debtId: 'd1' });
     });
 
+    describe('card topics', () => {
+      const CARD_TERMS = { kind: 'card', principalMinor: 500000, openedOn: '2026-04-01', system: 'none', periodicity: 'monthly', rate: { value: 28, basis: 'effective', periodicity: 'annual', timing: 'arrears' }, card: { statementDay: 15, dueDay: 30, minPayment: { rule: 'interest_fees_plus_pct', pct: 5, floorMinor: 20000 } } };
+      const visa = (id = 'c1', name = 'Visa') => debtRow(id, name, { kind: 'card', termsJson: serializeTerms(CARD_TERMS) });
+
+      it('explains the only card by itself when the member also has a loan and names no debt', async () => {
+        const w = released({ debts: [debtRow('d1', 'Carro'), visa()], answers: [explainAnswer({ topic: 'card_statement' })] });
+        const writes = watched(w);
+        await handleDebt(w.deps, ctx({ text: '¿cómo funciona el pago mínimo?' }));
+
+        expect(w.sent).toHaveLength(1);
+        expect(w.sent[0].text).toContain('Fuente: Visa · extractos de tarjeta');
+        expect(w.sent[0].text).toContain('Tu último extracto cortó el 15 de septiembre de 2026');
+        expect(w.sent[0].text).toContain('Pago mínimo: $');
+        expect(writes).toEqual([]);
+        expect(lastEntry(w).explain).toEqual({ topic: 'card_statement', debtId: 'c1' });
+      });
+
+      it('asks which card, offering only the cards, when there are several', async () => {
+        const w = released({ debts: [debtRow('d1', 'Carro'), visa('c1', 'Visa'), visa('c2', 'Mastercard')], answers: [explainAnswer({ topic: 'card_interest_drop' })] });
+        const writes = watched(w);
+        await handleDebt(w.deps, ctx({ text: '¿por qué bajaron los intereses?' }));
+
+        expect(labels(w.sent[0]).map(([, data]) => data)).toEqual(['nia:exp:card_interest_drop:c1', 'nia:exp:card_interest_drop:c2']);
+        expect(writes).toEqual([]);
+        expect(w.sessions[0].pending).toBeNull();
+      });
+
+      it('says there is no card when the member has none, and shows no keyboard', async () => {
+        const w = released({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [explainAnswer({ topic: 'card_statement' })] });
+        const writes = watched(w);
+        await handleDebt(w.deps, ctx({ text: '¿cómo funciona el extracto?' }));
+
+        expect(w.sent[0].text).toBe('No encuentro una tarjeta de crédito registrada, y ese tema aplica solo a tarjetas.');
+        expect(w.sent[0].keyboard).toBeUndefined();
+        expect(writes).toEqual([]);
+      });
+
+      it('still answers a named loan with the not applicable text', async () => {
+        const w = released({ debts: [debtRow('d1', 'Carro'), visa()], answers: [explainAnswer({ topic: 'card_statement', debtRef: 'carro' })] });
+        await handleDebt(w.deps, ctx({ text: '¿cómo funciona el extracto de mi carro?' }));
+
+        expect(w.sent[0].text).toMatch(/solo a tarjetas/);
+        expect(w.sent[0].text).not.toContain('Carro');
+      });
+    });
+
     it('reads a stated rate and amount from the marker only when they are valid', () => {
       const entry = (explain) => [{ role: 'assistant', content: 'a', explain }];
 

@@ -1,6 +1,6 @@
 // Spanish rendering of the explain facts (design G1, G6). Each topic has a deterministic template over `facts`: every
 // figure is read from `facts.text` (pre-formatted by the core) and the rest is fixed text or reviewed copy, so no template
-// invents a number. The messages are split on paragraph boundaries into parts of at most `maxChars` characters, each one
+// invents a number (a card figure that comes from a proration or from the first-cycle approximation carries «aproximado»). The messages are split on paragraph boundaries into parts of at most `maxChars` characters, each one
 // with the source footer. Pure and Node 16 safe.
 
 export const TOPIC_LABELS = Object.freeze({
@@ -32,6 +32,8 @@ const FAMILY = {
   mora: 'cálculo de mora',
   payment_allocation: 'aplicación de pagos',
   charges: 'cargos e impuestos',
+  card_statement: 'extractos de tarjeta',
+  card_interest_drop: 'intereses de tarjeta',
 };
 
 // Related topics offered after an explanation (at most two).
@@ -41,6 +43,8 @@ const FOLLOW_UPS = {
   mora: ['usury_ibc', 'payment_allocation'],
   payment_allocation: ['mora', 'charges'],
   charges: ['payment_allocation', 'usury_ibc'],
+  card_statement: ['card_interest_drop', 'mora'],
+  card_interest_drop: ['card_statement', 'payment_allocation'],
 };
 
 const CONVENTION = {
@@ -70,12 +74,16 @@ const ORIGIN = {
 const KIND = { insurance: 'seguro', fee: 'comisión o cuota', tax: 'impuesto', other: 'otro cargo' };
 
 const INVITE = 'Si me dices de cuál deuda hablas, te lo muestro con tus números.';
+const CARD_INVITE = 'Si me dices de cuál tarjeta hablas, te muestro';
+const CARD_CAPITAL_ORDER = 'En una tarjeta, el capital se aplica primero a las cuotas de compras diferidas ya facturadas, luego a los avances y al final al saldo de compras corrientes.';
+const NO_STATEMENT = 'Esta tarjeta todavía no tiene un extracto';
 
 // -- helpers ---------------------------------------------------------------------------------------------------------
 
 const copyOf = (facts, key) => (facts.copyKeys ? facts.copy[facts.copyKeys.indexOf(key)] : undefined) || '';
 const approx = (facts, key) => `${facts.text[key]}${facts.approximate.includes(key) ? ' (aproximado)' : ''}`;
 const hasNotice = (facts, code) => facts.notices.some((notice) => notice.code === code);
+const isCard = (facts) => Boolean(facts.debt && facts.debt.kind === 'card');
 const days = (count) => (count === 1 ? 'día' : 'días');
 const whose = (facts) => (facts.dataSource === 'stated' ? 'La tasa que me diste' : 'Tu tasa');
 
@@ -126,12 +134,31 @@ function moraPolicy(facts) {
   return `La mora de esta deuda se cobra a la tasa de usura vigente: ${text.lateEA} E.A.`;
 }
 
+// A card runs mora on the capital of the minimum payment that stays unpaid: payments settle interest, fees and taxes first.
+function cardMora(facts) {
+  const { text, numbers } = facts;
+  if (numbers.lateMinor !== undefined) {
+    const paragraphs = [];
+    if (numbers.minimum !== undefined) {
+      paragraphs.push(`Tu pago mínimo es de ${text.minimum}: ${text.nonCapital} son intereses, cargos e impuestos, que los pagos cubren primero, y ${text.capital} son capital. La mora corre sobre el capital del mínimo que sigue sin pagar: hoy ${text.base}.`);
+    }
+    paragraphs.push(`Llevas ${text.days} ${days(numbers.lateDays)} de atraso y la mora acumulada es ${approx(facts, 'late')}. Se cobra como una línea del extracto del siguiente corte; mientras corre, ese capital no paga interés corriente.`);
+    return paragraphs;
+  }
+  if (numbers.exampleLateMinor !== undefined) {
+    return [`Ejemplo: si el mínimo de ${text.minimum} no se paga, su capital sin pagar de ${text.exampleBase} correría mora ${text.exampleDays} ${days(numbers.exampleDays)} y la mora sería de ${approx(facts, 'exampleLate')}.`];
+  }
+  return [];
+}
+
 function mora(facts) {
   const { text, numbers } = facts;
   const paragraphs = [copyOf(facts, 'mora.sample')];
   if (facts.status === 'generic') paragraphs.push(INVITE);
   else paragraphs.push(moraPolicy(facts));
-  if (numbers.lateMinor !== undefined) {
+  if (isCard(facts)) {
+    paragraphs.push(...cardMora(facts));
+  } else if (numbers.lateMinor !== undefined) {
     paragraphs.push(`Hoy llevas ${text.days} ${days(numbers.lateDays)} de atraso sobre ${text.base} de capital vencido, y la mora acumulada es ${text.late}.`);
   } else if (numbers.exampleLateMinor !== undefined) {
     paragraphs.push(`Ejemplo: con ${text.exampleDays} ${days(numbers.exampleDays)} de atraso sobre ${text.exampleBase} de capital vencido, la mora sería de ${approx(facts, 'exampleLate')}.`);
@@ -147,13 +174,18 @@ function paymentAllocation(facts) {
   const { text } = facts;
   const paragraphs = [copyOf(facts, 'payment_allocation.sample')];
   if (facts.status === 'generic') return [...paragraphs, 'Si me dices de cuál deuda hablas y qué valor pagarías, te muestro el reparto con tus números.'];
-  if (hasNotice(facts, 'nothing_due')) return [...paragraphs, 'Ahora no tiene ninguna cuota pendiente, así que no hay un pago para repartir. Dime un valor y te muestro cómo se repartiría.'];
-  const head = text.amountSource === 'stated' ? `Con un pago de ${text.payment} el ${text.paidOn}, el reparto sería:` : `Si pagas hoy (${text.paidOn}) lo que debe la próxima cuota, ${text.payment}, el reparto sería:`;
+  const card = isCard(facts);
+  if (hasNotice(facts, 'nothing_due')) {
+    const nothing = card ? 'Esta tarjeta no tiene un pago mínimo pendiente' : 'Ahora no tiene ninguna cuota pendiente';
+    return [...paragraphs, `${nothing}, así que no hay un pago para repartir. Dime un valor y te muestro cómo se repartiría.`];
+  }
+  const due = card ? 'el pago mínimo pendiente' : 'lo que debe la próxima cuota';
+  const head = text.amountSource === 'stated' ? `Con un pago de ${text.payment} el ${text.paidOn}, el reparto sería:` : `Si pagas hoy (${text.paidOn}) ${due}, ${text.payment}, el reparto sería:`;
   const lines = [`• Cargos: ${text.charges}`];
   if (facts.numbers.taxes > 0) lines.push(`• Impuestos: ${text.taxes}`);
   lines.push(`• Mora: ${text.late}`, `• Intereses: ${text.interest}`, `• Capital: ${text.principal}`);
   if (facts.numbers.surplus > 0) lines.push(`• Sobrante: ${text.surplus}`);
-  return [...paragraphs, `${head}\n${lines.join('\n')}`];
+  return [...paragraphs, `${head}\n${lines.join('\n')}`, ...(card ? [CARD_CAPITAL_ORDER] : [])];
 }
 
 function chargeLine(text, key) {
@@ -172,20 +204,84 @@ function charges(facts) {
   const paragraphs = [copyOf(facts, 'charges.sample')];
   if (facts.status === 'generic') {
     paragraphs.push(`Ejemplo del IVA: con una comisión de ${text.ivaBase} y un IVA de ${text.ivaPct}, el IVA es de ${text.iva}.`, INVITE);
+  } else if (hasNotice(facts, 'no_statement_yet')) {
+    paragraphs.push(`${NO_STATEMENT}, así que aún no hay cargos que mostrar.`);
   } else if (hasNotice(facts, 'no_charges')) {
     paragraphs.push('Esta deuda no tiene cargos, seguros ni impuestos registrados.');
   } else {
     const lines = Array.from({ length: numbers.lines }, (_, index) => chargeLine(text, `l${index}`));
     if (numbers.hidden) lines.push(`Y ${text.hidden} más.`);
-    paragraphs.push(`Cargos de tu próxima cuota:\n${lines.join('\n')}`);
-    paragraphs.push(`Suma aproximada de cargos e impuestos de las próximas ${text.yearRows} cuotas: ${text.yearTotal} (aproximado).`);
+    const card = isCard(facts);
+    paragraphs.push(`${card ? 'Cargos de tu último extracto' : 'Cargos de tu próxima cuota'}:\n${lines.join('\n')}`);
+    paragraphs.push(`Suma aproximada de cargos e impuestos de ${card ? `${text.yearRows} extractos como el último` : `las próximas ${text.yearRows} cuotas`}: ${text.yearTotal} (aproximado).`);
     if (lines.some((line) => line.includes(' de «'))) paragraphs.push('Un impuesto como el IVA se calcula sobre el cargo al que está ligado, por eso aparece junto a él.');
   }
   paragraphs.push(copyOf(facts, 'legal.gmf'), `Ejemplo del GMF: ${text.gmfRate} sobre ${text.gmfBase} son ${text.gmf}.`);
   return paragraphs;
 }
 
-const TEMPLATES = { rate_conventions: rateConventions, usury_ibc: usuryIbc, mora, payment_allocation: paymentAllocation, charges };
+// How the card computes its minimum payment (the rule is in the terms of the card).
+function minimumRule(facts) {
+  const { text } = facts;
+  const floor = text.floor ? `; nunca es menos de ${text.floor}` : '';
+  if (text.rule === 'installments_due') return `Según la regla de tu tarjeta, el pago mínimo suma solo los intereses, los cargos, los impuestos y las cuotas del periodo${floor}.`;
+  if (text.rule === 'pct_balance') return `Según la regla de tu tarjeta, el pago mínimo es el ${text.pct} del valor total del extracto${floor}.`;
+  return `Según la regla de tu tarjeta, el pago mínimo suma los intereses, los cargos, los impuestos y las cuotas del periodo, más el ${text.pct} del saldo de compras corrientes y avances${floor}. Nunca supera el total del extracto.`;
+}
+
+function statementStanding(text, numbers) {
+  if (text.status === 'paid') return 'El pago mínimo de este extracto ya está cubierto.';
+  if (numbers.paid > 0) return `Ya abonaste ${text.paid} al mínimo y faltan ${text.outstanding}.`;
+  if (text.status === 'pastDue') return `La fecha límite ya pasó y el mínimo sigue sin pagarse: faltan ${text.outstanding}.`;
+  return '';
+}
+
+function cardStatement(facts) {
+  const { text, numbers } = facts;
+  const paragraphs = [copyOf(facts, 'card_statement.sample')];
+  if (facts.status === 'generic') return [...paragraphs, `${CARD_INVITE} tu último extracto con tus números.`];
+  if (hasNotice(facts, 'no_statement_yet')) {
+    paragraphs.push(`${NO_STATEMENT} registrado. El próximo corte es el ${text.nextStatementOn}, con fecha límite de pago el ${text.nextDueOn}.`);
+    return [...paragraphs, minimumRule(facts)];
+  }
+  const lines = [`• Intereses: ${text.interest}`, `• Cuotas de compras diferidas: ${text.installments}`, `• Cuota de manejo e impuestos: ${text.charges}`];
+  if (numbers.late > 0) lines.push(`• Mora: ${text.late}`);
+  paragraphs.push(`Tu último extracto cortó el ${text.statementOn} y su fecha límite de pago es el ${text.dueOn}. Lo cobrado en el periodo es ${text.total}:\n${lines.join('\n')}`);
+  paragraphs.push(`Pago mínimo: ${text.minimum}. Para pagar todo el extracto: ${text.payInFull}.`);
+  const standing = statementStanding(text, numbers);
+  if (standing) paragraphs.push(standing);
+  paragraphs.push(minimumRule(facts));
+  if (text.nextStatementOn) paragraphs.push(`El próximo corte es el ${text.nextStatementOn} y la fecha límite de pago, el ${text.nextDueOn}.`);
+  return paragraphs;
+}
+
+// The interest of the last statement and why it came out as it did: the base it ran on, the part paid on time, the capital that ran mora instead,
+// and a what-if of paying only the minimum. Every figure is read from the facts; what is estimated carries «aproximado».
+function cardInterestDrop(facts) {
+  const { text, numbers } = facts;
+  const paragraphs = [copyOf(facts, 'card_interest_drop.sample')];
+  if (facts.status === 'generic') return [...paragraphs, `${CARD_INVITE} de dónde salen sus intereses con tus números.`];
+  if (hasNotice(facts, 'no_statement_yet')) {
+    return [...paragraphs, `${NO_STATEMENT}, así que aún no hay intereses por explicar. Tu tasa es ${text.monthly} mensual (${text.ea} efectiva anual).`];
+  }
+  paragraphs.push(`En tu extracto del ${text.statementOn}, los intereses fueron ${approx(facts, 'interest')}.`);
+  paragraphs.push(`Los intereses de compras corrientes se calcularon sobre una base de ${approx(facts, 'revolving')}, a ${text.monthly} mensual (${text.ea} efectiva anual).`);
+  if (numbers.excluded > 0) paragraphs.push(`La parte del extracto anterior que pagaste a tiempo (${approx(facts, 'excluded')}) no generó intereses.`);
+  if (hasNotice(facts, 'paid_in_full')) paragraphs.push('Como pagaste el extracto completo hasta la fecha límite de pago, la base de intereses de compras corrientes es cero.');
+  if (hasNotice(facts, 'mora_replaced')) {
+    paragraphs.push(`En parte del periodo, ${approx(facts, 'lateExcluded')} del capital del pago mínimo sin pagar estuvo en mora; por esos días se cobra mora en lugar de interés corriente. Sin eso, los intereses habrían sido de ${approx(facts, 'withoutLateInterest')}, así que la diferencia es de ${approx(facts, 'lateEffect')}.`);
+  }
+  if (numbers.previousInterest !== undefined) {
+    paragraphs.push(numbers.drop > 0 ? `Frente al extracto anterior (${text.previousInterest}), los intereses bajaron ${text.drop}.` : `En el extracto anterior los intereses fueron ${text.previousInterest}.`);
+  }
+  if (hasNotice(facts, 'first_cycle')) paragraphs.push('Es tu primer extracto: la app cuenta el saldo inicial como ya facturado, por eso estas cifras son aproximadas.');
+  if (numbers.minPayment !== undefined) {
+    paragraphs.push(`¿Y si pagas solo el mínimo? Si el ${text.whatIfDueOn} pagas solo el mínimo (${text.minPayment}), en el corte del ${text.whatIfCloseOn} los intereses serían de ${approx(facts, 'minInterest')}, sobre una base de ${approx(facts, 'minBase')}. Si pagas todo el extracto (${text.fullPayment}), serían de ${approx(facts, 'fullInterest')}. Pagar solo el mínimo costaría ${approx(facts, 'extra')} más en intereses. Es una estimación: no incluye compras ni pagos nuevos.`);
+  }
+  return paragraphs;
+}
+
+const TEMPLATES = { rate_conventions: rateConventions, usury_ibc: usuryIbc, mora, payment_allocation: paymentAllocation, charges, card_statement: cardStatement, card_interest_drop: cardInterestDrop };
 
 // -- splitter --------------------------------------------------------------------------------------------------------
 

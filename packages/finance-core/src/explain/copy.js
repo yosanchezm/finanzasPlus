@@ -93,8 +93,8 @@ export const EXPLAIN_COPY = {
   },
   'card_statement.sample': {
     text:
-      'El extracto es el resumen que tu entidad genera en la fecha de corte de la tarjeta: reúne las compras, las cuotas de las compras diferidas, los intereses, la cuota de manejo y los impuestos del periodo. Tienes hasta la fecha límite de pago para pagarlo. ' +
-      'El pago mínimo es lo menos que debes pagar en esa fecha para no quedar en mora; cada entidad define cómo lo calcula (por ejemplo, intereses, cargos y cuotas más un porcentaje del saldo). El pago total es el valor que cubre todo el extracto.',
+      'El extracto es el resumen que tu entidad genera en la fecha de corte: reúne las compras, las cuotas de las compras diferidas, los intereses, la cuota de manejo y los impuestos del periodo. Tienes hasta la fecha límite de pago para pagarlo. ' +
+      'El pago mínimo es lo menos que debes pagar en esa fecha para no quedar en mora; cada entidad define cómo lo calcula. El pago total cubre todo el extracto.',
     sources: [CARD_CONTRACT],
     reviewedOn: null,
     reviewedHash: null,
