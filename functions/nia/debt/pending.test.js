@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { EXPLAIN_TOPICS } from '../../../packages/finance-core/index.js';
 import {
+  CALLBACK_MAX_BYTES,
   PENDING_MAX_BYTES,
   buildPending,
   chargeKeyboard,
@@ -8,7 +10,9 @@ import {
   debtRowId,
   dedupeKeyOf,
   eventIdOf,
+  explainButton,
   modeKeyboard,
+  parseExplainCallback,
   parseCallback,
   pickKeyboard,
   simulateKeyboard,
@@ -198,5 +202,74 @@ describe('charge change callbacks (E2c)', () => {
     const pending = buildPending({ id: 'a1b2c3d4e5f6a7b8c9d0e1f2', action: 'charge_change', awaiting: 'charge', debtId: 'db0123456789abcdef0123456789abcdef01', candidates, draft: { effectiveOn: '2026-10-13', chargeRef: 'seguro de vida', op: 'set', newValue: 0.125 } });
 
     expect(bytes(JSON.stringify(pending))).toBeLessThanOrEqual(PENDING_MAX_BYTES);
+  });
+});
+
+describe('explainButton and parseExplainCallback (stateless nia:exp: buttons)', () => {
+  const ID36 = 'db0123456789abcdef0123456789abcdef01';
+
+  it('fits the longest topic and a 36 character debt id in 64 bytes', () => {
+    const button = explainButton('card_interest_drop', ID36);
+
+    expect(button.callback_data).toBe(`nia:exp:card_interest_drop:${ID36}`);
+    expect(bytes(button.callback_data)).toBeLessThanOrEqual(CALLBACK_MAX_BYTES);
+  });
+
+  it('keeps every topic with a 36 character id within 64 bytes, with and without a page', () => {
+    for (const topic of EXPLAIN_TOPICS) {
+      for (const page of [undefined, 2, 3]) {
+        expect(bytes(explainButton(topic, ID36, page).callback_data)).toBeLessThanOrEqual(CALLBACK_MAX_BYTES);
+      }
+      expect(bytes(explainButton(topic).callback_data)).toBeLessThanOrEqual(CALLBACK_MAX_BYTES);
+    }
+  });
+
+  it('drops the debt id to "-" in the page form when the full form would pass 64 bytes', () => {
+    const page = explainButton('card_interest_drop', ID36, 2);
+
+    expect(page.callback_data).toBe('nia:exp:card_interest_drop:-:2');
+    expect(bytes(page.callback_data)).toBeLessThanOrEqual(CALLBACK_MAX_BYTES);
+    // a shorter topic still fits the id and the page: no need to drop it
+    expect(explainButton('mora', ID36, 2).callback_data).toBe(`nia:exp:mora:${ID36}:2`);
+  });
+
+  it('writes the topic alone when there is no debt, and uses the label as the button text', () => {
+    expect(explainButton('mora').callback_data).toBe('nia:exp:mora');
+    expect(explainButton('mora', null, 1, 'La mora')).toEqual({ text: 'La mora', callback_data: 'nia:exp:mora' });
+    expect(explainButton('mora', 'd1', 1, 'La mora').callback_data).toBe('nia:exp:mora:d1');
+  });
+
+  it('round trips every form', () => {
+    expect(parseExplainCallback('nia:exp:mora')).toEqual({ topic: 'mora', debtId: null, page: 1 });
+    expect(parseExplainCallback(explainButton('mora', 'd1').callback_data)).toEqual({ topic: 'mora', debtId: 'd1', page: 1 });
+    expect(parseExplainCallback(explainButton('charges', ID36, 2).callback_data)).toEqual({ topic: 'charges', debtId: ID36, page: 2 });
+    expect(parseExplainCallback(explainButton('card_interest_drop', ID36, 3).callback_data)).toEqual({ topic: 'card_interest_drop', debtId: null, page: 3 });
+    for (const topic of EXPLAIN_TOPICS) expect(parseExplainCallback(explainButton(topic, 'd1').callback_data)).toEqual({ topic, debtId: 'd1', page: 1 });
+  });
+
+  it('returns null for an unknown topic and for any malformed callback', () => {
+    expect(parseExplainCallback('nia:exp:tax_returns')).toBeNull();
+    expect(parseExplainCallback('nia:exp:')).toBeNull();
+    expect(parseExplainCallback('nia:exp')).toBeNull();
+    expect(parseExplainCallback('nia:exp:mora:d1:1')).toBeNull();
+    expect(parseExplainCallback('nia:exp:mora:d1:x')).toBeNull();
+    expect(parseExplainCallback('nia:exp:mora:d1:2:3')).toBeNull();
+    expect(parseExplainCallback('nia:exp:mora:bad id')).toBeNull();
+    expect(parseExplainCallback('nia:pick:d1')).toBeNull();
+    expect(parseExplainCallback(undefined)).toBeNull();
+    expect(parseExplainCallback(null)).toBeNull();
+  });
+
+  it('is not a stage callback: parseCallback ignores it', () => {
+    expect(parseCallback('nia:exp:mora')).toBeNull();
+  });
+
+  it('refuses to build a button for an unknown topic or an over-long callback', () => {
+    expect(() => explainButton('tax_returns')).toThrow(expect.objectContaining({ code: 'unknown_topic' }));
+    expect(() => explainButton('card_interest_drop', 'x'.repeat(60))).toThrow(expect.objectContaining({ code: 'callback_too_long' }));
+  });
+
+  it('makes the shared button() assert the 64 byte limit for any callback', () => {
+    expect(() => pickKeyboard([{ $id: 'x'.repeat(80), name: 'Larga' }])).toThrow(expect.objectContaining({ code: 'callback_too_long' }));
   });
 });

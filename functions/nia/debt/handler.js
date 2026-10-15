@@ -1,12 +1,13 @@
-import { ValidationError, advise, commitPlan, compareStrategies, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
+import { EXPLAIN_TOPICS, ValidationError, advise, commitPlan, compareStrategies, explainFacts, legalRateId, normalizeRate, planCommit, previewChange, project, rateInForce, resolveLegal, serializeTerms, toEffectiveAnnual } from '../../../packages/finance-core/index.js';
 import { cashflowSignals, cashflowWindow, inScopeFor } from './cashflow.js';
+import { explainReply, menuReply, pickReply, recoveryReply } from './explain/flow.js';
 import { debtPrompt, normaliseDebtExtraction } from './extract.js';
 import { MAX_CANDIDATES, findDebt, fold } from './findDebt.js';
 import { isoDateIn, pesos } from './format.js';
 import { guardParaphrase } from './guard.js';
 import { describeLatePolicy, previewLatePolicy } from './late.js';
 import { describeLegalRate, isStorableLegalRate, previewLegalRate } from './legal.js';
-import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
+import { buildPending, chargeKeyboard, confirmKeyboard, conventionKeyboard, debtRowId, dedupeKeyOf, eventIdOf, modeKeyboard, parseCallback, parseExplainCallback, pickKeyboard, simulateKeyboard, strategyKeyboard } from './pending.js';
 import { ADD_IN_WEB, CHARGE_GONE_TEXT, TOO_LOW_CONFIRM, chargesInForce, describeChargeChange, describeRateChange, describeRestructure, previewChargeChange, previewRateChange, previewRestructure, rebuildCharges, rebuildRestructure, restructureDraft } from './planChange.js';
 import { conventionQuestion, describeCoreError, previewCreate, previewPay, buildTerms, withConvention } from './preview.js';
 import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply } from './replies.js';
@@ -63,16 +64,31 @@ const MISSING = {
 const hasStatus = (error, status) => Boolean(error) && (error.status === status || error.code === status);
 const clip = (value) => String(value || '').trim().slice(0, 700);
 
-function turn(history, user, reply) {
+// `explain` is the `{topic, debtId}` marker of an explanation (design G4). It rides in the last assistant entry of the history, so
+// the pending is untouched and the next reply of any kind expires the marker.
+function turn(history, user, reply, explain) {
   const items = [...(history || [])];
   if (clip(user)) items.push({ role: 'user', content: clip(user) });
-  if (clip(reply)) items.push({ role: 'assistant', content: clip(reply) });
+  if (clip(reply)) items.push({ role: 'assistant', content: clip(reply), ...(explain ? { explain } : {}) });
   return items.slice(-10);
 }
 
+/**
+ * The `{topic, debtId}` marker of the last explanation, read from the LAST history entry only (any later reply expires it).
+ * @param {object[]} history
+ * @returns {({ topic: string, debtId: (string | null) } | null)}
+ */
+export function lastExplain(history) {
+  const last = Array.isArray(history) && history.length > 0 ? history[history.length - 1] : null;
+  const marker = last && last.role === 'assistant' ? last.explain : null;
+  if (!marker || typeof marker !== 'object' || !EXPLAIN_TOPICS.includes(marker.topic)) return null;
+  if (marker.debtId !== null && marker.debtId !== undefined && typeof marker.debtId !== 'string') return null;
+  return { topic: marker.topic, debtId: marker.debtId ?? null };
+}
+
 // Saves the session (and the turn) and then answers.
-async function say(deps, ctx, { text, keyboard, status, pending }) {
-  await deps.saveSession(ctx.chatId, ctx.actorId, status, pending, turn(ctx.history, ctx.text, text));
+async function say(deps, ctx, { text, keyboard, status, pending, explain }) {
+  await deps.saveSession(ctx.chatId, ctx.actorId, status, pending, turn(ctx.history, ctx.text, text, explain));
   await deps.sendMessage(ctx.chatId, clampTelegram(text), keyboard);
 }
 
@@ -363,6 +379,63 @@ async function runAnalysis(deps, ctx, action, id, debt, draft, debts) {
   }
 }
 
+// Explain (S0, design G2 to G6). It only reads: no row, event or pending is written, and the pending that was waiting is saved back as it was
+// (`inform` semantics), so a Confirm that was waiting still works. The session save only adds the `{topic, debtId}` marker to the history.
+const NO_EXPLAIN = { topic: null, stated: null, rateValue: null, amountMinor: null };
+
+async function sendExplain(deps, ctx, { topic, debt, asked, legal }) {
+  let facts;
+  try {
+    const events = debt ? await loadEvents(deps, debt.$id) : [];
+    facts = explainFacts(topic, debt, events, legal, today(deps), { stated: asked.stated || undefined, amountMinor: asked.amountMinor ?? undefined, copy: deps.explainCopy });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return inform(deps, ctx, describeCoreError(error));
+  }
+  const { text, keyboard } = explainReply(facts);
+  return say(deps, ctx, { text, keyboard, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null, explain: { topic, debtId: debt ? debt.$id : null } });
+}
+
+// The topic: a follow-up that rides on the marker keeps the marker topic; otherwise the model's topic when it is valid, then the router's keyword hint.
+async function startExplain(deps, ctx, request, debts, legal) {
+  const asked = request.explain || NO_EXPLAIN;
+  const hint = ctx.explainHint || null;
+  const topic = hint && hint.fromMarker ? hint.topic : asked.topic || (hint && hint.topic) || null;
+  const visible = debts.filter(inScopeFor(ctx.profile.ownerScope));
+  const found = findDebt(visible, request.debtRef);
+  if (!topic) return say(deps, ctx, { ...menuReply(found.match ? found.match.$id : null), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+  if (found.candidates) return say(deps, ctx, { ...pickReply(topic, found.candidates), status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null });
+  const marker = lastExplain(ctx.history);
+  const fromMarker = !found.match && !request.debtRef && hint && hint.fromMarker && marker && marker.topic === topic && marker.debtId;
+  const debt = found.match || (fromMarker ? visible.find((item) => item.$id === marker.debtId) : null) || null;
+  return sendExplain(deps, ctx, { topic, debt, asked, legal });
+}
+
+/**
+ * `nia:exp:<topic>[:<debtId>][:<n>]` buttons: stateless and read-only, routed before the stage check, so they work with no pending. An
+ * unknown topic, a deleted debt or a debt outside the member's scope gets a short safe reply and writes nothing (not even the session).
+ * @param {object} deps
+ * @param {{ chatId: string, actorId: string, profile: object, history: object[], previous: (object | null), sessionStatus?: string }} ctx `previous` is the session's pending payload, kept as it is.
+ * @param {string} data The callback data.
+ */
+export async function handleExplainCallback(deps, ctx, data) {
+  const parsed = parseExplainCallback(data);
+  if (!parsed) return notify(deps, ctx, recoveryReply('unknown_topic'));
+  const legal = await loadLegal(deps);
+  const visible = (await loadDebts(deps, legal)).filter(inScopeFor(ctx.profile.ownerScope));
+  const marker = lastExplain(ctx.history);
+  // A button without an id (the topic menu, or the «Ver más» form that dropped it) resolves the debt from the marker, then like a text question.
+  const wanted = parsed.debtId || (marker && marker.topic === parsed.topic ? marker.debtId : null);
+  let debt = null;
+  if (wanted) {
+    debt = visible.find((item) => item.$id === wanted) || null;
+    if (!debt) return notify(deps, ctx, recoveryReply('debt_gone'));
+  } else {
+    debt = findDebt(visible, null).match || null;
+  }
+  return sendExplain(deps, ctx, { topic: parsed.topic, debt, asked: NO_EXPLAIN, legal });
+}
+
 /**
  * Entry point for a message classified as `debt`: extracts, validates, previews and asks for
  * what is missing. Nothing is written here.
@@ -376,6 +449,8 @@ export async function handleDebt(deps, ctx) {
   const raw = await deps.gemini(debtPrompt(ctx.text, debts, ctx.history, { today: asOf, timezone: deps.config.timezone, currency: deps.config.currency }));
   const request = normaliseDebtExtraction(raw, { today: asOf });
   if (request.problems.length) return inform(deps, ctx, PROBLEMS[request.problems[0]]);
+  // G3: a write action of the extraction wins over the router's hint; a read-only list or advise with the hint becomes the explanation.
+  if (request.action === 'explain' || (ctx.explainHint && ['list', 'advise'].includes(request.action))) return startExplain(deps, ctx, request, debts, legal);
   if (request.action === 'list') return inform(deps, ctx, listReply(await summaries(deps, debts, asOf)));
   if (request.action === 'pay') return startPay(deps, ctx, request, debts);
   if (request.action === 'create') {

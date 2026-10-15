@@ -1,3 +1,4 @@
+import { EXPLAIN_TOPICS } from '../../../packages/finance-core/index.js';
 import { STRATEGIES } from './extract.js';
 import { MODES } from './planChange.js';
 
@@ -95,4 +96,30 @@ export function parseCallback(data) {
   if (kind === 'mode') return MODES.includes(value) ? { type: 'mode', value } : null;
   if (kind === 'chg') return /^\d$/.test(value) ? { type: 'charge', value: Number(value) } : null;
   return CONVENTION_BUTTONS.includes(value) ? { type: 'convention', value } : null;
+}
+
+/**
+ * A stateless explanation button, `nia:exp:<topic>[:<debtId>][:<n>]` (design G5, G6): it needs no pending stage and writes nothing.
+ * `page` n >= 2 is the «Ver más» form; when its full form would pass 64 bytes the debt id becomes `-` and the handler resolves the
+ * debt from the session marker. The shared `button()` asserts the limit.
+ * @param {string} topic One of the explain topics.
+ * @param {(string | null)} [debtId]
+ * @param {number} [page]
+ * @param {string} [text] The button label (defaults to the topic name).
+ */
+export function explainButton(topic, debtId = null, page = 1, text = topic) {
+  if (!EXPLAIN_TOPICS.includes(topic)) throw fail('unknown_topic', `unknown explain topic: ${topic}`);
+  const head = `nia:exp:${topic}`;
+  if (page > 1) {
+    const full = `${head}:${debtId || '-'}:${page}`;
+    return button(text, debtId && Buffer.byteLength(full, 'utf8') > CALLBACK_MAX_BYTES ? `${head}:-:${page}` : full);
+  }
+  return button(text, debtId ? `${head}:${debtId}` : head);
+}
+
+/** @returns {{ topic: string, debtId: (string | null), page: number } | null} `null` for a malformed callback or a topic outside the catalogue. */
+export function parseExplainCallback(data) {
+  const match = typeof data === 'string' ? data.match(/^nia:exp:([a-z_]+)(?::([A-Za-z0-9_.-]{1,36}))?(?::([2-9]))?$/) : null;
+  if (!match || !EXPLAIN_TOPICS.includes(match[1])) return null;
+  return { topic: match[1], debtId: match[2] && match[2] !== '-' ? match[2] : null, page: match[3] ? Number(match[3]) : 1 };
 }

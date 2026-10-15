@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
+import { EXPLAIN_TOPICS, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
 import { pesos } from './format.js';
-import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, loadDebts, loadLegal } from './handler.js';
+import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain, loadDebts, loadLegal } from './handler.js';
 
 const plain = (text) => text.replace(/ /g, ' ');
 const ACTOR = 'telegram:1';
@@ -1936,6 +1936,259 @@ describe('mora in the list and the advice (F2)', () => {
       expect(w.sent[0].text).toContain('Recomendación para un abono');
       expect(w.sent[0].text).toContain(`Mora acumulada hoy: ${money(1375)}.`);
       expect(w.sent[0].text).not.toContain('9.999');
+    });
+  });
+});
+
+describe('explain (read-only, session-safe)', () => {
+  const explainAnswer = (extra = {}) => ({ action: 'explain', topic: 'mora', ...extra });
+  const REVIEW = 'Este tema está en revisión';
+  // Counts every write the flow could make through the injected deps.
+  const watched = (w) => {
+    const writes = [];
+    for (const name of ['createRow', 'updateRow', 'deleteRow']) {
+      const original = w.deps[name];
+      w.deps[name] = async (...args) => { writes.push(name); return original(...args); };
+    }
+    return writes;
+  };
+  const marker = (topic, debtId) => [{ role: 'user', content: 'qué es la mora' }, { role: 'assistant', content: 'respuesta', explain: { topic, debtId } }];
+  const lastEntry = (w, index = 0) => w.sessions[index].history[w.sessions[index].history.length - 1];
+  const payments = (w) => w.tables.debt_events.filter((event) => event.kind === 'payment');
+
+  it('shows the topic menu, one button per topic, and writes nothing when the topic is missing or unknown', async () => {
+    for (const answer of [{ action: 'explain' }, { action: 'explain', topic: 'tax_returns' }, { action: 'explain', topic: null }]) {
+      const w = world({ answers: [answer] });
+      const writes = watched(w);
+      await handleDebt(w.deps, ctx({ text: 'explícame mi deuda' }));
+
+      expect(w.sent).toHaveLength(1);
+      expect(buttons(w.sent[0].keyboard)).toEqual(EXPLAIN_TOPICS.map((topic) => `nia:exp:${topic}:d1`));
+      expect(writes).toEqual([]);
+      expect(w.sessions[0].pending).toBeNull();
+      expect(lastEntry(w).explain).toBeUndefined();
+      expect(w.tables.debt_events).toHaveLength(1);
+      expect(costRows(w)).toHaveLength(0);
+    }
+  });
+
+  it('keeps the menu generic (no debt id on the buttons) when there are several debts and none was named', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [{ action: 'explain' }] });
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(EXPLAIN_TOPICS.map((topic) => `nia:exp:${topic}`));
+  });
+
+  it('answers «Este tema está en revisión» for a topic whose copy is not reviewed, with no figures, and nothing written', async () => {
+    for (const topic of EXPLAIN_TOPICS) {
+      const w = world({ answers: [explainAnswer({ topic })] });
+      const writes = watched(w);
+      await handleDebt(w.deps, ctx({ text: 'qué es esto' }));
+
+      if (['card_statement', 'card_interest_drop'].includes(topic)) {
+        expect(w.sent[0].text).toMatch(/solo a tarjetas/); // the debt is a loan
+      } else {
+        expect(w.sent[0].text).toContain(REVIEW);
+      }
+      expect(w.sent[0].text).not.toMatch(/\d/);
+      expect(writes).toEqual([]);
+      expect(w.sent).toHaveLength(1);
+    }
+  });
+
+  it('writes the {topic, debtId} marker in the last assistant history entry and nowhere else', async () => {
+    const w = world({ answers: [explainAnswer()] });
+    await handleDebt(w.deps, ctx({ text: '¿qué es la mora?', history: [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'hola, soy Nia' }] }));
+    const { history } = w.sessions[0];
+
+    expect(history).toHaveLength(4);
+    expect(history[history.length - 1]).toEqual({ role: 'assistant', content: w.sent[0].text, explain: { topic: 'mora', debtId: 'd1' } });
+    expect(history.slice(0, -1).some((item) => item.explain)).toBe(false);
+    expect(lastExplain(history)).toEqual({ topic: 'mora', debtId: 'd1' });
+  });
+
+  it('lastExplain reads only the last entry, and only a well formed assistant marker', () => {
+    expect(lastExplain([{ role: 'assistant', content: 'a', explain: { topic: 'mora', debtId: 'd1' } }, { role: 'user', content: 'gracias' }])).toBeNull();
+    expect(lastExplain([{ role: 'assistant', content: 'a', explain: { topic: 'mora', debtId: 'd1' } }, { role: 'assistant', content: 'b' }])).toBeNull();
+    expect(lastExplain([{ role: 'assistant', content: 'a', explain: { topic: 'charges', debtId: null } }])).toEqual({ topic: 'charges', debtId: null });
+    expect(lastExplain([{ role: 'user', content: 'a', explain: { topic: 'mora', debtId: 'd1' } }])).toBeNull();
+    expect(lastExplain([{ role: 'assistant', content: 'a', explain: { topic: 'tax_returns', debtId: 'd1' } }])).toBeNull();
+    expect(lastExplain([{ role: 'assistant', content: 'a', explain: { topic: 'mora', debtId: 42 } }])).toBeNull();
+    expect(lastExplain([])).toBeNull();
+    expect(lastExplain(undefined)).toBeNull();
+  });
+
+  it('keeps a pending payment: the same pending is saved and the later Confirm writes once', async () => {
+    const w = world({ answers: [payAnswer(), explainAnswer({ topic: 'usury_ibc' })] });
+    await handleDebt(w.deps, ctx({ text: 'pagué 380 mil al carro' }));
+    const pending = w.lastPending();
+    const writes = watched(w);
+
+    await handleDebt(w.deps, ctx({ text: '¿qué es la usura?', previous: pending, sessionStatus: 'awaiting_confirmation', history: w.sessions[0].history }));
+
+    expect(writes).toEqual([]);
+    expect(w.sessions).toHaveLength(2);
+    expect(w.sessions[1].pending).toBe(pending);
+    expect(w.sessions[1].status).toBe('awaiting_confirmation');
+    expect(w.sent[1].text).toContain(REVIEW);
+    expect(payments(w)).toHaveLength(0);
+
+    await confirmDebt(w.deps, ctx(), w.sessions[1].pending);
+    expect(payments(w)).toHaveLength(1);
+    expect(costRows(w)).toHaveLength(1);
+  });
+
+  it('renders the marker topic for the marker debt on a follow-up like «¿y con ejemplo?»', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [{ action: 'explain', topic: null }] });
+    await handleDebt(w.deps, ctx({ text: '¿y con ejemplo?', history: marker('mora', 'd2'), explainHint: { topic: 'mora', fromMarker: true } }));
+
+    expect(w.sent[0].text).toContain(REVIEW);
+    expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: 'd2' });
+  });
+
+  it('lets the marker topic win over a topic the model guessed on a marker follow-up', async () => {
+    const w = world({ answers: [explainAnswer({ topic: 'charges' })] });
+    await handleDebt(w.deps, ctx({ text: '¿y con ejemplo?', history: marker('mora', 'd1'), explainHint: { topic: 'mora', fromMarker: true } }));
+
+    expect(lastEntry(w).explain.topic).toBe('mora');
+  });
+
+  it('uses the topic of the keyword hint when the extraction gives none, and the extraction topic when it is valid', async () => {
+    const hinted = world({ answers: [{ action: 'explain', topic: null }] });
+    await handleDebt(hinted.deps, ctx({ explainHint: { topic: 'usury_ibc' } }));
+    expect(lastEntry(hinted).explain.topic).toBe('usury_ibc');
+
+    const extracted = world({ answers: [explainAnswer({ topic: 'charges' })] });
+    await handleDebt(extracted.deps, ctx({ explainHint: { topic: 'usury_ibc' } }));
+    expect(lastEntry(extracted).explain.topic).toBe('charges');
+  });
+
+  it('lets a write action of the extraction win over the explain hint (G3)', async () => {
+    const w = world({ answers: [payAnswer()] });
+    await handleDebt(w.deps, ctx({ text: 'pagué 380 mil, ¿y qué es la mora?', explainHint: { topic: 'mora' } }));
+
+    expect(w.sent[0].text).toContain('Abono a Crédito Vehículo');
+    expect(buttons(w.sent[0].keyboard)).toContain('nia:confirm');
+    expect(w.lastPending()).toMatchObject({ action: 'pay', awaiting: 'confirm' });
+  });
+
+  it('turns a read-only action (list, advise) with the hint into the explanation', async () => {
+    for (const action of ['list', 'advise']) {
+      const w = world({ answers: [{ action, debtRef: null }] });
+      await handleDebt(w.deps, ctx({ explainHint: { topic: 'mora' } }));
+
+      expect(w.sent[0].text).toContain(REVIEW);
+      expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: 'd1' });
+    }
+    const plainList = world({ answers: [{ action: 'list' }] });
+    await handleDebt(plainList.deps, ctx());
+    expect(plainList.sent[0].text).not.toContain(REVIEW); // without the hint a list stays a list
+  });
+
+  it('asks which debt with stateless explain buttons when the reference matches several, and creates no pending', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro', { lender: 'Banco Uno' }), debtRow('d2', 'Moto', { lender: 'Banco Dos' })], answers: [explainAnswer({ debtRef: 'banco' })] });
+    const writes = watched(w);
+    await handleDebt(w.deps, ctx());
+
+    expect(buttons(w.sent[0].keyboard)).toEqual(['nia:exp:mora:d1', 'nia:exp:mora:d2']);
+    expect(w.sessions[0].pending).toBeNull();
+    expect(writes).toEqual([]);
+  });
+
+  it('does not use a debt of another member personal scope', async () => {
+    const w = world({ debts: [debtRow('d1', 'Carro de ella', { ownerScope: 'partner' }), debtRow('d2', 'Moto')], answers: [explainAnswer({ debtRef: 'carro' })] });
+    await handleDebt(w.deps, ctx());
+
+    expect(lastEntry(w).explain.debtId).not.toBe('d1');
+  });
+
+  it('spends no Gemini call beyond the extraction', async () => {
+    const w = world({ answers: [explainAnswer()] });
+    await handleDebt(w.deps, ctx());
+
+    expect(w.prompts).toHaveLength(1);
+    expect(w.prompts[0]).toContain('explain');
+  });
+
+  describe('nia:exp: buttons', () => {
+    it('explains with no pending at all, without a stage check, and keeps the saved status', async () => {
+      const w = world({ answers: [] });
+      const writes = watched(w);
+      await handleExplainCallback(w.deps, ctx({ previous: null, history: [] }), 'nia:exp:mora:d1');
+
+      expect(w.sent).toHaveLength(1);
+      expect(w.sent[0].text).toContain(REVIEW);
+      expect(writes).toEqual([]);
+      expect(w.sessions[0].pending).toBeNull();
+      expect(w.prompts).toHaveLength(0);
+      expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: 'd1' });
+    });
+
+    it('keeps the pending that was waiting', async () => {
+      const w = world({ answers: [] });
+      const previous = { kind: 'debt', v: 1, id: 'p9', action: 'pay', awaiting: 'confirm', debtId: 'd1', draft: { kind: 'payment', effectiveOn: '2026-10-13', amountMinor: 1000 } };
+      await handleExplainCallback(w.deps, ctx({ previous, sessionStatus: 'awaiting_confirmation' }), 'nia:exp:charges:d1');
+
+      expect(w.sessions[0].pending).toBe(previous);
+      expect(w.sessions[0].status).toBe('awaiting_confirmation');
+    });
+
+    it('answers a deleted debt with a short safe reply, no session save and zero writes', async () => {
+      const w = world({ answers: [] });
+      const writes = watched(w);
+      await handleExplainCallback(w.deps, ctx(), 'nia:exp:mora:deleted-debt');
+
+      expect(w.sent).toHaveLength(1);
+      expect(w.sent[0].text).toMatch(/ya no está disponible/);
+      expect(w.sent[0].keyboard).toBeUndefined();
+      expect(writes).toEqual([]);
+      expect(w.sessions).toHaveLength(0);
+    });
+
+    it('answers the debt of another member personal scope as no longer available', async () => {
+      const w = world({ debts: [debtRow('d1', 'Carro de ella', { ownerScope: 'partner' })], answers: [] });
+      const writes = watched(w);
+      await handleExplainCallback(w.deps, ctx(), 'nia:exp:mora:d1');
+
+      expect(w.sent[0].text).toMatch(/ya no está disponible/);
+      expect(w.sent[0].text).not.toContain('Carro de ella');
+      expect(writes).toEqual([]);
+      expect(w.sessions).toHaveLength(0);
+    });
+
+    it('lets a debt of the same member through', async () => {
+      const w = world({ debts: [debtRow('d1', 'Mi carro', { ownerScope: 'you' })], answers: [] });
+      await handleExplainCallback(w.deps, ctx(), 'nia:exp:mora:d1');
+
+      expect(w.sent[0].text).toContain(REVIEW);
+    });
+
+    it('answers an unknown topic and a malformed callback with a short safe reply and zero writes', async () => {
+      for (const data of ['nia:exp:tax_returns', 'nia:exp:mora:d1:1', 'nia:exp:']) {
+        const w = world({ answers: [] });
+        const writes = watched(w);
+        await handleExplainCallback(w.deps, ctx(), data);
+
+        expect(w.sent).toHaveLength(1);
+        expect(w.sent[0].text).toMatch(/ya no está disponible/);
+        expect(writes).toEqual([]);
+        expect(w.sessions).toHaveLength(0);
+      }
+    });
+
+    it('resolves the debt from the marker when the page form dropped the id', async () => {
+      const w = world({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [] });
+      await handleExplainCallback(w.deps, ctx({ history: marker('mora', 'd2') }), 'nia:exp:mora:-:2');
+
+      expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: 'd2' });
+    });
+
+    it('explains generically (no debt) when a topic button carries no id and there are several debts', async () => {
+      const w = world({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [] });
+      await handleExplainCallback(w.deps, ctx(), 'nia:exp:mora');
+
+      expect(w.sent[0].text).toContain(REVIEW);
+      expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: null });
     });
   });
 });
