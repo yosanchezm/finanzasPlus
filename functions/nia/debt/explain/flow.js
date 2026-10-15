@@ -7,6 +7,7 @@ import { TOPIC_LABELS, renderExplain } from './render.js';
 // the reads and the session (see `startExplain` and `handleExplainCallback` in handler.js). Node 16 safe.
 
 const MENU_TEXT = 'Elige el tema que quieres que te explique:';
+const MORE_LABEL = 'Ver más';
 const PICK_TEXT = '¿De cuál deuda quieres la explicación?';
 const RECOVERY = {
   unknown_topic: 'Ese tema ya no está disponible. Pídeme “explícame” y te muestro los temas.',
@@ -30,11 +31,17 @@ export function pickReply(topic, debts) {
 export const recoveryReply = (reason) => RECOVERY[reason];
 
 /**
- * The first part of the explanation, with its buttons if any. In S0 no topic is released, so this is the "under review" or "does not apply" text.
+ * One part of the explanation with its buttons (design G6): «Ver más» (`nia:exp:<topic>:<debtId>:<n>`) while parts remain, then the
+ * related topics. Every part carries its own footer. A status with no explanation (under review, not applicable) has no buttons.
  * @param {object} facts `explainFacts(...)`.
+ * @param {{ debtId?: (string | null), page?: number }} [options] `page` is 1-based and is clamped to the parts that exist.
  * @returns {{ text: string, keyboard?: object[][] }}
  */
-export function explainReply(facts) {
-  const { parts } = renderExplain(facts);
-  return { text: parts[0] };
+export function explainReply(facts, { debtId = null, page = 1 } = {}) {
+  const { parts, followUps } = renderExplain(facts);
+  const index = Math.min(Math.max(page, 1), parts.length) - 1;
+  const rows = [];
+  if (index + 1 < parts.length) rows.push([explainButton(facts.topic, debtId, index + 2, MORE_LABEL)]);
+  for (const topic of followUps) rows.push([explainButton(topic, debtId, 1, TOPIC_LABELS[topic])]);
+  return rows.length > 0 ? { text: parts[index], keyboard: rows } : { text: parts[index] };
 }

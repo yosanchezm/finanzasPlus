@@ -75,15 +75,18 @@ function turn(history, user, reply, explain) {
 
 /**
  * The `{topic, debtId}` marker of the last explanation, read from the LAST history entry only (any later reply expires it).
+ * It also carries the `stated` rate and the `amountMinor` the user gave, when valid, so «Ver más» re-renders the same explanation.
  * @param {object[]} history
- * @returns {({ topic: string, debtId: (string | null) } | null)}
+ * @returns {({ topic: string, debtId: (string | null), stated?: object, amountMinor?: number } | null)}
  */
 export function lastExplain(history) {
   const last = Array.isArray(history) && history.length > 0 ? history[history.length - 1] : null;
   const marker = last && last.role === 'assistant' ? last.explain : null;
   if (!marker || typeof marker !== 'object' || !EXPLAIN_TOPICS.includes(marker.topic)) return null;
   if (marker.debtId !== null && marker.debtId !== undefined && typeof marker.debtId !== 'string') return null;
-  return { topic: marker.topic, debtId: marker.debtId ?? null };
+  const stated = marker.stated && typeof marker.stated === 'object' && Number.isFinite(marker.stated.value) ? { stated: marker.stated } : {};
+  const amount = Number.isSafeInteger(marker.amountMinor) && marker.amountMinor > 0 ? { amountMinor: marker.amountMinor } : {};
+  return { topic: marker.topic, debtId: marker.debtId ?? null, ...stated, ...amount };
 }
 
 // Saves the session (and the turn) and then answers.
@@ -383,7 +386,7 @@ async function runAnalysis(deps, ctx, action, id, debt, draft, debts) {
 // (`inform` semantics), so a Confirm that was waiting still works. The session save only adds the `{topic, debtId}` marker to the history.
 const NO_EXPLAIN = { topic: null, stated: null, rateValue: null, amountMinor: null };
 
-async function sendExplain(deps, ctx, { topic, debt, asked, legal }) {
+async function sendExplain(deps, ctx, { topic, debt, asked, legal, page = 1 }) {
   let facts;
   try {
     const events = debt ? await loadEvents(deps, debt.$id) : [];
@@ -392,8 +395,11 @@ async function sendExplain(deps, ctx, { topic, debt, asked, legal }) {
     if (!(error instanceof ValidationError)) throw error;
     return inform(deps, ctx, describeCoreError(error));
   }
-  const { text, keyboard } = explainReply(facts);
-  return say(deps, ctx, { text, keyboard, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null, explain: { topic, debtId: debt ? debt.$id : null } });
+  const { text, keyboard } = explainReply(facts, { debtId: debt ? debt.$id : null, page });
+  // The marker keeps what the user stated, so «Ver más» (which carries only the topic, the debt and the page) continues the same explanation.
+  const stated = asked.stated ? { stated: asked.stated } : {};
+  const amount = asked.amountMinor ? { amountMinor: asked.amountMinor } : {};
+  return say(deps, ctx, { text, keyboard, status: ctx.sessionStatus || 'conversation', pending: ctx.previous || null, explain: { topic, debtId: debt ? debt.$id : null, ...stated, ...amount } });
 }
 
 // The topic: a follow-up that rides on the marker keeps the marker topic; otherwise the model's topic when it is valid, then the router's keyword hint.
@@ -433,7 +439,10 @@ export async function handleExplainCallback(deps, ctx, data) {
   } else {
     debt = findDebt(visible, null).match || null;
   }
-  return sendExplain(deps, ctx, { topic: parsed.topic, debt, asked: NO_EXPLAIN, legal });
+  // A «Ver más» page re-renders what the marker says the user stated, but only for the same topic and the same debt.
+  const sameAsMarker = parsed.page > 1 && marker && marker.topic === parsed.topic && marker.debtId === (debt ? debt.$id : null);
+  const asked = sameAsMarker ? { ...NO_EXPLAIN, stated: marker.stated || null, amountMinor: marker.amountMinor || null } : NO_EXPLAIN;
+  return sendExplain(deps, ctx, { topic: parsed.topic, debt, asked, legal, page: parsed.page });
 }
 
 /**

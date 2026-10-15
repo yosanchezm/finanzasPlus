@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_TOPICS, resolveLegal, restructureCarry, serializeTerms } from '../../../packages/finance-core/index.js';
+import { reviewedCopy } from '../../../packages/finance-core/test/helpers/explainCopy.js';
 import { pesos } from './format.js';
 import { confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain, loadDebts, loadLegal } from './handler.js';
 
@@ -2189,6 +2190,88 @@ describe('explain (read-only, session-safe)', () => {
 
       expect(w.sent[0].text).toContain(REVIEW);
       expect(lastEntry(w).explain).toEqual({ topic: 'mora', debtId: null });
+    });
+  });
+
+  describe('released topics (injected reviewed copy)', () => {
+    const DISCLAIMER = 'Información educativa con tus datos; no es asesoría financiera.';
+    const released = (options) => {
+      const w = world(options);
+      w.deps.explainCopy = reviewedCopy();
+      return w;
+    };
+    const labels = (message) => (message.keyboard || []).flat().map((button) => [button.text, button.callback_data]);
+
+    it('answers part 1 with the source footer, «Ver más» and the related topics, writes nothing and sets the marker', async () => {
+      const w = released({ answers: [explainAnswer({ topic: 'usury_ibc' })] });
+      const writes = watched(w);
+      await handleDebt(w.deps, ctx({ text: '¿qué es la usura?' }));
+
+      expect(w.sent).toHaveLength(1);
+      expect(w.sent[0].text).toContain('Fuente: Crédito Vehículo · tasas de usura e IBC');
+      expect(w.sent[0].text).toContain(DISCLAIMER);
+      expect(w.sent[0].text.length).toBeLessThanOrEqual(1200);
+      expect(labels(w.sent[0])[0]).toEqual(['Ver más', 'nia:exp:usury_ibc:d1:2']);
+      expect(labels(w.sent[0]).slice(1).map(([, data]) => data)).toEqual(['nia:exp:rate_conventions:d1', 'nia:exp:mora:d1']);
+      expect(writes).toEqual([]);
+      expect(w.sessions[0].pending).toBeNull();
+      expect(lastEntry(w).explain).toEqual({ topic: 'usury_ibc', debtId: 'd1' });
+    });
+
+    it('sends part 2 with its own footer when «Ver más» is tapped, and leaves the marker for the next tap', async () => {
+      const w = released({ answers: [] });
+      const writes = watched(w);
+      await handleExplainCallback(w.deps, ctx({ history: marker('usury_ibc', 'd1') }), 'nia:exp:usury_ibc:d1:2');
+
+      expect(w.sent[0].text).toContain('El interés bancario corriente (IBC) es la tasa promedio');
+      expect(w.sent[0].text).toContain('Fuente: Crédito Vehículo · tasas de usura e IBC');
+      expect(labels(w.sent[0]).map(([label]) => label)).not.toContain('Ver más');
+      expect(writes).toEqual([]);
+      expect(lastEntry(w).explain).toEqual({ topic: 'usury_ibc', debtId: 'd1' });
+    });
+
+    it('resolves the debt of «Ver más» from the marker when the page form dropped the id', async () => {
+      const w = released({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [] });
+      await handleExplainCallback(w.deps, ctx({ history: marker('usury_ibc', 'd2') }), 'nia:exp:usury_ibc:-:2');
+
+      expect(w.sent[0].text).toContain('El interés bancario corriente (IBC) es la tasa promedio');
+      expect(w.sent[0].text).toContain('Fuente: Moto · tasas de usura e IBC');
+      expect(lastEntry(w).explain).toEqual({ topic: 'usury_ibc', debtId: 'd2' });
+    });
+
+    it('keeps the rate the user stated in the marker, so «Ver más» continues the same explanation', async () => {
+      const rate = { value: 35, period: 'annual', compounding: 'effective', timing: 'arrears' };
+      const w = released({ answers: [explainAnswer({ topic: 'usury_ibc', rate })] });
+      await handleDebt(w.deps, ctx({ text: '¿qué pasa si me cobran 35 % efectivo anual?' }));
+
+      expect(w.sent[0].text).toContain('La tasa que me diste es 35 % E.A. y supera ese tope');
+      expect(lastEntry(w).explain).toMatchObject({ topic: 'usury_ibc', debtId: 'd1', stated: { value: 35 } });
+
+      await handleExplainCallback(w.deps, ctx({ history: w.sessions[0].history }), 'nia:exp:usury_ibc:d1:2');
+
+      expect(w.sent[1].text).toContain('Fuente: tasa que me diste · tasas de usura e IBC');
+      expect(lastEntry(w, 1).explain).toMatchObject({ stated: { value: 35 } });
+    });
+
+    it('does not carry a stated rate over to another topic or another debt', async () => {
+      const w = released({ debts: [debtRow('d1', 'Carro'), debtRow('d2', 'Moto')], answers: [] });
+      const history = [{ role: 'user', content: 'x' }, { role: 'assistant', content: 'respuesta', explain: { topic: 'usury_ibc', debtId: 'd1', stated: { value: 35, basis: 'effective', periodicity: 'annual', timing: 'arrears' } } }];
+      await handleExplainCallback(w.deps, ctx({ history }), 'nia:exp:usury_ibc:d2:2');
+      await handleExplainCallback(w.deps, ctx({ history }), 'nia:exp:mora:d1:2');
+
+      expect(w.sent[0].text).toContain('Fuente: Moto');
+      expect(w.sent[0].text).not.toContain('tasa que me diste');
+      expect(w.sent[1].text).toContain('Fuente: Carro');
+      expect(lastEntry(w, 0).explain).toEqual({ topic: 'usury_ibc', debtId: 'd2' });
+      expect(lastEntry(w, 1).explain).toEqual({ topic: 'mora', debtId: 'd1' });
+    });
+
+    it('reads a stated rate and amount from the marker only when they are valid', () => {
+      const entry = (explain) => [{ role: 'assistant', content: 'a', explain }];
+
+      expect(lastExplain(entry({ topic: 'payment_allocation', debtId: 'd1', amountMinor: 100000 }))).toEqual({ topic: 'payment_allocation', debtId: 'd1', amountMinor: 100000 });
+      expect(lastExplain(entry({ topic: 'usury_ibc', debtId: null, stated: { value: 20 } }))).toEqual({ topic: 'usury_ibc', debtId: null, stated: { value: 20 } });
+      expect(lastExplain(entry({ topic: 'mora', debtId: 'd1', amountMinor: -5, stated: 'rápido' }))).toEqual({ topic: 'mora', debtId: 'd1' });
     });
   });
 });

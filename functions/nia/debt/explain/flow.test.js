@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { EXPLAIN_TOPICS, explainFacts } from '../../../../packages/finance-core/index.js';
+import { EXPLAIN_COPY, EXPLAIN_TOPICS, explainFacts } from '../../../../packages/finance-core/index.js';
+import { reviewedCopy } from '../../../../packages/finance-core/test/helpers/explainCopy.js';
 import { explainReply, menuReply, pickReply, recoveryReply } from './flow.js';
 import { TOPIC_LABELS, UNDER_REVIEW_TEXT, renderExplain } from './render.js';
 
@@ -92,5 +93,68 @@ describe('recoveryReply', () => {
       noDigits(text);
     }
     expect(recoveryReply('debt_gone')).not.toBe(recoveryReply('unknown_topic'));
+  });
+});
+
+describe('explainReply: a released topic (injected reviewed copy)', () => {
+  const copy = reviewedCopy();
+  const released = (topic, row = loan, injected = copy) => explainFacts(topic, row, [], undefined, '2026-10-13', { copy: injected });
+  const pairs = (keyboard) => keyboard.flat().map((button) => [button.text, button.callback_data]);
+  const longSample = (key) => ({ ...EXPLAIN_COPY[key], text: `${'Primer párrafo del tema con una cifra de $ 1.234.567 y un detalle largo. '.repeat(9)}
+
+${'Segundo párrafo del tema con otra cifra de $ 7.654.321 y más detalle. '.repeat(9)}` });
+
+  it('sends part 1 with its footer, «Ver más» and the related topics when the answer has more parts', () => {
+    const facts = released('usury_ibc');
+    const { parts } = renderExplain(facts);
+    const { text, keyboard } = explainReply(facts, { debtId: 'd1' });
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(text).toBe(parts[0]);
+    expect(text).toContain('Fuente: Crédito Vehículo · tasas de usura e IBC');
+    expect(text).toContain('Información educativa con tus datos; no es asesoría financiera.');
+    expect(pairs(keyboard)).toEqual([
+      ['Ver más', 'nia:exp:usury_ibc:d1:2'],
+      [TOPIC_LABELS.rate_conventions, 'nia:exp:rate_conventions:d1'],
+      [TOPIC_LABELS.mora, 'nia:exp:mora:d1'],
+    ]);
+  });
+
+  it('sends part n with its own footer when «Ver más» is tapped, and no «Ver más» on the last part', () => {
+    const facts = released('usury_ibc');
+    const { parts } = renderExplain(facts);
+    const last = explainReply(facts, { debtId: 'd1', page: parts.length });
+
+    expect(last.text).toBe(parts[parts.length - 1]);
+    expect(last.text).toContain('Fuente: Crédito Vehículo');
+    expect(last.text).not.toBe(explainReply(facts, { debtId: 'd1' }).text);
+    expect(pairs(last.keyboard).map(([label]) => label)).toEqual([TOPIC_LABELS.rate_conventions, TOPIC_LABELS.mora]);
+    expect(explainReply(facts, { debtId: 'd1', page: 99 }).text).toBe(last.text);
+  });
+
+  it('offers only the related topics when the answer is a single part', () => {
+    const { keyboard } = explainReply(released('payment_allocation'), { debtId: 'd1' });
+
+    expect(pairs(keyboard)).toEqual([
+      [TOPIC_LABELS.mora, 'nia:exp:mora:d1'],
+      [TOPIC_LABELS.charges, 'nia:exp:charges:d1'],
+    ]);
+  });
+
+  it('keeps the page callback within 64 bytes by dropping the debt id (the handler resolves it from the marker)', () => {
+    const id = 'd'.repeat(36);
+    const facts = released('payment_allocation', { ...loan, $id: id }, reviewedCopy({ ...EXPLAIN_COPY, 'payment_allocation.sample': longSample('payment_allocation.sample') }));
+    const { keyboard } = explainReply(facts, { debtId: id });
+    const [more, ...related] = pairs(keyboard);
+
+    expect(more).toEqual(['Ver más', 'nia:exp:payment_allocation:-:2']);
+    for (const [, data] of [more, ...related]) expect(Buffer.byteLength(data, 'utf8')).toBeLessThanOrEqual(64);
+    expect(related.map(([, data]) => data)).toEqual([`nia:exp:mora:${id}`, `nia:exp:charges:${id}`]);
+  });
+
+  it('puts no debt id on any button when the answer is not about a debt', () => {
+    const { keyboard } = explainReply(released('usury_ibc', null));
+
+    expect(pairs(keyboard).map(([, data]) => data)).toEqual(['nia:exp:usury_ibc:-:2', 'nia:exp:rate_conventions', 'nia:exp:mora']);
   });
 });
