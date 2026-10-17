@@ -55,6 +55,23 @@ describe('buildCardTerms', () => {
     expect(terms.schemaVersion).toBe(1);
   });
 
+  it('registers a card with a stated balance from its last statement (the latest statement day on or before today)', () => {
+    const owner = card({ principalMinor: 3268319, openedOn: '2026-10-16' }, { statementDay: 15, dueDay: 3 });
+    expect(buildCardTerms(owner).openedOn).toBe('2026-10-15');
+    expect(buildCardTerms({ ...owner, openedOn: '2026-10-14' }).openedOn).toBe('2026-09-15');
+    expect(buildCardTerms(card({ principalMinor: 500000, openedOn: '2026-03-10' }, { statementDay: 31, dueDay: 10 })).openedOn).toBe('2026-02-28');
+    expect(buildCardTerms(owner).card).not.toHaveProperty('openingMinimumMinor');
+  });
+
+  it('keeps today as the opening date of a card without a balance', () => {
+    expect(buildCardTerms(card({ openedOn: '2026-10-16' }, { statementDay: 15, dueDay: 3 })).openedOn).toBe('2026-10-16');
+  });
+
+  it('carries a stated minimum of the last statement when the case has one', () => {
+    const terms = buildCardTerms(card({ principalMinor: 3268319, openedOn: '2026-10-16' }, { statementDay: 15, dueDay: 3, openingMinimumMinor: 180000 }));
+    expect(terms.card.openingMinimumMinor).toBe(180000);
+  });
+
   it('never writes a card limit, whatever the case says', () => {
     const terms = buildCardTerms({ ...card(), limitMinor: 5000000, card: { ...card().card, limitMinor: 5000000 } });
     expect(terms.card.limitMinor).toBeUndefined();

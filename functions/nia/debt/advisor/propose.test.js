@@ -36,6 +36,26 @@ const fields = (proposal) => proposal.questions.map((question) => question.field
 const codes = (items) => items.map((item) => item.code);
 const lineOf = (proposal, label) => proposal.preview.chargeLines.find((line) => line.label === label);
 
+describe('a card with the balance of its last statement', () => {
+  it('says it takes the balance from the last statement and when its minimum is due, instead of opening today', () => {
+    const proposal = proposeSetup(complete({ principalMinor: 3268319, openedOn: '2026-10-16' }, { statementDay: 15, dueDay: 3 }), [], DEFAULT_LEGAL, '2026-10-16');
+    expect(codes(proposal.assumptions)).toContain('opened_last_statement');
+    expect(codes(proposal.assumptions)).not.toContain('opened_today');
+    const { text } = proposal.assumptions.find((item) => item.code === 'opened_last_statement');
+    expect(text).toContain('2026-10-15');
+    expect(text).toContain('2026-11-03');
+    expect(proposal.draft).not.toBeNull();
+    const onStatementDay = proposeSetup(complete({ principalMinor: 3268319, openedOn: '2026-10-15' }, { statementDay: 15, dueDay: 3 }), [], DEFAULT_LEGAL, '2026-10-15');
+    expect(codes(onStatementDay.assumptions)).toContain('opened_last_statement');
+  });
+
+  it('keeps the opening-today and zero-balance assumptions when no balance is stated', () => {
+    const proposal = propose(complete());
+    expect(codes(proposal.assumptions)).toEqual(expect.arrayContaining(['opened_today', 'opening_zero']));
+    expect(codes(proposal.assumptions)).not.toContain('opened_last_statement');
+  });
+});
+
 describe('the Bancolombia card (2.1 % MV, fee 45,000 plus IVA 19 %)', () => {
   const proposal = propose(card());
 

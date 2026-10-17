@@ -1,4 +1,4 @@
-import { ValidationError, addExplicitCharge, defaultLateFor, presetCharges, validateTerms } from '../../../../packages/finance-core/index.js';
+import { ValidationError, addExplicitCharge, defaultLateFor, lastStatementOn, presetCharges, validateTerms } from '../../../../packages/finance-core/index.js';
 import { MIN_RULES } from '../extract.js';
 import { buildTerms } from '../preview.js';
 
@@ -50,6 +50,19 @@ export function setupCharges(setupCase, { card }) {
   return charges;
 }
 
+const isDay = (value) => Number.isInteger(value) && value >= 1 && value <= 31;
+
+/**
+ * The opening date of a described card. With a stated balance, the card is registered from its last statement (the latest statement day
+ * on or before the day of the case), so the core bills that statement as the opening one and its minimum is due on the usual due date.
+ * Without a balance it opens on the day of the case, as before.
+ */
+export function cardOpenedOn(setupCase) {
+  const card = setupCase.card || {};
+  if (!(setupCase.principalMinor > 0) || !isDay(card.statementDay)) return setupCase.openedOn;
+  return lastStatementOn(card.statementDay, setupCase.openedOn);
+}
+
 /**
  * Validated terms of a described card: system `none`, monthly, the mora of the case and the card charges. No card limit is ever written.
  * @throws {ValidationError} `setup_incomplete` for a missing rate, day or minimum rule, plus the core's errors
@@ -64,7 +77,7 @@ export function buildCardTerms(setupCase) {
   return validateTerms({
     kind: 'card',
     principalMinor: setupCase.principalMinor || 0,
-    openedOn: setupCase.openedOn,
+    openedOn: cardOpenedOn(setupCase),
     rate: setupCase.rate,
     system: 'none',
     periodicity: 'monthly',
@@ -74,6 +87,8 @@ export function buildCardTerms(setupCase) {
       statementDay: card.statementDay,
       dueDay: card.dueDay,
       minPayment: { rule: card.minRule, pct: card.minPct ?? DEFAULT_MIN_PCT, floorMinor: card.minFloorMinor ?? 0 },
+      // The minimum of the last statement, only when the case states one (the extraction does not ask it today).
+      ...(Number.isSafeInteger(card.openingMinimumMinor) ? { openingMinimumMinor: card.openingMinimumMinor } : {}),
     },
   });
 }

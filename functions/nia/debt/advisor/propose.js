@@ -4,7 +4,7 @@ import { pesos } from '../format.js';
 import { CONVENTION_BUTTONS } from '../pending.js';
 import { PERIOD_LABELS, SYSTEM_LABELS, conventionQuestion, describeCoreError, usuryLines } from '../preview.js';
 import { proposeAdjust } from './adjust.js';
-import { AMOUNT_ASK, DEFAULT_IVA_PCT, buildSetupTerms, lateFor, setupCharges } from './cardTerms.js';
+import { AMOUNT_ASK, DEFAULT_IVA_PCT, buildSetupTerms, cardOpenedOn, lateFor, setupCharges } from './cardTerms.js';
 
 // proposeSetup (design G13): turns a described case into a draft, the assumptions Nia made, the questions it still has and a preview computed
 // by the core. It never writes and does no I/O. A draft is only offered when nothing blocks the creation. Pure and Node 16 safe.
@@ -85,9 +85,20 @@ function amountQuestions(c) {
   return ['fee', 'life', 'insurance'].filter((key) => has(presets, key) && presets[key] === null).map((key) => ({ field: `amount:${key}`, text: AMOUNT_ASK[key], blocking: true }));
 }
 
+// A card with a balance is registered from its last statement (see `cardOpenedOn`); anything else opens today.
+function openingAssumption(c) {
+  const card = c.card || {};
+  if (c.kind !== 'card' || !(c.principalMinor > 0) || !isDay(card.statementDay) || !isDay(card.dueDay)) {
+    return { code: 'opened_today', text: `Registro la deuda con fecha de hoy (${c.openedOn}).` };
+  }
+  const statementOn = cardOpenedOn(c);
+  const { dueOn } = cycleDates(card.statementDay, card.dueDay, statementOn.slice(0, 7));
+  return { code: 'opened_last_statement', text: `Tomo el saldo como el de tu último extracto, con corte el ${statementOn}: su pago mínimo vence el ${dueOn}.` };
+}
+
 function assumptionsOf(c) {
   const presets = c.presets || {};
-  const items = [{ code: 'opened_today', text: `Registro la deuda con fecha de hoy (${c.openedOn}).` }];
+  const items = [openingAssumption(c)];
   if (c.kind === 'card' && !c.principalMinor) items.push({ code: 'opening_zero', text: 'La tarjeta empieza con saldo $ 0: registra tus compras y pagos desde hoy.' });
   const iva = presets.iva === undefined && presets.ivaIncluded === true ? DEFAULT_IVA_PCT : presets.iva;
   if (iva !== undefined) {
