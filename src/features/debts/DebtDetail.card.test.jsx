@@ -23,7 +23,8 @@ describe('DebtDetail for a credit card', () => {
     expect(within(state).getByText('28 % E.A.')).toBeInTheDocument();
 
     const panel = screen.getByRole('region', { name: 'Tu tarjeta' });
-    expect(within(panel).getByText('Próximo corte: 15 may. Próximo pago: 30 may.')).toBeInTheDocument();
+    // The next payment is the pending minimum (30 abr), not the due date of the statement that has not closed yet.
+    expect(within(panel).getByText('Próximo corte: 15 may. Próximo pago: 30 abr.')).toBeInTheDocument();
     const [revolving, nevera] = within(panel).getAllByRole('listitem');
     expect(revolving).toHaveTextContent('Saldo rotativo');
     expect(revolving).toHaveTextContent('$ 500.000');

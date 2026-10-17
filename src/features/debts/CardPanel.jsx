@@ -29,7 +29,7 @@ export default function CardPanel({ projection, explain = {} }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-ink-muted">
-        Próximo corte: {formatDueDate(card.nextStatementOn)}. Próximo pago: {formatDueDate(card.nextDueOn)}.
+        Próximo corte: {formatDueDate(card.nextStatementOn)}. Próximo pago: {formatDueDate(projection.nextDue?.dueOn ?? card.nextDueOn)}.
       </p>
       <ul className="flex flex-col divide-y divide-[#eef1ed]">
         {tranches.map((tranche) => (
