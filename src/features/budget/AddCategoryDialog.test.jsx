@@ -46,6 +46,16 @@ describe('AddCategoryDialog', () => {
     expect(props.onSubmit).toHaveBeenCalledWith({ name: 'Salud', kind: 'need', color: CATEGORY_PALETTE[0], icon: '' });
   });
 
+  it('rejects a name that only differs in accents, case or spaces', async () => {
+    const { props, user } = renderDialog({ existingNames: ['Alimentación'] });
+
+    await user.type(screen.getByLabelText('Nombre'), '  ALIMENTACION ');
+    await user.click(screen.getByRole('button', { name: 'Crear categoría' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Ya existe una categoría con ese nombre.');
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   it('rejects a duplicate name without calling onSubmit', async () => {
     const { props, user } = renderDialog();
 

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { Wallet } from 'lucide-react';
+import { activeCategories } from '@finance-core';
 import {
   appwriteConfig,
   createCategory,
@@ -79,6 +80,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
 
   const data = useFinanceData(initialWorkspace, selectedMonth);
   const { household, members, categories, budgets, goals } = data.workspace;
+  // Archived (merged or deleted) categories still name their old movements, but are never offered or charted.
+  const pickableCategories = useMemo(() => activeCategories(categories), [categories]);
   const isCurrentMonth = selectedMonth === currentMonth;
   const monthStart = monthStartDate(selectedMonth);
   const monthDays = daysInMonth(monthStart);
@@ -113,12 +116,12 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     monthsEndingAt(selectedMonth, 6),
   ), [data.period, data.periodReady, visibleTransactions, selectedMonth, storedScope]);
 
-  const categoryStats = useMemo(() => categories.filter((category) => category.kind !== 'income').map((category) => {
+  const categoryStats = useMemo(() => pickableCategories.filter((category) => category.kind !== 'income').map((category) => {
     const value = visibleTransactions.filter((item) => item.type === 'expense' && item.categoryId === category.$id)
       .reduce((sum, item) => sum + Number(item.amountMinor || 0), 0);
     const budget = budgets.find((item) => item.categoryId === category.$id && item.month === selectedMonth);
     return { ...category, color: categoryColor(category), value, budget: Number(budget?.plannedMinor || 0) };
-  }), [categories, visibleTransactions, budgets, selectedMonth]);
+  }), [pickableCategories, visibleTransactions, budgets, selectedMonth]);
   // Same rule as the Presupuesto summary: only categories with a limit count against the budget.
   const budgetedSpent = categoryStats.filter((item) => item.budget > 0).reduce((sum, item) => sum + item.value, 0);
   const budgetTotal = categoryStats.reduce((sum, item) => sum + item.budget, 0);
@@ -130,7 +133,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 3000); };
   const refreshInPlace = () => data.refresh().catch((error) => notify(readableError(error)));
 
-  const openCreateTransaction = () => { setEditingTransaction(null); setReceiptFile(null); setNewTransaction({ ...resetForm(), categoryId: categories[0]?.$id || '' }); setShowTransaction(true); };
+  const openCreateTransaction = () => { setEditingTransaction(null); setReceiptFile(null); setNewTransaction({ ...resetForm(), categoryId: pickableCategories[0]?.$id || '' }); setShowTransaction(true); };
   const openEditTransaction = (item) => { setEditingTransaction(item); setReceiptFile(null); setNewTransaction({ merchant: item.merchant || '', amount: String(item.amountMinor || ''), categoryId: item.categoryId || '', type: item.type || 'expense', owner: item.ownerScope === 'shared' ? 'shared' : item.ownerScope === currentOwnerScope ? 'you' : 'partner', date: dateInputValue(new Date(item.occurredAt)), note: item.note || '' }); setShowTransaction(true); };
 
   const saveTransaction = async (event) => {
@@ -231,7 +234,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         return (
           <TransactionsView
             transactions={visibleTransactions}
-            categories={categories}
+            categories={pickableCategories}
             month={selectedMonth}
             currentOwnerScope={currentOwnerScope}
             search={transactionSearch}
@@ -331,7 +334,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         <Suspense fallback={<ViewSkeleton label="Cargando la sección…" />}>{renderView()}</Suspense>
       </AppShell>
 
-      {showTransaction && <TransactionModal form={newTransaction} setForm={setNewTransaction} categories={categories} receiptFile={receiptFile} setReceiptFile={setReceiptFile} editing={editingTransaction} saving={saving} onClose={() => setShowTransaction(false)} onSubmit={saveTransaction} />}
+      {showTransaction && <TransactionModal form={newTransaction} setForm={setNewTransaction} categories={pickableCategories} receiptFile={receiptFile} setReceiptFile={setReceiptFile} editing={editingTransaction} saving={saving} onClose={() => setShowTransaction(false)} onSubmit={saveTransaction} />}
       {detailTransaction && (
         <TransactionDetail
           transaction={detailTransaction}

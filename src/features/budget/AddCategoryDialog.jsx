@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
+import { foldCategoryName } from '@finance-core';
 import { CATEGORY_ICON_OPTIONS, CATEGORY_PALETTE, PALETTE_NAMES } from '../../shared/lib/categories';
 import { Button } from '../../shared/ui/Button';
 import { DialogContent, DialogHeader, DialogRoot } from '../../shared/ui/Dialog';
@@ -20,7 +21,7 @@ export default function AddCategoryDialog({ existingNames = [], onClose, onSubmi
     event.preventDefault();
     const name = form.name.trim();
     if (!name) { setError('Escribe un nombre.'); return; }
-    if (existingNames.some((existing) => existing.trim().toLowerCase() === name.toLowerCase())) {
+    if (existingNames.some((existing) => foldCategoryName(existing) === foldCategoryName(name))) {
       setError('Ya existe una categoría con ese nombre.');
       return;
     }

@@ -195,6 +195,19 @@ describe('App Ajustes section', () => {
   });
 });
 
+describe('App archived categories', () => {
+  it('leaves an archived category out of the movement form', async () => {
+    api.getWorkspace.mockResolvedValue({ ...WORKSPACE, categories: [...WORKSPACE.categories, { $id: 'c2', name: 'Comida', kind: 'need', color: '#0B6E4F', archived: true }] });
+    const user = await renderReadyApp();
+
+    await user.click(screen.getAllByRole('button', { name: 'Nuevo movimiento' })[0]);
+    const options = within(screen.getByLabelText('Categoría')).getAllByRole('option').map((option) => option.textContent);
+
+    expect(options).toContain('Mercado');
+    expect(options).not.toContain('Comida');
+  });
+});
+
 describe('App transaction detail', () => {
   it('opens the detail from Resumen, lists its receipts and edits it from there', async () => {
     const user = await renderReadyApp();
