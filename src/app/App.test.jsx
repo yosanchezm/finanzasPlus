@@ -208,6 +208,17 @@ describe('App archived categories', () => {
   });
 });
 
+describe('App dashboard charts', () => {
+  it('opens Movimientos filtered by the category picked in the spending chart', async () => {
+    const user = await renderReadyApp();
+
+    await user.click(await screen.findByRole('button', { name: /^Ver movimientos de Mercado/ }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Movimientos' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Categoría')).toHaveValue('c1');
+  });
+});
+
 describe('App transaction detail', () => {
   it('opens the detail from Resumen, lists its receipts and edits it from there', async () => {
     const user = await renderReadyApp();

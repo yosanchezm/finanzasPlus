@@ -177,3 +177,64 @@ describe('DashboardView on a phone and transaction detail', () => {
     expect(onOpenDetail).toHaveBeenCalledWith(recent[1]);
   });
 });
+
+describe('interactive charts in the dashboard', () => {
+  const spread = [
+    ['c1', 'Hogar', 1100000], ['c2', 'Tecnología', 560000], ['c3', 'Salud', 540000], ['c4', 'Servicios', 500000],
+    ['c5', 'Alimentación', 490000], ['c6', 'Mercado', 430000], ['c7', 'Ocio', 40000],
+  ].map(([$id, name, value]) => ({ $id, name, value, color: '#0B6E4F' }));
+  const legend = () => within(screen.getByRole('figure', { name: /Gastos por categoría/ }));
+
+  it('names the 5 biggest categories and folds the rest into an expandable Otros', async () => {
+    const { user } = renderDashboard({ categoryStats: spread });
+
+    expect(legend().getAllByRole('button', { name: /^Ver movimientos de/ }).map((button) => button.textContent)).toEqual([
+      'Hogar$ 1,1 M30 %', 'Tecnología$ 560 k15 %', 'Salud$ 540 k15 %', 'Servicios$ 500 k14 %', 'Alimentación$ 490 k13 %',
+    ]);
+    const other = legend().getByRole('button', { name: /^Otros \(2\)/ });
+    expect(other).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(other);
+
+    expect(other).toHaveAttribute('aria-expanded', 'true');
+    expect(legend().getByRole('button', { name: /^Ver movimientos de Mercado/ })).toBeInTheDocument();
+    expect(legend().getByRole('button', { name: /^Ver movimientos de Ocio/ })).toBeInTheDocument();
+  });
+
+  it('shows the hovered or focused category in the center of the donut', async () => {
+    const { user } = renderDashboard({ categoryStats: spread });
+    expect(legend().getByText('gastado')).toBeInTheDocument();
+
+    await user.hover(legend().getByRole('button', { name: /^Ver movimientos de Tecnología/ }));
+    expect(legend().getByTestId('donut-center')).toHaveTextContent('Tecnología$ 560 k15 %');
+
+    await user.unhover(legend().getByRole('button', { name: /^Ver movimientos de Tecnología/ }));
+    expect(legend().getByTestId('donut-center')).toHaveTextContent('$ 3,7 Mgastado');
+  });
+
+  it('opens the movements of a category, folded ones included', async () => {
+    const onSelectCategory = vi.fn();
+    const { user } = renderDashboard({ categoryStats: spread, onSelectCategory });
+
+    await user.click(legend().getByRole('button', { name: /^Ver movimientos de Hogar/ }));
+    await user.click(legend().getByRole('button', { name: /Otros/ }));
+    await user.click(legend().getByRole('button', { name: /^Ver movimientos de Ocio/ }));
+
+    expect(onSelectCategory.mock.calls).toEqual([['c1'], ['c7']]);
+  });
+
+  it('toggles the cash flow series from the legend but never hides both', async () => {
+    const { user } = renderDashboard({ history: withMonths({ '2026-10': { income: 2000, expenses: 500 } }) });
+    const series = screen.getByRole('group', { name: 'Series del flujo de caja' });
+    const income = within(series).getByRole('button', { name: 'Ingresos' });
+    const expenses = within(series).getByRole('button', { name: 'Gastos' });
+    expect(income).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(expenses);
+
+    expect(expenses).toHaveAttribute('aria-pressed', 'false');
+    expect(income).toBeDisabled();
+    await user.click(expenses);
+    expect(income).toBeEnabled();
+  });
+});

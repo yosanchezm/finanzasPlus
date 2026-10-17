@@ -140,13 +140,16 @@ function Pagination({ start, end, total, page, pageCount, onPage }) {
  */
 export default function TransactionsView({
   transactions, categories = [], month, currentOwnerScope, onAdd, onEdit, onDelete, onOpenDetail, scopeControl,
-  search: controlledSearch, onSearchChange,
+  search: controlledSearch, onSearchChange, categoryFilter, onCategoryFilterChange,
 }) {
   const [localSearch, setLocalSearch] = useState('');
   const search = controlledSearch ?? localSearch;
   const setSearch = onSearchChange ?? setLocalSearch;
   const [type, setType] = useState('all');
-  const [categoryId, setCategoryId] = useState('all');
+  // Controlled when the shell opens this view for one category (from the dashboard chart).
+  const [localCategoryId, setLocalCategoryId] = useState('all');
+  const categoryId = categoryFilter ?? localCategoryId;
+  const setCategoryId = onCategoryFilterChange ?? setLocalCategoryId;
   const [owner, setOwner] = useState('all');
   const [pendingDelete, setPendingDelete] = useState(null);
   const wide = useMediaQuery('(min-width: 640px)');

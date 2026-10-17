@@ -91,7 +91,7 @@ function NiaInsight({ budget, remainingDays, isCurrentMonth, onOpenAssistant, on
 export default function DashboardView({
   dateLabel, periodLabel, scope, onScopeChange, totals, incomeCount, expenseCount, budget, remainingDays,
   isCurrentMonth = true, cashflow, history = [], categoryStats, recentTransactions, goals, currentOwnerScope,
-  onNavigate, onAddTransaction, onAddGoal, onOpenAssistant, onOpenDetail,
+  onNavigate, onAddTransaction, onAddGoal, onOpenAssistant, onOpenDetail, onSelectCategory, onSelectMonth,
 }) {
   const seeBudget = () => onNavigate('Presupuesto');
   return (
@@ -101,8 +101,8 @@ export default function DashboardView({
       <KpiCards totals={totals} incomeCount={incomeCount} expenseCount={expenseCount} budget={budget} history={history} />
 
       <div className={twoToOne}>
-        <CashflowCard history={history} series={cashflow} periodLabel={periodLabel} />
-        <CategoryBreakdown stats={categoryStats} periodLabel={periodLabel} onSeeBudget={seeBudget} />
+        <CashflowCard history={history} series={cashflow} periodLabel={periodLabel} onSelectMonth={onSelectMonth} />
+        <CategoryBreakdown stats={categoryStats} periodLabel={periodLabel} onSeeBudget={seeBudget} onSelectCategory={onSelectCategory} />
       </div>
 
       <div className={twoToOne}>

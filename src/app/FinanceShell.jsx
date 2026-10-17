@@ -68,6 +68,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   const [activeView, setActiveView] = useState('Resumen');
   const [scope, setScope] = useState('total');
   const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionCategory, setTransactionCategory] = useState('all');
   const [showTransaction, setShowTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [showAssistant, setShowAssistant] = useState(false);
@@ -222,6 +223,11 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     setActiveView('Movimientos');
   };
 
+  const showCategoryTransactions = (categoryId) => {
+    setTransactionCategory(categoryId);
+    setActiveView('Movimientos');
+  };
+
   const scopeControl = <ScopeControl scope={scope} onScopeChange={setScope} />;
   const needsPeriod = PERIOD_VIEWS.includes(activeView);
 
@@ -239,6 +245,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             currentOwnerScope={currentOwnerScope}
             search={transactionSearch}
             onSearchChange={setTransactionSearch}
+            categoryFilter={transactionCategory}
+            onCategoryFilterChange={setTransactionCategory}
             onAdd={openCreateTransaction}
             onEdit={openEditTransaction}
             onDelete={removeTransaction}
@@ -296,6 +304,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             cashflow={cashflow}
             history={history}
             categoryStats={categoryStats}
+            onSelectCategory={showCategoryTransactions}
+            onSelectMonth={setSelectedMonth}
             recentTransactions={visibleTransactions}
             goals={goals}
             currentOwnerScope={currentOwnerScope}
