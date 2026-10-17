@@ -28,6 +28,7 @@ const MERGES = [
   { from: 'Salud y Bienestar', into: 'Salud y Cuidado Personal' },
   { from: 'Servicios', into: 'Servicios Públicos' },
   { from: 'Inteligencia Artificial', into: 'Tecnología' },
+  { from: 'Mercado', into: 'Alimentación' },
 ];
 
 const apply = process.argv.includes('--apply');
