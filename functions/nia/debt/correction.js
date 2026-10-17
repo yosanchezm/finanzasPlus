@@ -19,6 +19,8 @@ const ISSUES = {
   correction_not_applicable: 'El día de corte, el día de pago y el pago mínimo solo existen en tarjetas. No guardé nada.',
   invalid_card: 'Revisa los datos de la tarjeta: los días van entre 1 y 31, el porcentaje entre 0 y 100 y el piso en pesos enteros. No guardé nada.',
   correction_empty: 'No me dijiste qué dato corregir. No guardé nada.',
+  not_a_statement_date: 'La fecha del último corte debe caer en el día de corte de la tarjeta. Revísala en tu extracto; no guardé nada.',
+  last_statement_in_future: 'La fecha del último corte no puede ser posterior a hoy. No guardé nada.',
 };
 
 // The event the correction would write and the core replay of it, or the reason in Spanish (a typed error of the core).
@@ -43,6 +45,10 @@ function changeLines({ before, after }) {
   const pay = now.minPayment || {};
   if (now.statementDay !== undefined) lines.push(change('Día de corte', was.statementDay, now.statementDay));
   if (now.dueDay !== undefined) lines.push(change('Día límite de pago', was.dueDay, now.dueDay));
+  if (now.lastStatementOn !== undefined) lines.push(change('Fecha del último corte', was.lastStatementOn, now.lastStatementOn));
+  if (now.openingMinimumMinor !== undefined) {
+    lines.push(change('Pago mínimo del extracto', was.openingMinimumMinor === undefined ? 'sin dato' : pesos(was.openingMinimumMinor), pesos(now.openingMinimumMinor)));
+  }
   if (pay.rule !== undefined) lines.push(change('Pago mínimo', RULE_LABELS[wasPay.rule], RULE_LABELS[pay.rule]));
   if (pay.pct !== undefined) lines.push(change('Porcentaje del pago mínimo', `${wasPay.pct} %`, `${pay.pct} %`));
   if (pay.floorMinor !== undefined) lines.push(change('Piso del pago mínimo', pesos(wasPay.floorMinor), pesos(pay.floorMinor)));

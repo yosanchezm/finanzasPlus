@@ -116,12 +116,21 @@ function minPaymentFields(input) {
 
 function cardFields(input) {
   if (!isObject(input)) throw badCard('card must be an object');
-  onlyKeys(input, ['statementDay', 'dueDay', 'minPayment'], 'card.');
+  onlyKeys(input, ['statementDay', 'dueDay', 'lastStatementOn', 'openingMinimumMinor', 'minPayment'], 'card.');
   const result = {};
   for (const key of ['statementDay', 'dueDay']) {
     if (input[key] === undefined) continue;
     if (!isDay(input[key])) throw badCard(`${key} must be a whole day 1..31, got ${String(input[key])}`);
     result[key] = input[key];
+  }
+  // The statement the card was registered from: it sets the opening date (checked against the statement day by `applyCorrection`).
+  if (input.lastStatementOn !== undefined) {
+    if (!isIsoDate(input.lastStatementOn)) throw new ValidationError('invalid_date', `card.lastStatementOn must be a real YYYY-MM-DD date, got ${String(input.lastStatementOn)}`);
+    result.lastStatementOn = input.lastStatementOn;
+  }
+  if (input.openingMinimumMinor !== undefined) {
+    if (!isMinor(input.openingMinimumMinor)) throw badCard('openingMinimumMinor must be whole pesos >= 0');
+    result.openingMinimumMinor = input.openingMinimumMinor;
   }
   if (input.minPayment !== undefined) {
     const minPayment = minPaymentFields(input.minPayment);
@@ -132,7 +141,8 @@ function cardFields(input) {
 
 /**
  * Validates the fields of a `terms_correction`: the rate as the bank states it, the modality, and for cards the
- * statement day, due day and minimum-payment rule, percentage and floor. Any other field is refused. Returns a
+ * statement day, due day, last statement date (`lastStatementOn`, the opening date), opening minimum and minimum-payment
+ * rule, percentage and floor. Any other field is refused. Returns a
  * normalized copy with the keys in a fixed order and no empty parts. Internal: not exported by the package barrel.
  * @param {object} input
  * @param {{ allowEmpty?: boolean }} [options] `allowEmpty` is for the `previous` values, which may be absent.

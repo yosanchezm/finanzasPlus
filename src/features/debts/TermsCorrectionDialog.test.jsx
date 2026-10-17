@@ -2,7 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import TermsCorrectionDialog from './TermsCorrectionDialog';
-import { makeCard, makeDebt, makeEvent, makeMoraCard } from './debtFixtures';
+import { serializeTerms } from '@finance-core';
+import { CARD_TERMS, makeCard, makeDebt, makeEvent, makeMoraCard } from './debtFixtures';
 
 const TODAY = '2026-06-01';
 const IDLE = { status: 'idle', error: null, locked: false };
@@ -18,6 +19,22 @@ const typeInto = async (user, name, text) => { await user.clear(field(name)); aw
 const preview = () => screen.getByRole('group', { name: 'Vista previa' });
 const rowOf = (name) => within(preview()).getByRole('row', { name: new RegExp(name) });
 const save = (name = 'Guardar corrección') => screen.getByRole('button', { name });
+
+describe('TermsCorrectionDialog: the last statement of a card', () => {
+  it('corrects the date of the last statement and saves the draft that moves the card to it', async () => {
+    const debt = makeCard({ termsJson: serializeTerms({ ...CARD_TERMS, principalMinor: 3268319, openedOn: '2026-10-16', card: { ...CARD_TERMS.card, statementDay: 15, dueDay: 3, deferred: [] } }) });
+    const { user, onSubmit } = setup({ debt, today: '2026-10-16' });
+
+    expect(field('Fecha del último corte')).toHaveValue('2026-10-16');
+    expect(field('Pago mínimo del extracto (opcional)')).toHaveValue(null);
+    fireEvent.change(field('Fecha del último corte'), { target: { value: '2026-10-15' } });
+
+    expect(rowOf('Fecha del último corte')).toBeInTheDocument();
+    expect(rowOf('Próximo pago mínimo')).toBeInTheDocument();
+    await user.click(save());
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'terms_correction', fields: { card: { lastStatementOn: '2026-10-15' } }, previous: { card: { lastStatementOn: '2026-10-16' } } }));
+  });
+});
 
 describe('TermsCorrectionDialog: a card', () => {
   it('prefills the stored values and previews day 15 to 20 before anything is saved', async () => {

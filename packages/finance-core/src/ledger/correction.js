@@ -1,4 +1,5 @@
 import { compareIso, isIsoDate } from '../calendar.js';
+import { lastStatementOn } from '../card/card.js';
 import { ValidationError } from '../errors.js';
 import { modalityOf } from '../late/policy.js';
 import { termsOfDebt, validateTerms } from '../terms.js';
@@ -10,24 +11,34 @@ import { activeEvents, normalizeCorrectionFields, readEvents, sortEvents } from 
 
 const isCorrection = (event) => event.kind === 'terms_correction';
 const OPENING = 'opening';
+// Card fields compared one by one; `lastStatementOn` is read from and written to the opening date of the terms.
+const CARD_KEYS = ['statementDay', 'dueDay', 'lastStatementOn', 'openingMinimumMinor'];
+const cardValue = (terms, key) => (key === 'lastStatementOn' ? terms.openedOn : terms.card[key]);
 
 /**
  * Applies correction fields to terms and returns validated terms. Pure: the input is not touched.
  * @param {object} terms Validated DebtTerms.
  * @param {{ rate?: object, modality?: string, card?: object }} fields Normalized correction fields.
  * @returns {object} Validated DebtTerms.
- * @throws {ValidationError} `correction_not_applicable` for card fields on another kind of debt, otherwise what `validateTerms` throws
+ * @throws {ValidationError} `correction_not_applicable` for card fields on another kind of debt, `not_a_statement_date` for a
+ *   `lastStatementOn` that is not a statement date of the (corrected) statement day, otherwise what `validateTerms` throws
  */
 export function applyCorrection(terms, fields) {
   if (fields.card !== undefined && terms.kind !== 'card') {
-    throw new ValidationError('correction_not_applicable', 'statement day, due day and minimum payment only exist on a card');
+    throw new ValidationError('correction_not_applicable', 'statement day, due day, last statement and minimum payment only exist on a card');
   }
   const next = { ...terms };
   if (fields.rate !== undefined) next.rate = fields.rate;
   if (fields.modality !== undefined) next.modality = fields.modality;
   if (fields.card !== undefined) {
-    const { minPayment, ...days } = fields.card;
+    const { minPayment, lastStatementOn: statementOn, ...days } = fields.card;
     next.card = { ...terms.card, ...days, minPayment: { ...terms.card.minPayment, ...minPayment } };
+    if (statementOn !== undefined) {
+      if (lastStatementOn(next.card.statementDay, statementOn) !== statementOn) {
+        throw new ValidationError('not_a_statement_date', `${statementOn} is not a statement date of a card that closes on day ${next.card.statementDay}`);
+      }
+      next.openedOn = statementOn; // the card is registered from that statement (the opening statement of the card projector)
+    }
   }
   return validateTerms(next);
 }
@@ -144,13 +155,21 @@ export function correctionValues(terms, fields) {
   if (fields.modality !== undefined) values.modality = modalityOf(terms);
   if (fields.card !== undefined && terms.card !== undefined) {
     values.card = {};
-    for (const key of ['statementDay', 'dueDay']) if (fields.card[key] !== undefined) values.card[key] = terms.card[key];
+    for (const key of CARD_KEYS) if (fields.card[key] !== undefined && cardValue(terms, key) !== undefined) values.card[key] = cardValue(terms, key);
     if (fields.card.minPayment !== undefined) {
       values.card.minPayment = {};
       for (const key of Object.keys(fields.card.minPayment)) values.card.minPayment[key] = terms.card.minPayment[key];
     }
   }
   return values;
+}
+
+// A `lastStatementOn` equal to the stored opening date changes nothing and is not checked again: a card registered before the
+// opening statement existed may open on any day, and a form that carries every field must still correct the others.
+function withoutSameStatement(terms, fields) {
+  if (fields.card === undefined || fields.card.lastStatementOn !== terms.openedOn) return fields;
+  const { lastStatementOn, ...card } = fields.card;
+  return { ...fields, card };
 }
 
 // Only the parts of `fields` that differ from `terms`, in the same shape.
@@ -161,7 +180,7 @@ function changedParts(terms, fields) {
   if (fields.modality !== undefined && fields.modality !== current.modality) changed.modality = fields.modality;
   if (fields.card !== undefined) {
     const card = {};
-    for (const key of ['statementDay', 'dueDay']) if (fields.card[key] !== undefined && fields.card[key] !== current.card[key]) card[key] = fields.card[key];
+    for (const key of CARD_KEYS) if (fields.card[key] !== undefined && fields.card[key] !== current.card[key]) card[key] = fields.card[key];
     const minPayment = {};
     for (const key of Object.keys(fields.card.minPayment ?? {})) {
       if (fields.card.minPayment[key] !== current.card.minPayment[key]) minPayment[key] = fields.card.minPayment[key];
@@ -178,18 +197,24 @@ function changedParts(terms, fields) {
  * shape `planCommit` and `previewChange` take.
  * @param {object} debt A `debts` row.
  * @param {object[]} events The debt's `debt_events` rows.
- * @param {{ rate?: object, modality?: string, card?: { statementDay?: number, dueDay?: number, minPayment?: { rule?: string, pct?: number, floorMinor?: number } } }} fields
- *   The corrected values; the rate is given as the bank states it (`{ convention, value }` or the structured form).
+ * @param {{ rate?: object, modality?: string, card?: { statementDay?: number, dueDay?: number, lastStatementOn?: string, openingMinimumMinor?: number,
+ *   minPayment?: { rule?: string, pct?: number, floorMinor?: number } } }} fields
+ *   The corrected values; the rate is given as the bank states it (`{ convention, value }` or the structured form). The
+ *   `lastStatementOn` of a card is the statement it was registered from: a statement date of the card, not after `on`.
  * @param {{ on: string }} options `on` is the recording date (the event date), `YYYY-MM-DD`.
  * @returns {{ kind: 'terms_correction', effectiveOn: string, amountMinor: 0, fields: object, previous: object, appliesTo: string }}
  * @throws {ValidationError} `correction_empty`, `correction_unsupported_field`, `correction_not_applicable`, `no_change`,
- *   `invalid_card`, `invalid_rate`, `invalid_terms` or `invalid_date`
+ *   `invalid_card`, `invalid_rate`, `invalid_terms`, `invalid_date`, `not_a_statement_date` or `last_statement_in_future`
  */
 export function buildCorrection(debt, events, fields, { on } = {}) {
   if (!isIsoDate(on)) throw new ValidationError('invalid_date', `on must be a real YYYY-MM-DD date, got ${String(on)}`);
   const wanted = normalizeCorrectionFields(fields);
+  const statementOn = wanted.card === undefined ? undefined : wanted.card.lastStatementOn;
+  if (statementOn !== undefined && compareIso(statementOn, on) > 0) {
+    throw new ValidationError('last_statement_in_future', `the last statement ${statementOn} is after the recording date ${on}`);
+  }
   const { appliesTo, terms } = versionTermsAt(debt, events, on);
-  applyCorrection(terms, wanted);
+  applyCorrection(terms, withoutSameStatement(terms, wanted));
   const changed = changedParts(terms, wanted);
   if (Object.keys(changed).length === 0) throw new ValidationError('no_change', 'the corrected values are the ones already stored');
   return { kind: 'terms_correction', effectiveOn: on, amountMinor: 0, fields: changed, previous: correctionValues(terms, changed), appliesTo };

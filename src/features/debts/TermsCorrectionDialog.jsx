@@ -20,6 +20,10 @@ function CardFields({ card, onChange }) {
         <TextField label="Día de corte" type="number" inputMode="numeric" inputClassName="tabular-nums" {...bind('statementDay')} />
         <TextField label="Día límite de pago" type="number" inputMode="numeric" inputClassName="tabular-nums" {...bind('dueDay')} />
       </div>
+      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
+        <TextField label="Fecha del último corte" type="date" {...bind('lastStatementOn')} />
+        <TextField label="Pago mínimo del extracto (opcional)" {...money} {...bind('openingMinimum')} />
+      </div>
       <SelectField label="Cómo se calcula tu pago mínimo" {...bind('minRule')}>
         {MIN_RULES.map((rule) => <option key={rule.value} value={rule.value}>{rule.label}</option>)}
       </SelectField>
@@ -33,7 +37,7 @@ function CardFields({ card, onChange }) {
 
 /**
  * "Corregir datos": fixes data that was wrong from the start (rate and its convention, modality and, for a card, the cut
- * and due days and the minimum payment) by writing a `terms_correction`. The fields start on the stored values; the preview
+ * and due days, the last statement it was registered from with its minimum, and the minimum payment) by writing a `terms_correction`. The fields start on the stored values; the preview
  * is the core's `previewChange` (see `previewCorrection`). `saveState`: `{ status, error, locked }`; `onSubmit(draft)` receives
  * the `terms_correction` draft to write.
  */

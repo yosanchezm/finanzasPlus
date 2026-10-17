@@ -1,6 +1,7 @@
-import { buildCorrection, planCommit, project } from '@finance-core';
+import { buildCorrection, planCommit, project, serializeTerms } from '@finance-core';
 import { describe, expect, it } from 'vitest';
-import { makeCard, makeDebt, makeEvent, makeMoraCard } from './debtFixtures';
+import { formatDueDate } from './debtLabels';
+import { CARD_TERMS, makeCard, makeDebt, makeEvent, makeMoraCard } from './debtFixtures';
 import { RETROACTIVE_NOTE, describeCorrection, initialCorrectionForm, previewCorrection } from './termsCorrectionModel';
 
 const TODAY = '2026-06-01';
@@ -26,10 +27,10 @@ describe('initialCorrectionForm', () => {
     expect(form).toEqual({
       rate: EA(28),
       modality: 'consumer',
-      card: { statementDay: '15', dueDay: '30', minRule: 'interest_fees_plus_pct', minPct: '5', minFloor: '20000' },
+      card: { statementDay: '15', dueDay: '30', lastStatementOn: '2026-04-01', openingMinimum: '', minRule: 'interest_fees_plus_pct', minPct: '5', minFloor: '20000' },
     });
     expect(Object.keys(form).sort()).toEqual(['card', 'modality', 'rate']);
-    expect(Object.keys(form.card).sort()).toEqual(['dueDay', 'minFloor', 'minPct', 'minRule', 'statementDay']);
+    expect(Object.keys(form.card).sort()).toEqual(['dueDay', 'lastStatementOn', 'minFloor', 'minPct', 'minRule', 'openingMinimum', 'statementDay']);
   });
 
   it('keeps the convention the rate was stated in', () => {
@@ -145,6 +146,46 @@ describe('previewCorrection: the draft and the preview', () => {
     expect(run({ debt, events: statements.slice(0, 1), cardChange: { dueDay: '25' } }).warning).toBe('Tienes 1 extracto registrado; revisa que coincida.');
     expect(run({ debt, events: statements, cardChange: { minPct: '3' } }).warning).toBeNull();
     expect(run({ debt, events: [], cardChange: { statementDay: '20' } }).warning).toBeNull();
+  });
+});
+
+describe('previewCorrection: the last statement of a card', () => {
+  // The owner card: registered 2026-10-16 with the balance of the 2026-10-15 statement (day 15, due day 3).
+  const OWNER_TODAY = '2026-10-16';
+  const owner = () => makeCard({ termsJson: serializeTerms({ ...CARD_TERMS, principalMinor: 3268319, openedOn: OWNER_TODAY, card: { ...CARD_TERMS.card, statementDay: 15, dueDay: 3, deferred: [] } }) });
+  const runOwner = (cardChange) => {
+    const debt = owner();
+    const base = initialCorrectionForm(debt, [], OWNER_TODAY);
+    return previewCorrection({ debt, events: [], form: { ...base, card: { ...base.card, ...cardChange } }, today: OWNER_TODAY });
+  };
+
+  it('prefills the date the card was registered from', () => {
+    expect(initialCorrectionForm(owner(), [], OWNER_TODAY).card).toMatchObject({ lastStatementOn: '2026-10-16', openingMinimum: '' });
+  });
+
+  it('moves the card to its 2026-10-15 statement: the minimum is due 2026-11-03', () => {
+    const result = runOwner({ lastStatementOn: '2026-10-15', openingMinimum: '180000' });
+    expect(result.issue).toBeNull();
+    expect(result.draft.fields).toEqual({ card: { lastStatementOn: '2026-10-15', openingMinimumMinor: 180000 } });
+    expect(result.after).toMatchObject({ nextDueOn: '2026-11-03', nextTotalMinor: 180000 });
+    expect(result.rows).toEqual(expect.arrayContaining([
+      { label: 'Fecha del último corte', before: formatDueDate('2026-10-16'), after: formatDueDate('2026-10-15') },
+      { label: 'Pago mínimo del extracto', before: null, after: '$ 180.000' },
+      { label: 'Próximo pago', before: 'Sin pago pendiente', after: formatDueDate('2026-11-03') },
+      { label: 'Próximo pago mínimo', before: '$ 0', after: '$ 180.000' },
+    ]));
+  });
+
+  it.each([
+    ['a date that is not a statement day', { lastStatementOn: '2026-10-14' }, 'día de corte'],
+    ['a statement after today', { lastStatementOn: '2026-11-15' }, 'posterior a hoy'],
+    ['an empty date', { lastStatementOn: '' }, 'fecha del último corte'],
+    ['a minimum above the balance', { lastStatementOn: '2026-10-15', openingMinimum: '4000000' }, 'saldo'],
+    ['a minimum with decimals', { lastStatementOn: '2026-10-15', openingMinimum: '10.5' }, 'pesos'],
+  ])('explains %s and builds no draft', (_label, cardChange, text) => {
+    const result = runOwner(cardChange);
+    expect(result.draft).toBeNull();
+    expect(result.issue.toLowerCase()).toContain(text);
   });
 });
 

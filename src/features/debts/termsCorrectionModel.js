@@ -1,6 +1,6 @@
 import { ValidationError, buildCorrection, modalityOf, previewChange, versionTermsAt } from '@finance-core';
 import { formatMoney } from '../../shared/lib/format';
-import { formatDecimal, formatStatedRate } from './debtLabels';
+import { formatDecimal, formatDueDate, formatStatedRate } from './debtLabels';
 import { impactedFor } from './rateChangeModel';
 import { rateEcho, toRate } from './wizard/wizardModel';
 
@@ -19,6 +19,9 @@ const DUE_ISSUE = 'Escribe el día límite de pago.';
 const DAY_ISSUE = 'Los días de corte y de pago van del 1 al 31.';
 const PCT_ISSUE = 'El porcentaje del pago mínimo va de 0 a 100.';
 const FLOOR_ISSUE = 'El piso del pago mínimo debe ser un valor en pesos, sin decimales.';
+const LAST_STATEMENT_ISSUE = 'Escribe la fecha del último corte.';
+const OPENING_MIN_PESOS = 'El pago mínimo del extracto debe ser un valor en pesos, sin decimales.';
+const OPENING_MIN_ABOVE = 'El pago mínimo del extracto no puede ser mayor que el saldo de la tarjeta.';
 const CANNOT_PREVIEW = 'No se pudo calcular la corrección con esos datos. Revisa los valores.';
 
 /** Legal modalities by their name for the user (they set the usury cap that applies). */
@@ -54,6 +57,9 @@ export function initialCorrectionForm(debt, events, today) {
     card: card ? {
       statementDay: asText(card.statementDay),
       dueDay: asText(card.dueDay),
+      // The statement the card was registered from (its opening date) and that statement's minimum, blank when not stated.
+      lastStatementOn: terms.openedOn,
+      openingMinimum: card.openingMinimumMinor === undefined ? '' : asText(card.openingMinimumMinor),
       minRule: card.minPayment.rule,
       minPct: asText(card.minPayment.pct),
       minFloor: asText(card.minPayment.floorMinor),
@@ -67,6 +73,8 @@ const FIELD_LINES = [
   ['modality', 'Modalidad', (fields) => (fields.modality ? MODALITY_LABELS[fields.modality] ?? fields.modality : null)],
   ['statementDay', 'Día de corte', (fields) => (fields.card?.statementDay === undefined ? null : asText(fields.card.statementDay))],
   ['dueDay', 'Día de pago', (fields) => (fields.card?.dueDay === undefined ? null : asText(fields.card.dueDay))],
+  ['lastStatementOn', 'Fecha del último corte', (fields) => (fields.card?.lastStatementOn === undefined ? null : formatDueDate(fields.card.lastStatementOn))],
+  ['openingMinimum', 'Pago mínimo del extracto', (fields) => (fields.card?.openingMinimumMinor === undefined ? null : formatMoney(fields.card.openingMinimumMinor))],
   ['minRule', 'Cálculo del pago mínimo', (fields) => (fields.card?.minPayment?.rule ? RULE_LABELS[fields.card.minPayment.rule] : null)],
   ['minPct', 'Pago mínimo', (fields) => (fields.card?.minPayment?.pct === undefined ? null : percentText(fields.card.minPayment.pct))],
   ['minFloor', 'Piso del pago mínimo', (fields) => (fields.card?.minPayment?.floorMinor === undefined ? null : formatMoney(fields.card.minPayment.floorMinor))],
@@ -82,7 +90,7 @@ export function describeCorrection(fields, previous = {}) {
   return FIELD_LINES.filter(([, , read]) => read(fields) !== null).map(([key, label, read]) => ({ key, label, before: read(previous), after: read(fields) }));
 }
 
-function cardFieldsOf(card) {
+function cardFieldsOf(card, balanceMinor) {
   const days = [['statementDay', card.statementDay, STATEMENT_ISSUE], ['dueDay', card.dueDay, DUE_ISSUE]];
   const fields = {};
   for (const [key, text, missing] of days) {
@@ -90,6 +98,15 @@ function cardFieldsOf(card) {
     const day = number(text);
     if (!Number.isSafeInteger(day) || day < 1 || day > 31) return { issue: DAY_ISSUE };
     fields[key] = day;
+  }
+  // The core checks that the date is a statement date of the card and not after today (see CODE_ISSUES).
+  if (blank(card.lastStatementOn)) return { issue: LAST_STATEMENT_ISSUE };
+  fields.lastStatementOn = card.lastStatementOn;
+  if (!blank(card.openingMinimum)) {
+    const minimum = number(card.openingMinimum);
+    if (!Number.isSafeInteger(minimum) || minimum < 0) return { issue: OPENING_MIN_PESOS };
+    if (minimum > balanceMinor) return { issue: OPENING_MIN_ABOVE };
+    fields.openingMinimumMinor = minimum;
   }
   const minPayment = { rule: card.minRule };
   if (card.minRule !== 'installments_due') {
@@ -103,19 +120,27 @@ function cardFieldsOf(card) {
   return { fields: { ...fields, minPayment } };
 }
 
-const CODE_ISSUES = { invalid_rate: BAD_RATE, invalid_card: DAY_ISSUE };
+const CODE_ISSUES = {
+  invalid_rate: BAD_RATE,
+  invalid_card: DAY_ISSUE,
+  invalid_date: 'Escribe una fecha real para el último corte.',
+  not_a_statement_date: 'La fecha del último corte debe caer en tu día de corte (o en el último día de un mes más corto).',
+  last_statement_in_future: 'La fecha del último corte no puede ser posterior a hoy.',
+};
 
 function figureRows(before, after, isCard) {
   const rows = [];
+  const dueText = (snapshot) => (snapshot.nextDueOn ? formatDueDate(snapshot.nextDueOn) : 'Sin pago pendiente');
   if (!isCard) rows.push({ label: 'Próxima cuota', before: formatMoney(before.installmentMinor), after: formatMoney(after.installmentMinor) });
-  else if (before.nextTotalMinor > 0 || after.nextTotalMinor > 0) rows.push({ label: 'Próximo pago mínimo', before: formatMoney(before.nextTotalMinor), after: formatMoney(after.nextTotalMinor) });
+  if (isCard && before.nextDueOn !== after.nextDueOn) rows.push({ label: 'Próximo pago', before: dueText(before), after: dueText(after) });
+  if (isCard && (before.nextTotalMinor > 0 || after.nextTotalMinor > 0)) rows.push({ label: 'Próximo pago mínimo', before: formatMoney(before.nextTotalMinor), after: formatMoney(after.nextTotalMinor) });
   rows.push({ label: 'Intereses por pagar', before: formatMoney(before.remainingInterestMinor), after: formatMoney(after.remainingInterestMinor) });
   return rows;
 }
 
 function statementsWarning(draft, recorded) {
   const cycle = draft.fields.card;
-  if (!cycle || (cycle.statementDay === undefined && cycle.dueDay === undefined) || recorded === 0) return null;
+  if (!cycle || (cycle.statementDay === undefined && cycle.dueDay === undefined && cycle.lastStatementOn === undefined) || recorded === 0) return null;
   return recorded === 1 ? 'Tienes 1 extracto registrado; revisa que coincida.' : `Tienes ${recorded} extractos registrados; revisa que coincidan.`;
 }
 
@@ -135,7 +160,7 @@ export function previewCorrection({ debt, events, form, today }) {
 
   const fields = { rate: toRate(form.rate), modality: form.modality };
   if (isCard) {
-    const card = cardFieldsOf(form.card);
+    const card = cardFieldsOf(form.card, terms.principalMinor);
     if (card.issue) return { ...none, issue: card.issue };
     fields.card = card.fields;
   }

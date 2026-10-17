@@ -22,6 +22,23 @@ const disbursement = event('e0', 'disbursement', '2026-01-10', 10000000);
 
 const run = ({ debt = card(), events = [], draft }) => previewCorrection({ debt, events, today: TODAY, draft });
 
+describe('previewCorrection: the last statement of a card', () => {
+  const owner = () => row({ ...cardTerms, principalMinor: 3268319, openedOn: '2026-10-16', card: { ...cardTerms.card, statementDay: 15, dueDay: 3, deferred: [] } });
+
+  it('lists the date of the last statement and its minimum when the draft corrects them', () => {
+    const result = previewCorrection({ debt: owner(), events: [], today: '2026-10-16', draft: { card: { lastStatementOn: '2026-10-15', openingMinimumMinor: 180000 } } });
+    const text = plain(result.text);
+    expect(result.ok).toBe(true);
+    expect(text).toContain('Fecha del último corte: 2026-10-16 → 2026-10-15');
+    expect(text).toContain('Pago mínimo del extracto: sin dato → $ 180.000');
+  });
+
+  it('explains a date that is not a statement day, or one after today', () => {
+    expect(previewCorrection({ debt: owner(), events: [], today: '2026-10-16', draft: { card: { lastStatementOn: '2026-10-14' } } }).issue).toContain('día de corte');
+    expect(previewCorrection({ debt: owner(), events: [], today: '2026-10-16', draft: { card: { lastStatementOn: '2026-11-15' } } }).issue).toContain('posterior a hoy');
+  });
+});
+
 describe('previewCorrection', () => {
   it('previews a statement day of 20 instead of 15, with the retroactive note and the question, and no backdated note when no cost changes', () => {
     const result = run({ draft: { card: { statementDay: 20 } } });
