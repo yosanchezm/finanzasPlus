@@ -194,7 +194,7 @@ export function validateTerms(input) {
   // Only written when present, so terms stored before mora existed serialize byte-identically.
   if (input.late !== undefined) terms.late = normalizeLate(input.late);
   if (input.modality !== undefined) terms.modality = oneOf(input.modality, LEGAL_MODALITIES, 'modality');
-  if (input.card !== undefined || kind === 'card') terms.card = normalizeCard(input.card);
+  if (input.card !== undefined || kind === 'card') terms.card = normalizeCard(input.card, { principalMinor });
   return terms;
 }
 

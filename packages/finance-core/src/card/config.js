@@ -36,12 +36,14 @@ function normalizePurchase(item, earlier) {
 
 /**
  * Validates the card block of the terms and returns a normalized copy with
- * defaults applied (`minPayment`: 5% of the revolving balance, no floor).
+ * defaults applied (`minPayment`: 5% of the revolving balance, no floor). `openingMinimumMinor` is the minimum payment of
+ * the statement the card was registered from (see the opening statement of the card projector), never above the balance.
  * @param {object} input
- * @returns {{ statementDay: number, dueDay: number, minPayment: object, deferred: object[], limitMinor?: number, advanceRate?: object }}
+ * @param {{ principalMinor?: number }} [debt] The opening balance, to bound `openingMinimumMinor`.
+ * @returns {{ statementDay: number, dueDay: number, minPayment: object, deferred: object[], limitMinor?: number, advanceRate?: object, openingMinimumMinor?: number }}
  * @throws {ValidationError} `invalid_card`
  */
-export function normalizeCard(input) {
+export function normalizeCard(input, { principalMinor = Number.MAX_SAFE_INTEGER } = {}) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) throw bad('a card debt needs its card settings (statement and due day)');
   if (!isInteger(input.statementDay, 1, 31) || !isInteger(input.dueDay, 1, 31)) throw bad('statementDay and dueDay must be whole days 1..31');
   const { rule = 'interest_fees_plus_pct', pct = 5, floorMinor = 0 } = input.minPayment ?? {};
@@ -54,6 +56,11 @@ export function normalizeCard(input) {
     card.limitMinor = input.limitMinor;
   }
   if (input.advanceRate !== undefined) card.advanceRate = normalizeRate(input.advanceRate);
+  // Only written when present, so terms stored before the opening statement existed serialize byte-identically.
+  if (input.openingMinimumMinor !== undefined) {
+    if (!isInteger(input.openingMinimumMinor, 0, principalMinor)) throw bad('openingMinimumMinor must be whole pesos from 0 up to the opening balance');
+    card.openingMinimumMinor = input.openingMinimumMinor;
+  }
   const deferred = input.deferred ?? [];
   if (!Array.isArray(deferred) || deferred.length > MAX_OPENING_PURCHASES) throw bad(`deferred must list at most ${MAX_OPENING_PURCHASES} purchases`);
   for (const item of deferred) card.deferred.push(normalizePurchase(item, card.deferred));

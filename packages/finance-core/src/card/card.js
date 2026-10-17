@@ -1,4 +1,4 @@
-import { addMonthsClamped, compareIso, daysBetween } from '../calendar.js';
+import { addMonthsClamped, compareIso, daysBetween, isIsoDate } from '../calendar.js';
 import { evaluateCharges } from '../charges.js';
 import { ValidationError } from '../errors.js';
 import { BUCKETS, allocate, emptyBuckets } from '../ledger/allocate.js';
@@ -27,6 +27,9 @@ import { accrueCardLate, lateView, markDue, newCardLate, newLateItem, pendingLat
 //     reduces the shortfall (interest is decided by the balance on the due date).
 //   - An `adjustment` is the statement's truth: it is applied after that day's
 //     close, resets tranche balances and absorbs the rest in the revolving balance.
+//   - Opening statement: a card registered ON one of its statement dates starts from the bank statement the user
+//     copied. That close bills nothing new (its interest, fees and IVA are already inside the opening balance), asks
+//     `card.openingMinimumMinor` or the minimum rule over that balance, and is due on its usual due date.
 //   - Mora (F3, `./late.js`) accrues on the capital of the minimum left unpaid after the due date, until the
 //     next close, where it is billed as a line of that statement. A billed mora line accrues nothing more.
 
@@ -70,6 +73,20 @@ export function minimumPayment(minPayment, cycle) {
   if (rule === 'installments_due') amount = contractualMinor;
   else if (rule === 'pct_balance') amount = (payInFullMinor * pct) / 100;
   return Math.min(payInFullMinor, Math.max(roundUnit(amount, unit), floorMinor));
+}
+
+/**
+ * The last statement date on or before `on` for a card that closes on `statementDay` (clamped to short months).
+ * @param {number} statementDay 1..31
+ * @param {string} on `YYYY-MM-DD`
+ * @returns {string}
+ * @throws {ValidationError} `invalid_card` or `invalid_date`
+ */
+export function lastStatementOn(statementDay, on) {
+  if (!isIsoDate(on)) throw new ValidationError('invalid_date', `expected a real YYYY-MM-DD date, got ${String(on)}`);
+  const month = on.slice(0, 7);
+  const { statementOn } = cycleDates(statementDay, statementDay, month);
+  return compareIso(statementOn, on) <= 0 ? statementOn : addMonthsClamped(`${month}-01`, -1, statementDay);
 }
 
 /** Closed cycles up to `asOf` (statements on or after the opening date) plus the next one. */
@@ -296,6 +313,41 @@ function closeCycle(state, cycle) {
   });
 }
 
+/**
+ * Close of the opening statement: the copied statement bills no interest, fee, IVA, installment or mora of its own.
+ * Its minimum is the stated one (never above the statement) or the card's rule over the opening balance.
+ */
+function closeOpeningStatement(state, cycle) {
+  const { unit } = state;
+  state.billed += state.pending;
+  state.pending = 0;
+  state.closedBilled = state.billed;
+  state.interestBase = null;
+  const payInFull = payInFullOf(state);
+  const stated = state.card.openingMinimumMinor;
+  const minimum = stated === undefined
+    ? minimumPayment(state.card.minPayment, { contractualMinor: 0, revolvingMinor: state.billed + sum(ofType(state, 'advance'), (t) => t.balanceMinor), payInFullMinor: payInFull, unit })
+    : Math.min(stated, payInFull);
+  state.cycles.push({
+    ...cycle,
+    opening: true,
+    interest: 0,
+    bases: { revolving: 0, excluded: 0, lateExcluded: 0 },
+    deferred: 0,
+    charges: 0,
+    taxes: 0,
+    lateInterest: 0,
+    late: newLateItem(unit, cycle.dueOn),
+    chargeLines: [],
+    total: 0,
+    payInFull,
+    minimum,
+    covered: 0,
+    eventIds: [],
+    closing: balanceOf(state),
+  });
+}
+
 function trancheView(state) {
   const revolving = { id: REVOLVING, type: REVOLVING, label: 'Revolving balance', balanceMinor: state.billed + state.pending, rate: state.rate };
   const others = state.tranches.map(({ rows, next, ...tranche }) => (tranche.type === 'deferred' ? { ...tranche, installmentsLeft: rows.length - next } : tranche));
@@ -345,6 +397,8 @@ export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }
   };
   for (const item of terms.card.deferred) openDeferred(state, { openedOn: terms.openedOn, ...item });
   const { cycles, next } = cyclesThrough(terms.card, terms.openedOn, asOf);
+  // Opened on a statement date: the first close is the statement the user copied (see the header).
+  const opening = cycles.length > 0 && cycles[0].statementOn === terms.openedOn ? cycles[0] : null;
   const moments = events.map((event) => ({ at: event.effectiveOn, rank: event.kind === 'adjustment' ? 3 : 0, event }));
   for (const cycle of cycles) {
     moments.push({ at: cycle.statementOn, rank: 2, close: cycle });
@@ -357,7 +411,8 @@ export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }
   for (const moment of moments) {
     accrueCardLate(state, moment.at); // days up to the moment are accrued under the policy in force before it
     if (moment.close) {
-      closeCycle(state, moment.close);
+      if (moment.close === opening) closeOpeningStatement(state, moment.close);
+      else closeCycle(state, moment.close);
       // A due date clamped onto the statement day is marked right after the close.
       if (moment.close.dueOn === moment.close.statementOn) markDue(state, state.cycles[state.cycles.length - 1]);
     } else if (moment.due) {
@@ -389,6 +444,7 @@ export function projectCard({ debt, terms, events, asOf, legal = DEFAULT_LEGAL }
       period: cycle.period,
       statementOn: cycle.statementOn,
       dueOn: cycle.dueOn,
+      ...(cycle.opening ? { opening: true } : {}),
       interestMinor: cycle.interest,
       revolvingBaseMinor: cycle.bases.revolving,
       excludedBaseMinor: cycle.bases.excluded,

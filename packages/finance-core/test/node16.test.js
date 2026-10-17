@@ -211,6 +211,7 @@ describe('public barrel (index.js)', () => {
         'evaluateCharges',
         'explainFacts',
         'isIsoDate',
+        'lastStatementOn',
         'lateEAOn',
         'lateRateOn',
         'legalOf',
