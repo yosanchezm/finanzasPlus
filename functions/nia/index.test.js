@@ -979,3 +979,68 @@ describe('/ayuda in the Nia entry point', () => {
     expect(help).toBe(ayuda);
   });
 });
+
+describe('categories in the Nia entry point', () => {
+  const expense = (category) => ({
+    intent: 'transaction', action: 'create',
+    transaction: { type: 'expense', amountMinor: 25000, currency: 'COP', occurredAt: '2026-10-13T12:00:00.000Z', merchant: 'Almuerzo', category, ownerScope: 'you', note: null, confidence: 0.9, missingFields: [] },
+  });
+  const seedCategories = () => fake.tables.categories.push(
+    { $id: 'c-food', householdId: 'h1', name: 'Alimentación', kind: 'need', archived: false },
+    { $id: 'c-home', householdId: 'h1', name: 'Hogar', kind: 'need', archived: false },
+    { $id: 'c-old', householdId: 'h1', name: 'Comida', kind: 'need', archived: true },
+  );
+
+  it('gives the model only the active categories and tells it never to invent one', async () => {
+    fake = makeNet([expense('Alimentación')]);
+    seedCategories();
+
+    await run(message('almorcé por 25 mil'));
+
+    expect(fake.prompts[0]).toContain('Alimentación');
+    expect(fake.prompts[0]).toContain('Hogar');
+    expect(fake.prompts[0]).not.toContain('Comida');
+    expect(fake.prompts[0]).toMatch(/Nunca inventes una categoría/);
+  });
+
+  it('files a loosely written category under the existing one and creates no category', async () => {
+    fake = makeNet([expense('  alimentacion ')]);
+    seedCategories();
+
+    await run(message('almorcé por 25 mil'));
+    expect(sent()[0].text).toContain('Categoría: Alimentación');
+    expect(buttons(sent()[0])).toContain('nia:confirm');
+    await run(press('nia:confirm'));
+
+    expect(fake.tables.transactions).toEqual([expect.objectContaining({ categoryId: 'c-food' })]);
+    expect(fake.tables.categories).toHaveLength(3);
+    expect(sent()[1].text).toContain('en Alimentación');
+  });
+
+  it('asks for an existing category instead of creating an unknown or archived one', async () => {
+    fake = makeNet([expense('Comida')]);
+    seedCategories();
+
+    await run(message('almorcé por 25 mil'));
+    expect(sent()[0].text).toContain('una categoría existente');
+    expect(sent()[0].text).toContain('Categorías disponibles: Alimentación, Hogar');
+    expect(sent()[0].reply_markup).toBeUndefined();
+    await run(press('nia:confirm'));
+
+    expect(fake.tables.transactions).toHaveLength(0);
+    expect(fake.tables.categories).toHaveLength(3);
+  });
+
+  it('refuses to save a confirmed pending whose category was archived after the preview', async () => {
+    fake = makeNet([expense('Alimentación')]);
+    seedCategories();
+
+    await run(message('almorcé por 25 mil'));
+    fake.tables.categories[0].archived = true;
+    await run(press('nia:confirm'));
+
+    expect(fake.tables.transactions).toHaveLength(0);
+    expect(fake.tables.categories).toHaveLength(3);
+    expect(sent()[1].text).toContain('una categoría existente');
+  });
+});

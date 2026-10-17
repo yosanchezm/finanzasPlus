@@ -3,6 +3,7 @@
 // anything not re-exported below is internal.
 export { CommitError, TermsTooLarge, ValidationError } from './src/errors.js';
 export { assertMinor, roundUnit, sumMinor } from './src/money.js';
+export { activeCategories, findActiveCategory, foldCategoryName } from './src/categories.js';
 export {
   PERIODICITIES,
   addDays,

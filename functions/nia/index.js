@@ -5,6 +5,7 @@ import { parseThresholds } from './debt/cashflow.js';
 import { paraphraseEnabled } from './debt/explain/paraphrase.js';
 import { glossaryTopic } from './debt/explain/router.js';
 import { STEP_RECORDED } from './debt/advisor/chain.js';
+import { activeCategories, findActiveCategory } from '../../packages/finance-core/index.js';
 import { answersOpenSetup, cancelDebtChain, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
@@ -461,7 +462,16 @@ function conversationContext(history) {
     .join('\n');
 }
 
-function assistantPrompt(input, previous, history, profile, attachment) {
+function categoryRule(categories) {
+  const names = activeCategories(categories).map((category) => category.name);
+  if (!names.length) return 'El hogar todavía no tiene categorías: deja category en null y el sistema pedirá crearla.';
+  return [
+    `Categorías existentes del hogar: ${names.join(', ')}.`,
+    'En transaction.category y budget.category usa EXACTAMENTE uno de esos nombres: el más cercano al gasto o ingreso (por ejemplo, un almuerzo va en la categoría de alimentación si existe). Nunca inventes una categoría nueva ni un sinónimo; solo el intent category con action create crea categorías, y solo cuando el usuario lo pide explícitamente.',
+  ].join('\n');
+}
+
+function assistantPrompt(input, previous, history, profile, attachment, categories) {
   return [
     'Eres Nia, una asistente inteligente de finanzas personales para un hogar de dos personas.',
     `La fecha y hora actual en ${config.timezone} es: ${localNow()}.`,
@@ -472,6 +482,7 @@ function assistantPrompt(input, previous, history, profile, attachment) {
     'Para debt solo identifica el intent: otra consulta extraerá los datos y el sistema hará los cálculos. Un pago a una deuda no es un transaction.',
     'Si la interpretación pendiente anterior es una solicitud de deuda (kind debt) que espera datos, un mensaje corto que responde sus preguntas (por ejemplo “el corte es el 15” o “no sé”) es debt.',
     'Para transaction, budget, goal o category, nunca afirmes que guardaste algo: el sistema mostrará una vista previa y esperará confirmación.',
+    categoryRule(categories),
     'Para transaction, interpreta texto y recibos en español. Nunca inventes una fecha: si no indica hoy, ayer, una fecha concreta o una referencia resoluble, marca date como faltante.',
     'Resuelve referencias como ayer, el viernes pasado o la semana pasada usando la fecha actual y la zona horaria. Si son ambiguas, marca date como faltante.',
     'El responsable debe ser you, partner o shared. Si no se aclara, usa null; el sistema aplicará el responsable configurado para quien envió el mensaje.',
@@ -503,8 +514,8 @@ async function geminiJson(parts, temperature = 0.2) {
   return parseJson(text.replace(/^```json\s*|```$/g, '').trim(), null) || (() => { throw new Error('Gemini devolvió JSON inválido.'); })();
 }
 
-async function askGemini(input, attachment, previous, history, profile) {
-  const parts = [{ text: assistantPrompt(input, previous, history, profile, attachment) }];
+async function askGemini(input, attachment, previous, history, profile, categories) {
+  const parts = [{ text: assistantPrompt(input, previous, history, profile, attachment, categories) }];
   if (attachment) {
     parts.push({ inline_data: { mime_type: attachment.mimeType, data: attachment.bytes.toString('base64') } });
   }
@@ -673,9 +684,25 @@ function sameText(left, right) {
 }
 
 function findCategory(snapshot, nameOrId) {
-  if (!nameOrId) return null;
-  const value = String(nameOrId).trim();
-  return snapshot.categories.find((item) => item.id === value) || snapshot.categories.find((item) => sameText(item.name, value)) || null;
+  return findActiveCategory(snapshot.categories, nameOrId);
+}
+
+async function listCategories() {
+  return listRows(TABLES.categories, [queryEqual('householdId', config.householdId), queryLimit(100)]);
+}
+
+// The pending keeps the canonical name and id of an existing active category; anything else asks for one.
+function resolvePendingCategory(pending, categories) {
+  if (!pending.category) return pending;
+  const category = findActiveCategory(categories, pending.category);
+  if (category) return { ...pending, category: category.name, categoryId: category.$id };
+  const missingFields = [...new Set([...pending.missingFields, 'categoryNotFound'])];
+  return { ...pending, categoryId: null, missingFields };
+}
+
+function availableCategoriesLine(categories) {
+  const names = activeCategories(categories).map((category) => category.name);
+  return names.length ? `Categorías disponibles: ${names.join(', ')}.` : 'Todavía no hay categorías: crea una primero (por ejemplo «crear categoría Mercado»).';
 }
 
 function findGoal(snapshot, operation) {
@@ -863,25 +890,6 @@ function listReply(resource, snapshot) {
   return 'No encontré información para mostrar.';
 }
 
-async function ensureCategory(categoryName, type) {
-  if (!categoryName) return null;
-  const rows = await listRows(TABLES.categories, [
-    queryEqual('householdId', config.householdId),
-    queryEqual('name', categoryName),
-    queryLimit(1),
-  ]);
-  if (rows[0]) return rows[0].$id;
-  const row = await createRow(TABLES.categories, {
-    householdId: config.householdId,
-    name: categoryName.slice(0, 80),
-    kind: type === 'income' ? 'income' : 'need',
-    color: '#73f0b5',
-    icon: 'tag',
-    archived: false,
-  }, [permission('read', `team:${config.teamId}`), permission('update', `team:${config.teamId}`)]);
-  return row.$id;
-}
-
 async function uploadAttachment(attachment, transactionId) {
   const form = new FormData();
   form.append('fileId', randomId());
@@ -993,7 +1001,14 @@ async function confirmPending(chatId, actorId, profile, updateId, expectedId = n
     await sendMessage(chatId, `Antes de guardarlo necesito: ${pending.missingFields.map(missingLabel).join(', ')}.`);
     return;
   }
-  const categoryId = await ensureCategory(pending.category, pending.type);
+  // Re-read on Confirm: the category may have been archived (merged) since the preview.
+  const categories = await listCategories();
+  const category = findActiveCategory(categories, pending.categoryId) || findActiveCategory(categories, pending.category);
+  if (!category) {
+    await sendMessage(chatId, `Antes de guardarlo necesito una categoría existente. ${availableCategoriesLine(categories)}`);
+    return;
+  }
+  const categoryId = category.$id;
   const providerRef = `telegram:${updateId || Date.now()}`;
   const transaction = await createRow(TABLES.transactions, compactObject({
     householdId: config.householdId,
@@ -1029,7 +1044,7 @@ async function confirmPending(chatId, actorId, profile, updateId, expectedId = n
     try { await updateRow(TABLES.events, pending._eventId, { status: 'confirmed', transactionId: transaction.$id }); } catch (eventError) { writeError(eventError.message); }
   }
   await saveSession(chatId, actorId, 'completed', null);
-  await sendMessage(chatId, `Listo: registré ${pending.type === 'income' ? 'el ingreso' : 'el movimiento'} de ${money(pending.amountMinor, pending.currency)} en ${pending.category}.${attachmentMessage}`);
+  await sendMessage(chatId, `Listo: registré ${pending.type === 'income' ? 'el ingreso' : 'el movimiento'} de ${money(pending.amountMinor, pending.currency)} en ${category.name}.${attachmentMessage}`);
 }
 
 async function cancelPending(chatId, actorId) {
@@ -1072,7 +1087,8 @@ async function handleTextOrReceipt(message, updateId, profile) {
     return;
   }
   const inputHash = createHash('sha256').update(`${config.householdId}:telegram:${updateId || `${actorId}:${text}:${message.date || ''}`}`).digest('hex');
-  const raw = await askGemini(text, attachment, previous, history, profile);
+  const categories = await listCategories();
+  const raw = await askGemini(text, attachment, previous, history, profile, categories);
   const intent = intentFor(raw, attachment);
   const userContext = text || '[Adjunto una imagen o documento]';
 
@@ -1135,13 +1151,13 @@ async function handleTextOrReceipt(message, updateId, profile) {
   }
 
   if (await getEvent(inputHash)) return;
-  const pending = normaliseExtraction(raw?.transaction || raw, profile, previous);
+  const pending = resolvePendingCategory(normaliseExtraction(raw?.transaction || raw, profile, previous), categories);
   pending.attachment = attachment ? { fileId: attachment.fileId, mimeType: attachment.mimeType, name: attachment.name } : previous?.attachment;
   const eventStatus = pending.missingFields.length ? 'needs_clarification' : 'awaiting_confirmation';
   const event = await recordEvent(pending, profile.appwriteUserId, inputHash, eventStatus);
   pending._eventId = event.$id;
   const reply = pending.missingFields.length
-    ? `${pendingSummary(pending)}\n\nPara completar el registro necesito: ${pending.missingFields.map(missingLabel).join(', ')}. Respóndeme con esos datos.`
+    ? `${pendingSummary(pending)}\n\nPara completar el registro necesito: ${pending.missingFields.map(missingLabel).join(', ')}. Respóndeme con esos datos.${pending.missingFields.includes('categoryNotFound') ? `\n${availableCategoriesLine(categories)}` : ''}`
     : pendingSummary(pending);
   await saveSession(
     chatId,
