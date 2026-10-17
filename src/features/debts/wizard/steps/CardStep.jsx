@@ -34,8 +34,12 @@ function Purchases({ items, onChange }) {
   );
 }
 
-/** Statement and due day, minimum-payment rule, management fee with its IVA link, and the purchases the card already has. */
-export default function CardStep({ card, dispatch }) {
+/**
+ * Statement and due day, the last statement the balance comes from (its date defaults to the latest statement day, see
+ * `cardStatementOn`, and its minimum is optional), minimum-payment rule, management fee with its IVA link, and the purchases
+ * the card already has.
+ */
+export default function CardStep({ card, statementOn, dispatch }) {
   const set = (patch) => dispatch({ type: 'card', patch });
   const bind = (key) => ({ value: card[key], onChange: (event) => set({ [key]: event.target.value }) });
 
@@ -46,6 +50,14 @@ export default function CardStep({ card, dispatch }) {
         <TextField label="Día límite de pago" type="number" inputMode="numeric" placeholder="Ej. 30" inputClassName="tabular-nums" {...bind('dueDay')} />
       </div>
       <p className="-mt-3 text-[13px] text-ink-muted">Si el mes es más corto, usamos su último día.</p>
+
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
+          <TextField label="Fecha del último corte" type="date" value={statementOn} onChange={(event) => set({ lastStatementOn: event.target.value })} />
+          <TextField label="Pago mínimo del extracto (opcional)" {...money} {...bind('openingMinimum')} />
+        </div>
+        <p className="text-[13px] text-ink-muted">El saldo que escribiste es el de ese extracto. Si no tienes el pago mínimo a la mano, lo calculamos con tu regla.</p>
+      </div>
 
       <div className="flex flex-col gap-3">
         <SelectField label="Cómo se calcula tu pago mínimo" {...bind('minRule')}>

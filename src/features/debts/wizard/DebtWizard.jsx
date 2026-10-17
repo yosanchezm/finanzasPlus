@@ -10,7 +10,7 @@ import KindStep from './steps/KindStep';
 import PlanStep from './steps/PlanStep';
 import RateStep from './steps/RateStep';
 import ReviewStep from './steps/ReviewStep';
-import { STEP_TITLES, evaluate, initialWizard, rateEcho, stepsFor, wizardReducer } from './wizardModel';
+import { STEP_TITLES, cardStatementOn, evaluate, initialWizard, rateEcho, stepsFor, wizardReducer } from './wizardModel';
 
 /**
  * "Nueva deuda" dialog. Presentational: it validates through the wizard model and hands the
@@ -43,7 +43,7 @@ export default function DebtWizard({ saveState, onSubmit, onClose, legal, today 
       case 'kind': return <KindStep kind={state.kind} onPick={(kind) => { dispatch({ type: 'kind', kind }); dispatch({ type: 'step', to: 'next' }); }} />;
       case 'basics': return <BasicsStep state={state} set={set} />;
       case 'rate': return <RateStep rate={state.rate} echo={rateEcho(state.rate, state.kind === 'mortgage' ? 'mortgage' : 'consumer', state.openedOn, legal)} onChange={(patch) => dispatch({ type: 'rate', patch })} />;
-      case 'card': return <CardStep card={state.card} dispatch={dispatch} />;
+      case 'card': return <CardStep card={state.card} statementOn={cardStatementOn(state)} dispatch={dispatch} />;
       case 'plan': return <PlanStep state={state} set={set} withLate legal={legal} />;
       case 'charges': return <ChargesStep charges={state.charges} dispatch={dispatch} />;
       default: return <ReviewStep result={result} />;

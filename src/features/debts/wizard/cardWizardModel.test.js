@@ -1,15 +1,15 @@
 import { project } from '@finance-core';
 import { describe, expect, it } from 'vitest';
-import { evaluate, initialWizard, stepsFor, toTerms, wizardReducer } from './wizardModel';
+import { cardStatementOn, evaluate, initialWizard, stepsFor, toTerms, wizardReducer } from './wizardModel';
 
 const TODAY = '2026-10-12';
 const run = (actions, start = initialWizard(TODAY)) => actions.reduce(wizardReducer, start);
-const card = (patch = {}, set = {}) => run([
+const card = (patch = {}, set = {}, today = TODAY) => run([
   { type: 'kind', kind: 'card' },
   { type: 'set', patch: { name: 'Visa', principal: '500000', ...set } },
   { type: 'rate', patch: { value: '28' } },
   { type: 'card', patch: { statementDay: '15', dueDay: '30', fee: '9000', ...patch } },
-]);
+], initialWizard(today));
 const NEVERA = { label: 'Nevera', amount: '1200000', n: '12', rate: '0' };
 
 describe('card wizard model', () => {
@@ -58,13 +58,16 @@ describe('card wizard model', () => {
     ]);
   });
 
-  it('produces terms the card projector bills as the statement fixture does', () => {
-    const result = evaluate(card({ deferred: [NEVERA] }));
+  it('produces terms the card projector bills as the statement fixture does, after the copied opening statement', () => {
+    // Without mora, so the unpaid opening statement runs the plain revolving interest of the fixture.
+    const draft = card({ deferred: [NEVERA] });
+    const result = evaluate({ ...draft, late: { ...draft.late, mode: 'none' } });
     const projection = project({ terms: result.terms }, [], '2026-10-20');
 
     expect(result.issues).toEqual([]);
     expect(result.summary).toBeNull();
-    expect(projection.plan[0]).toMatchObject({ statementOn: '2026-10-15', interestMinor: 10392, principalMinor: 100000, chargesMinor: 9000, taxesMinor: 1710 });
+    expect(projection.plan[0]).toMatchObject({ statementOn: '2026-09-15', opening: true, interestMinor: 0, chargesMinor: 0 });
+    expect(projection.plan[1]).toMatchObject({ statementOn: '2026-10-15', interestMinor: 10392, principalMinor: 100000, chargesMinor: 9000, taxesMinor: 1710 });
   });
 
   it.each([
@@ -78,6 +81,50 @@ describe('card wizard model', () => {
     expect(issue.step).toBe(step);
     if (kind === 'missing') expect(issue.missing).toBe(true);
     else expect(issue.message.length).toBeGreaterThan(10);
+  });
+});
+
+describe('card wizard last statement', () => {
+  const owner = (patch = {}, set = {}) => card({ dueDay: '3', fee: '', ...patch }, { principal: '3268319', ...set }, '2026-10-16');
+
+  it('defaults the last statement date to the latest statement day on or before today', () => {
+    expect(cardStatementOn(owner())).toBe('2026-10-15');
+    expect(toTerms(owner()).openedOn).toBe('2026-10-15');
+    expect(cardStatementOn(card({}, {}, '2026-10-14'))).toBe('2026-09-15');
+    expect(cardStatementOn(card({}, {}, '2026-10-15'))).toBe('2026-10-15');
+  });
+
+  it('clamps the default to the end of a short month', () => {
+    expect(cardStatementOn(card({ statementDay: '31', dueDay: '10' }, {}, '2026-03-10'))).toBe('2026-02-28');
+    expect(cardStatementOn(card({ statementDay: '30', dueDay: '10' }, {}, '2026-03-01'))).toBe('2026-02-28');
+  });
+
+  it('has no default until the statement day is valid', () => {
+    expect(cardStatementOn(card({ statementDay: '' }))).toBe('');
+    expect(cardStatementOn(card({ statementDay: '40' }))).toBe('');
+  });
+
+  it('uses the date the user edits and the stated minimum of that statement', () => {
+    const terms = toTerms(owner({ lastStatementOn: '2026-09-15', openingMinimum: '180000' }));
+    expect(terms.openedOn).toBe('2026-09-15');
+    expect(terms.card.openingMinimumMinor).toBe(180000);
+    expect(toTerms(owner()).card).not.toHaveProperty('openingMinimumMinor');
+  });
+
+  it.each([
+    ['a date that is not a statement day', { lastStatementOn: '2026-10-14' }, {}],
+    ['a date after today', { lastStatementOn: '2026-11-15' }, {}],
+    ['a minimum above the balance', { openingMinimum: '4000000' }, {}],
+    ['a minimum without a balance', { openingMinimum: '1000' }, { principal: '' }],
+  ])('reports %s on the card step', (_label, patch, set) => {
+    const [issue] = evaluate(owner(patch, set)).issues;
+    expect(issue.step).toBe('card');
+    expect(issue.message.length).toBeGreaterThan(10);
+  });
+
+  it('previews the next payment: the copied statement is due on its due date with its minimum', () => {
+    expect(evaluate(owner()).cardPreview).toEqual({ lastStatementOn: '2026-10-15', nextDueOn: '2026-11-03', minimumMinor: 163416 });
+    expect(evaluate(owner({ openingMinimum: '180000' })).cardPreview.minimumMinor).toBe(180000);
   });
 });
 

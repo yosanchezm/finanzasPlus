@@ -1,6 +1,6 @@
 import {
-  CHARGE_PRESET_SPECS, CONVENTIONS, buildSchedule, ley1555Notice, normalizeRate, periodDates, presetCharges, rateLabel, summarizeSchedule,
-  toEffectiveAnnual, usuryNotice, validateTerms,
+  CHARGE_PRESET_SPECS, CONVENTIONS, buildSchedule, compareIso, isIsoDate, lastStatementOn, ley1555Notice, normalizeRate, periodDates, presetCharges,
+  project, rateLabel, summarizeSchedule, toEffectiveAnnual, usuryNotice, validateTerms,
 } from '@finance-core';
 import { defaultLateDraft, lateFromDraft, lateIssueOf } from '../lateModel';
 
@@ -58,7 +58,11 @@ export const MIN_RULES = [
   { value: 'pct_balance', label: 'Un porcentaje del total del extracto' },
 ];
 export const NEW_PURCHASE = { label: '', amount: '', n: '12', rate: '0' };
-const DEFAULT_CARD = { statementDay: '', dueDay: '', minRule: 'interest_fees_plus_pct', minPct: '5', minFloor: '', fee: '', feeIva: true, feeIvaPct: '19', deferred: [] };
+// `lastStatementOn` blank means "the latest statement day on or before today" (see `cardStatementOn`); `openingMinimum` is the
+// minimum payment of that statement, optional.
+const DEFAULT_CARD = {
+  statementDay: '', dueDay: '', lastStatementOn: '', openingMinimum: '', minRule: 'interest_fees_plus_pct', minPct: '5', minFloor: '', fee: '', feeIva: true, feeIvaPct: '19', deferred: [],
+};
 
 export const PERIODICITY_ADJECTIVES = {
   weekly: 'semanal', biweekly: 'cada 14 días', monthly: 'mensual', bimonthly: 'bimestral', quarterly: 'trimestral', semiannual: 'semestral', annual: 'anual',
@@ -70,7 +74,7 @@ const BLANK_RATE = { ...ZERO_RATE, value: '' };
 const isInterestFree = (kind) => kind === 'family' || kind === 'informal';
 
 export const initialWizard = (today) => ({
-  step: 'kind', kind: null, name: '', lender: '', ownerScope: 'shared', principal: '', openedOn: today,
+  step: 'kind', kind: null, today, name: '', lender: '', ownerScope: 'shared', principal: '', openedOn: today,
   rate: BLANK_RATE, system: 'french', periodicity: 'monthly', n: '12', firstDueOn: '',
   grace: { periods: '0', type: 'total' }, balloon: '', manualPlan: [], charges: {}, card: DEFAULT_CARD, late: defaultLateDraft(null),
 });
@@ -118,6 +122,15 @@ const chargesOf = (selected) => CHARGE_PRESETS.filter((preset) => preset.key in 
 
 const blank = (text) => String(text).trim() === '';
 
+/**
+ * Date of the card's last statement, the one the user copies the balance from: the date they wrote, else the latest
+ * statement day on or before today (clamped to short months). Blank while the statement day is not a valid day.
+ */
+export function cardStatementOn(state) {
+  if (!blank(state.card.lastStatementOn)) return state.card.lastStatementOn;
+  try { return lastStatementOn(num(state.card.statementDay), state.today ?? state.openedOn); } catch { return ''; }
+}
+
 // The management fee is an ordinary monthly charge; its IVA is a `pctOfCharge` link the user can edit or remove. The core builds both.
 const cardCharges = ({ fee, feeIva, feeIvaPct }) => (blank(fee) ? [] : presetCharges({ fee: pesos(fee), ...(feeIva ? { iva: num(feeIvaPct) } : {}) }, { card: true }));
 
@@ -126,7 +139,8 @@ function cardTerms(state) {
   return {
     kind: 'card',
     principalMinor: blank(state.principal) ? 0 : pesos(state.principal),
-    openedOn: state.openedOn,
+    // Registered from its last statement: the projector bills that statement as the opening one (no interest or fees of its own).
+    openedOn: cardStatementOn(state) || (state.today ?? state.openedOn),
     rate: toRate(state.rate),
     system: 'none',
     periodicity: 'monthly',
@@ -136,6 +150,7 @@ function cardTerms(state) {
       statementDay: num(card.statementDay),
       dueDay: num(card.dueDay),
       minPayment: { rule: card.minRule, pct: num(card.minPct), floorMinor: blank(card.minFloor) ? 0 : pesos(card.minFloor) },
+      ...(blank(card.openingMinimum) ? {} : { openingMinimumMinor: pesos(card.openingMinimum) }),
       deferred: card.deferred.map((item, index) => ({
         id: `p${index + 1}`,
         label: item.label.trim() || `Compra ${index + 1}`,
@@ -230,6 +245,35 @@ function missingFields(state) {
   return issues;
 }
 
+// The last statement must be a real statement date of the card, not after today, and its minimum cannot exceed its balance.
+function cardIssues(state) {
+  if (state.kind !== 'card') return [];
+  const issues = [];
+  const issue = (message) => issues.push({ step: 'card', message });
+  const { lastStatementOn: written, openingMinimum, statementDay } = state.card;
+  const today = state.today ?? state.openedOn;
+  if (!blank(written)) {
+    if (!isIsoDate(written)) issue('Escribe una fecha real para el último corte.');
+    else if (compareIso(written, today) > 0) issue('La fecha del último corte no puede ser posterior a hoy.');
+    else {
+      let expected = '';
+      try { expected = lastStatementOn(num(statementDay), written); } catch { /* the day itself is reported by the core */ }
+      if (expected !== '' && expected !== written) issue(`La fecha del último corte debe caer en tu día de corte (el ${num(statementDay)} o el último día de un mes más corto).`);
+    }
+  }
+  if (!blank(openingMinimum) && pesos(openingMinimum) > (blank(state.principal) ? 0 : pesos(state.principal))) {
+    issue('El pago mínimo del extracto no puede ser mayor que el saldo del último extracto.');
+  }
+  return issues;
+}
+
+/** What the review shows for a card: its last statement, and the next payment with its minimum. */
+function cardPreviewOf(terms, today) {
+  const projection = project({ terms }, [], today);
+  const due = projection.nextDue;
+  return { lastStatementOn: terms.openedOn, nextDueOn: due ? due.dueOn : projection.card.nextDueOn, minimumMinor: due ? due.outstandingMinor : 0 };
+}
+
 /**
  * Checks the whole form against the core. `issues` lists `{ step, message }` in friendly Spanish;
  * when it is empty, `terms`, a `summary` of the schedule (first installment and totals) and the
@@ -237,7 +281,7 @@ function missingFields(state) {
  * `legal` is the household's resolved tables (`{ usuryTable, smmlvTable }`); without it the code tables apply.
  */
 export function evaluate(state, legal) {
-  const issues = missingFields(state);
+  const issues = [...missingFields(state), ...cardIssues(state)];
   const lateIssue = state.kind === 'card' || state.system === 'none' ? null : lateIssueOf(state.late);
   if (lateIssue) return { issues: [...issues, { step: 'plan', ...lateIssue }] };
   try {
@@ -249,6 +293,7 @@ export function evaluate(state, legal) {
       usuryNotice(terms.rate, usuryModality(terms.kind), terms.openedOn, { usuryTable: legal?.usuryTable }),
       ley1555Notice(terms, terms.openedOn, { smmlvTable: legal?.smmlvTable }),
     ].filter(Boolean);
+    if (terms.kind === 'card') return { issues: [], terms, summary, notices, cardPreview: cardPreviewOf(terms, state.today ?? state.openedOn) };
     return { issues: [], terms, summary, notices };
   } catch (error) {
     const [step, message] = CORE_ISSUES[error?.code] ?? [];

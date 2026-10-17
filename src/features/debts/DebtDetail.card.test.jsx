@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import DebtDetail from './DebtDetail';
 import { buildDebtDetail } from './debtDetailModel';
-import { makeCard, makeEvent, makeMoraCard } from './debtFixtures';
+import { serializeTerms } from '@finance-core';
+import { CARD_TERMS, makeCard, makeEvent, makeMoraCard } from './debtFixtures';
 
 const pay = (id, on, amount) => makeEvent(id, 'payment', on, amount);
 const renderCard = (events, asOf, props = {}, debt = makeCard()) => {
@@ -33,6 +34,21 @@ describe('DebtDetail for a credit card', () => {
     for (const amount of ['$ 10.392', '$ 10.710', '$ 100.000']) expect(within(panel).getByText(amount)).toBeInTheDocument(); // interest, fee + IVA, installment
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Simular abono' })).not.toBeInTheDocument();
+  });
+
+  it('shows the copied opening statement as its balance and minimum, not as zero interest and fees', () => {
+    const opened = makeCard({ termsJson: serializeTerms({ ...CARD_TERMS, openedOn: '2026-04-15', card: { ...CARD_TERMS.card, deferred: [], openingMinimumMinor: 30000 } }) });
+    renderCard([], '2026-04-20', {}, opened);
+
+    const state = screen.getByRole('region', { name: 'Estado de la deuda' });
+    expect(within(state).getByText('$ 30.000')).toBeInTheDocument();
+    expect(within(state).getByText('30 abr')).toBeInTheDocument();
+    const panel = screen.getByRole('region', { name: 'Tu tarjeta' });
+    expect(within(panel).getByText('Último extracto, corte del 15 abr')).toBeInTheDocument();
+    expect(within(panel).getByText('Saldo del extracto')).toBeInTheDocument();
+    expect(within(panel).getByText('$ 500.000', { selector: 'dd' })).toBeInTheDocument();
+    expect(within(panel).getByText('Pago mínimo del extracto')).toBeInTheDocument();
+    expect(within(panel).queryByText('Intereses')).not.toBeInTheDocument();
   });
 
   it('shows the rate in force after an active rate change, and the original one once it is voided', () => {

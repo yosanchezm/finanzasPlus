@@ -13,9 +13,10 @@ export default function BasicsStep({ state, set }) {
     <div className="flex flex-col gap-4">
       <TextField label="Nombre de la deuda" placeholder="Ej. Crédito del carro" {...bind('name')} />
       <TextField label="Prestamista (opcional)" placeholder="Ej. Bancolombia o tía Marta" {...bind('lender')} />
-      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
-        <TextField label={card ? 'Saldo actual de la tarjeta (opcional)' : 'Monto del préstamo'} type="number" inputMode="numeric" placeholder="$ 0" inputClassName="tabular-nums" {...bind('principal')} />
-        <TextField label={card ? 'Fecha desde la que la registras' : 'Fecha del desembolso'} type="date" {...bind('openedOn')} />
+      {/* A card's date is the one of its last statement, asked in the card step once the statement day is known. */}
+      <div className={card ? 'grid grid-cols-1' : 'grid grid-cols-1 gap-3 min-[400px]:grid-cols-2'}>
+        <TextField label={card ? 'Saldo del último extracto (opcional)' : 'Monto del préstamo'} type="number" inputMode="numeric" placeholder="$ 0" inputClassName="tabular-nums" {...bind('principal')} />
+        {!card && <TextField label="Fecha del desembolso" type="date" {...bind('openedOn')} />}
       </div>
       <div className="flex flex-col gap-1.5">
         <span id={ownerLabelId} className={labelClass}>¿De quién es?</span>

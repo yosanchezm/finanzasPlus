@@ -1,11 +1,12 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { formatDueDate } from '../debtLabels';
 import DebtWizard from './DebtWizard';
 
-const setup = () => {
+const setup = (today = '2026-10-12') => {
   const onSubmit = vi.fn();
-  render(<DebtWizard saveState={{ status: 'idle' }} today="2026-10-12" onSubmit={onSubmit} onClose={vi.fn()} />);
+  render(<DebtWizard saveState={{ status: 'idle' }} today={today} onSubmit={onSubmit} onClose={vi.fn()} />);
   return { onSubmit, user: userEvent.setup() };
 };
 const fillIn = async (user, label, text) => {
@@ -13,11 +14,13 @@ const fillIn = async (user, label, text) => {
   await user.clear(field);
   await user.type(field, text);
 };
+// A date input takes its whole value at once.
+const setDate = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 const next = (user) => user.click(screen.getByRole('button', { name: 'Siguiente' }));
-const toCardStep = async (user) => {
+const toCardStep = async (user, balance = '500000') => {
   await user.click(screen.getByRole('button', { name: /^Tarjeta de crédito/ }));
   await fillIn(user, 'Nombre de la deuda', 'Visa');
-  await fillIn(user, 'Saldo actual de la tarjeta (opcional)', '500000');
+  await fillIn(user, 'Saldo del último extracto (opcional)', balance);
   await next(user);
   await fillIn(user, 'Valor de la tasa', '28');
   await next(user);
@@ -73,6 +76,52 @@ describe('DebtWizard card step', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
 
     expect(onSubmit.mock.calls[0][0].terms.charges.map((charge) => charge.id)).toEqual(['mgmt_fee']);
+  });
+});
+
+describe('DebtWizard card last statement', () => {
+  it('asks for the balance of the last statement and no registration date in the basics', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: /^Tarjeta de crédito/ }));
+
+    expect(screen.getByLabelText('Saldo del último extracto (opcional)')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Fecha desde la que la registras')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Fecha del desembolso')).not.toBeInTheDocument();
+  });
+
+  it('defaults the last statement date from the statement day, takes the stated minimum and previews the next payment', async () => {
+    const { user, onSubmit } = setup('2026-10-16');
+    await toCardStep(user, '3268319');
+    await fillIn(user, 'Día de corte', '15');
+    await fillIn(user, 'Día límite de pago', '3');
+
+    expect(screen.getByLabelText('Fecha del último corte')).toHaveValue('2026-10-15');
+    await fillIn(user, 'Pago mínimo del extracto (opcional)', '180000');
+    await next(user);
+
+    const review = screen.getByRole('region', { name: 'Vista previa' });
+    expect(within(review).getByText('Saldo del último extracto')).toBeInTheDocument();
+    expect(within(review).getByText(formatDueDate('2026-10-15'))).toBeInTheDocument();
+    expect(within(review).getByText(`$ 180.000 · ${formatDueDate('2026-11-03')}`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms).toMatchObject({ openedOn: '2026-10-15', principalMinor: 3268319, card: { statementDay: 15, dueDay: 3, openingMinimumMinor: 180000 } });
+  });
+
+  it('lets the user pick an earlier statement and blocks a date that is not a statement day', async () => {
+    const { user, onSubmit } = setup('2026-10-16');
+    await toCardStep(user);
+    await fillIn(user, 'Día de corte', '15');
+    await fillIn(user, 'Día límite de pago', '3');
+    setDate('Fecha del último corte', '2026-10-14');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('día de corte');
+    expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+    setDate('Fecha del último corte', '2026-09-15');
+    await next(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar deuda' }));
+
+    expect(onSubmit.mock.calls[0][0].terms.openedOn).toBe('2026-09-15');
   });
 });
 

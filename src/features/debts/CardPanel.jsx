@@ -5,6 +5,12 @@ import WhatIsThis from './explain/WhatIsThis';
 
 const KIND_TEXT = { revolving: 'Compras y saldo sin cuotas', advance: 'Avance en efectivo' };
 
+// The statement the card was registered from bills nothing of its own here (its interest and fees are inside its balance),
+// so it shows that balance and its minimum instead of a breakdown of zeros.
+const statementLines = (last) => (last.opening
+  ? [['Saldo del extracto', last.payInFullMinor], ['Pago mínimo del extracto', last.minimumMinor]]
+  : [['Intereses', last.interestMinor], ['Cuota de manejo e IVA', last.chargesMinor + last.taxesMinor], ['Cuotas del mes', last.principalMinor], ...(last.lateInterestMinor > 0 ? [['Mora', last.lateInterestMinor]] : [])]);
+
 function describeTranche(tranche) {
   const rate = formatEa(toEffectiveAnnual(tranche.rate));
   if (tranche.type === 'deferred') return `Compra a ${tranche.n} cuotas, quedan ${tranche.installmentsLeft} · ${rate}`;
@@ -49,7 +55,7 @@ export default function CardPanel({ projection, explain = {} }) {
             <WhatIsThis popover={explain.statement} subject="Último extracto" />
           </h3>
           <dl className="flex flex-col gap-2">
-            {[['Intereses', last.interestMinor], ['Cuota de manejo e IVA', last.chargesMinor + last.taxesMinor], ['Cuotas del mes', last.principalMinor], ...(last.lateInterestMinor > 0 ? [['Mora', last.lateInterestMinor]] : [])].map(([label, value]) => (
+            {statementLines(last).map(([label, value]) => (
               <div key={label} className="flex items-baseline justify-between gap-3">
                 <dt className="text-ink-muted">{label}</dt>
                 <dd className="text-ink tabular-nums">{formatMoney(value)}</dd>
