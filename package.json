@@ -8,6 +8,7 @@
     "build": "node scripts/check-explain-copy.mjs && vite build",
     "preview": "vite preview",
     "migrate:appwrite": "node --env-file=.env scripts/migrate-appwrite.mjs",
+    "merge:categories": "node --env-file=.env scripts/merge-categories.mjs",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs",
     "package:nia": "node scripts/package-nia.mjs"
