@@ -234,6 +234,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             dayOfMonth={dayOfMonth}
             daysInMonth={monthDays}
             budgetMonth={budgetMonth}
+            lines={lines}
+            actorId={user.$id}
             canEdit={canEdit}
             linesMode={linesMode}
             scope={scope}

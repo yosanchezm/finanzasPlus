@@ -10,12 +10,12 @@ import { PageHeader } from '../../shared/ui/PageHeader';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
 import { cn, focusRing } from '../../shared/ui/cn';
 import AddCategoryDialog from './AddCategoryDialog';
+import { GROUP_LABELS } from './groupLabels';
 
 const thClass = 'border-b border-border bg-surface-2 px-4 py-2.5 text-left text-xs font-medium whitespace-nowrap text-ink-muted';
 const tdClass = 'border-b border-[#eef1ed] px-4 py-3.5 align-middle text-sm whitespace-nowrap';
 
 const GROUP_ORDER = ['need', 'want', 'saving', 'investment', 'debt'];
-const GROUP_LABELS = { need: 'Necesidades', want: 'Gustos', saving: 'Ahorro', investment: 'Inversión', debt: 'Deudas' };
 // Spending more than planned is good news for these groups (AD12): shown as achieved, never as over.
 const GOAL_GROUPS = ['saving', 'investment'];
 
