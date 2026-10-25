@@ -6,6 +6,7 @@ import { paraphraseEnabled } from './debt/explain/paraphrase.js';
 import { glossaryTopic } from './debt/explain/router.js';
 import { STEP_RECORDED } from './debt/advisor/chain.js';
 import { activeCategories, findActiveCategory } from '../../packages/finance-core/index.js';
+import { LEGACY_REFUSAL, budgetFigures, budgetWrites, loadBudgetMonth, planBudgetEdit } from './budget.js';
 import { answersOpenSetup, cancelDebtChain, confirmDebt, debtSummaries, handleDebt, handleDebtCallback, handleExplainCallback, lastExplain } from './debt/handler.js';
 
 const { FormData, fetch } = undici;
@@ -35,7 +36,7 @@ const TABLES = {
   events: 'ai_events',
   categories: 'categories',
   transactions: 'transactions',
-  budgets: 'budgets',
+  budgetLines: 'budget_lines',
   goals: 'goals',
   attachments: 'attachments',
   debts: 'debts',
@@ -233,10 +234,13 @@ async function deleteRow(table, rowId) {
 const DEBT_ROW_ACTIONS = { debts: ['read', 'update'], debt_events: ['read'], transactions: ['read', 'update', 'delete'], categories: ['read', 'update'], legal_rates: ['read', 'update'] };
 const DEBT_PAGE = 100;
 
-async function debtListRows(table, where) {
+// `range` ({field, from, to}, `to` exclusive) bounds a time range; such a read is capped like `cashflowRows` and throws past the cap.
+async function debtListRows(table, where, range) {
   const filters = Object.entries(where).map(([field, value]) => queryEqual(field, value));
+  if (range) filters.push(queryGreaterEqual(range.field, range.from), queryLessThan(range.field, range.to));
   const rows = [];
-  for (let offset = 0; ; offset += DEBT_PAGE) {
+  for (let offset = 0, pages = 0; ; offset += DEBT_PAGE) {
+    if (range && (pages += 1) > CASHFLOW_MAX_PAGES) throw new Error('Too many rows in the requested range.');
     const page = await listRows(table, [...filters, queryLimit(DEBT_PAGE), queryOffset(offset)]);
     rows.push(...page.map((row) => ({ ...rowData(row), $id: row.$id, $createdAt: row.$createdAt })));
     if (page.length < DEBT_PAGE) return rows;
@@ -489,7 +493,7 @@ function assistantPrompt(input, previous, history, profile, attachment, categori
     'Para presupuestos, convierte “este mes”, “el próximo mes” o una fecha indicada en month con formato YYYY-MM. Para metas, convierte fechas objetivo a YYYY-MM-DD. Para un aporte a una meta, usa action contribute y contributionMinor.',
     'Para actualizar o eliminar un movimiento, presupuesto, meta o categoría, completa selector con nombre, comercio, fecha, monto o ID cuando el usuario lo proporcione. Para consultar datos usa action list.',
     'Devuelve únicamente JSON válido, sin markdown, con exactamente estas claves de nivel superior:',
-    '{"intent":"transaction|budget|goal|category|analysis|conversation|debt","action":"create|update|delete|contribute|list|none","reply":"string|null","transaction":{"type":"expense|income|transfer","amountMinor":number|null,"currency":"COP","occurredAt":"ISO-8601|null","merchant":"string|null","category":"string|null","ownerScope":"you|partner|shared|null","note":"string|null","confidence":number,"missingFields":["amount|date|merchant|category|owner"]},"budget":{"month":"YYYY-MM|null","category":"string|null","plannedMinor":number|null,"alertAtPercent":number|null},"goal":{"name":"string|null","targetMinor":number|null,"currentMinor":number|null,"contributionMinor":number|null,"targetDate":"YYYY-MM-DD|null","ownerScope":"you|partner|shared|null","status":"active|completed|paused|null"},"category":{"name":"string|null","kind":"need|want|saving|income|null","color":"string|null","icon":"string|null"},"selector":{"id":"string|null","name":"string|null","merchant":"string|null","date":"YYYY-MM-DD|null","amountMinor":number|null,"position":"latest|oldest|null"}}',
+    '{"intent":"transaction|budget|goal|category|analysis|conversation|debt","action":"create|update|delete|contribute|list|none","reply":"string|null","transaction":{"type":"expense|income|transfer","amountMinor":number|null,"currency":"COP","occurredAt":"ISO-8601|null","merchant":"string|null","category":"string|null","ownerScope":"you|partner|shared|null","note":"string|null","confidence":number,"missingFields":["amount|date|merchant|category|owner"]},"budget":{"month":"YYYY-MM|null","category":"string|null","plannedMinor":number|null,"alertAtPercent":number|null},"goal":{"name":"string|null","targetMinor":number|null,"currentMinor":number|null,"contributionMinor":number|null,"targetDate":"YYYY-MM-DD|null","ownerScope":"you|partner|shared|null","status":"active|completed|paused|null"},"category":{"name":"string|null","kind":"need|want|saving|investment|income|null","color":"string|null","icon":"string|null"},"selector":{"id":"string|null","name":"string|null","merchant":"string|null","date":"YYYY-MM-DD|null","amountMinor":number|null,"position":"latest|oldest|null"}}',
     'Para COP amountMinor es un entero en pesos colombianos, no en centavos. En conversation responde en español, con claridad y sin inventar datos. En analysis deja reply breve: el sistema consultará los datos reales. Para list no inventes resultados.',
     previous ? `Interpretación pendiente anterior:\n${JSON.stringify(previous)}` : 'No hay interpretación pendiente.',
     history?.length ? `Contexto reciente del chat:\n${conversationContext(history)}` : 'No hay contexto conversacional anterior.',
@@ -536,15 +540,30 @@ async function debtSnapshot() {
   }
 }
 
-async function workspaceSnapshot({ withDebts = false } = {}) {
-  const [transactions, categories, budgets, goals] = await Promise.all([
+const budgetInput = (month) => ({ listRows: debtListRows, householdId: config.householdId, month, timezone: config.timezone });
+
+// The budget of the current month from `budget_lines` (legacy fallback inside the module), with the code-computed figures the
+// model and the replies quote. `budgetInputs` stay out of the model prompt. An unreadable core table leaves it out and logs.
+async function budgetSnapshot() {
+  try {
+    const { linesMode, lines, categories, budgetMonth } = await loadBudgetMonth(budgetInput(currentMonth()));
+    const planned = BUDGET_GROUP_KEYS.flatMap((group) => budgetMonth.groups[group].categories.filter((item) => item.plannedMinor > 0).map((item) => ({ category: item.name, group, plannedMinor: item.plannedMinor, actualMinor: item.actualMinor })));
+    return { budget: { linesMode, ...budgetFigures(budgetMonth), planned }, budgetInputs: { lines, categories } };
+  } catch (caught) {
+    writeError(`No se pudo leer el presupuesto: ${caught?.message || caught}`);
+    return { budget: null, budgetInputs: null };
+  }
+}
+
+async function workspaceSnapshot({ withDebts = false, withBudget = false } = {}) {
+  const [transactions, categories, goals] = await Promise.all([
     listRows(TABLES.transactions, [queryEqual('householdId', config.householdId), queryLimit(100)]),
     listRows(TABLES.categories, [queryEqual('householdId', config.householdId), queryLimit(100)]),
-    listRows(TABLES.budgets, [queryEqual('householdId', config.householdId), queryLimit(100)]),
     listRows(TABLES.goals, [queryEqual('householdId', config.householdId), queryLimit(100)]),
   ]);
   const categoryNames = new Map(categories.map((row) => [row.$id, rowData(row).name]));
   const debts = withDebts ? await debtSnapshot() : null;
+  const budget = withBudget ? await budgetSnapshot() : {};
   return {
     transactions: transactions.map((row) => {
       const value = rowData(row);
@@ -562,7 +581,7 @@ async function workspaceSnapshot({ withDebts = false } = {}) {
       };
     }),
     categories: categories.map((row) => ({ id: row.$id, ...rowData(row) })),
-    budgets: budgets.map((row) => ({ id: row.$id, ...rowData(row), category: categoryNames.get(rowData(row).categoryId) || rowData(row).categoryId || null })),
+    ...budget,
     goals: goals.map((row) => ({ id: row.$id, ...rowData(row) })),
     ...(debts ? { debts } : {}),
   };
@@ -611,6 +630,10 @@ function normaliseExtraction(raw, profile, previous) {
     missingFields: [...missing].filter(Boolean),
   };
 }
+
+// Kinds Nia offers and creates. `debt` is system-managed (cost rows), so it is not offered; legacy and unknown kinds read as `need`.
+const CATEGORY_KINDS = ['need', 'want', 'saving', 'investment', 'income'];
+const BUDGET_GROUP_KEYS = ['need', 'want', 'saving', 'investment', 'debt'];
 
 function currentMonth() {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit' }).formatToParts(new Date());
@@ -665,7 +688,7 @@ function normaliseOperation(raw, profile) {
       kind: 'operation', resource, action,
       data: {
         name: String(value.name || '').trim() || null,
-        kind: ['need', 'want', 'saving', 'income'].includes(value.kind) ? value.kind : 'need',
+        kind: CATEGORY_KINDS.includes(value.kind) ? value.kind : 'need',
         color: String(value.color || '#73f0b5').trim(),
         icon: String(value.icon || 'tag').trim(),
       },
@@ -739,6 +762,15 @@ function findTransaction(snapshot, operation) {
   return candidates.length && (candidates.length === 1 || candidates[0].score > candidates[1].score) ? candidates[0].item : null;
 }
 
+const BUDGET_ISSUES = {
+  legacy_mode: LEGACY_REFUSAL,
+  income_category: 'Las categorías de ingreso no llevan presupuesto: el presupuesto reparte lo que gastas, ahorras, inviertes o pagas en deudas.',
+  debt_category: 'Las categorías de deuda no admiten un presupuesto por categoría.',
+  unavailable: 'No pude leer tus presupuestos ahora mismo, así que no guardé nada. Intenta de nuevo en un momento.',
+  other: 'No pude armar ese presupuesto. Revisa la categoría y el monto.',
+};
+const budgetRefusal = (planned) => planned.text || BUDGET_ISSUES[planned.issue] || BUDGET_ISSUES.other;
+
 async function resolveOperation(operation, snapshot, profile) {
   if (!operation) return null;
   const resolved = { ...operation, data: { ...operation.data }, missingFields: [], target: null };
@@ -747,11 +779,15 @@ async function resolveOperation(operation, snapshot, profile) {
     const category = findCategory(snapshot, operation.data.categoryId || operation.data.category);
     if (!category) resolved.missingFields.push(operation.data.category || operation.data.categoryId ? 'categoryNotFound' : 'category');
     else resolved.data.categoryId = category.id;
-    if (['create', 'update'].includes(operation.action) && (!Number.isInteger(operation.data.plannedMinor) || operation.data.plannedMinor <= 0)) resolved.missingFields.push('plannedMinor');
-    const existing = category ? snapshot.budgets.find((item) => item.month === operation.data.month && item.categoryId === category.id) : null;
-    resolved.target = existing;
-    if (operation.action === 'delete' && !existing) resolved.missingFields.push('budgetNotFound');
-    if (operation.action === 'update' && !existing) resolved.action = 'create';
+    const remove = operation.action === 'delete';
+    if (!remove && (!Number.isInteger(operation.data.plannedMinor) || operation.data.plannedMinor <= 0)) resolved.missingFields.push('plannedMinor');
+    if (resolved.missingFields.length) return resolved;
+    if (!snapshot.budgetInputs) { resolved.refusal = BUDGET_ISSUES.unavailable; return resolved; }
+    // "Solo este mes" (AD17): the draft is stored in the pending and planned again with fresh lines on Confirm.
+    const draft = { action: remove ? 'remove' : 'set', categoryId: category.id, amountMinor: remove ? undefined : operation.data.plannedMinor, month: operation.data.month };
+    const planned = planBudgetEdit({ draft, lines: snapshot.budgetInputs.lines, linesMode: snapshot.budget.linesMode, categories: snapshot.budgetInputs.categories, ctx: { actorId: profile.appwriteUserId, source: 'telegram' } });
+    if (!planned.ok) resolved.refusal = budgetRefusal(planned);
+    else Object.assign(resolved, { draft, preview: planned.text });
     return resolved;
   }
   if (operation.resource === 'goal') {
@@ -840,12 +876,7 @@ function operationTitle(operation) {
 function operationSummary(operation) {
   const lines = [`🛠️ ${operationTitle(operation)}`, ''];
   if (operation.resource === 'budget') {
-    lines.push(`Categoría: ${operation.data.category || operation.target?.category || '—'}`);
-    lines.push(`Mes: ${operation.data.month}`);
-    if (operation.action !== 'delete') {
-      lines.push(`Límite: ${money(operation.data.plannedMinor, config.currency)}`);
-      lines.push(`Alerta: ${operation.data.alertAtPercent}%`);
-    }
+    lines.push(operation.preview);
   } else if (operation.resource === 'goal') {
     const goal = operation.target;
     lines.push(`Meta: ${operation.data.name || goal?.name || '—'}`);
@@ -872,8 +903,9 @@ function operationSummary(operation) {
 
 function listReply(resource, snapshot) {
   if (resource === 'budget') {
-    if (!snapshot.budgets.length) return '📊 No hay presupuestos guardados todavía.';
-    return ['📊 Presupuestos', '', ...snapshot.budgets.slice(0, 15).map((item) => `• ${item.category || 'Sin categoría'} · ${item.month} · ${money(item.plannedMinor, config.currency)} · alerta ${item.alertAtPercent || 80}%`)].join('\n');
+    const budget = snapshot.budget;
+    if (!budget?.planned.length) return '📊 No hay presupuestos guardados todavía.';
+    return ['📊 Presupuestos', '', ...budget.planned.slice(0, 15).map((item) => `• ${item.category} · ${budget.month} · ${money(item.plannedMinor, config.currency)} · gastado ${money(item.actualMinor, config.currency)}`)].join('\n');
   }
   if (resource === 'goal') {
     if (!snapshot.goals.length) return '🎯 No hay metas guardadas todavía.';
@@ -907,21 +939,41 @@ async function uploadAttachment(attachment, transactionId) {
 
 const teamWritePermissions = () => [permission('read', `team:${config.teamId}`), permission('update', `team:${config.teamId}`)];
 
-async function confirmOperation(chatId, actorId, operation) {
+const POR_ASIGNAR_BASE = { actual: '', reference: ' (con el ingreso del mes anterior como base)' };
+
+// Plans the stored draft again with fresh lines (they may have changed since the preview) and writes only to `budget_lines`.
+async function applyBudgetDraft(draft, profile) {
+  const fresh = await loadBudgetMonth(budgetInput(draft.month));
+  const planned = planBudgetEdit({ draft, lines: fresh.lines, linesMode: fresh.linesMode, categories: fresh.categories, ctx: { actorId: profile.appwriteUserId, source: 'telegram' } });
+  if (!planned.ok) return { refusal: budgetRefusal(planned) };
+  for (const write of budgetWrites(planned.plan, config.householdId)) {
+    if (write.op === 'update') await updateRow(write.table, write.id, write.data);
+    else await upsertRow(write.table, write.id, write.data, teamWritePermissions());
+  }
+  try {
+    const figures = budgetFigures((await loadBudgetMonth(budgetInput(draft.month))).budgetMonth);
+    return { note: figures.incomeSource === 'none' ? '' : `\nPor asignar este mes: ${money(figures.porAsignarMinor, config.currency)}${POR_ASIGNAR_BASE[figures.incomeSource] ?? ''}.` };
+  } catch (caught) {
+    writeError(`No se pudo recalcular el presupuesto: ${caught?.message || caught}`);
+    return { note: '' };
+  }
+}
+
+async function confirmOperation(chatId, actorId, operation, profile) {
   if (operation.missingFields?.length) {
     await sendMessage(chatId, `Para completar esta acción necesito: ${operation.missingFields.map(missingLabel).join(', ')}.`);
     return;
   }
 
+  let budgetNote = '';
   if (operation.resource === 'budget') {
-    if (operation.action === 'delete') await deleteRow(TABLES.budgets, operation.target.id);
-    else await upsertRow(TABLES.budgets, operation.target?.id || randomId(), {
-      householdId: config.householdId,
-      month: operation.data.month,
-      categoryId: operation.data.categoryId,
-      plannedMinor: operation.data.plannedMinor,
-      alertAtPercent: operation.data.alertAtPercent,
-    }, teamWritePermissions());
+    const applied = await applyBudgetDraft(operation.draft, profile);
+    if (applied.refusal) {
+      await saveSession(chatId, actorId, 'cancelled', null);
+      await sendMessage(chatId, applied.refusal);
+      return;
+    }
+    budgetNote = applied.note;
   } else if (operation.resource === 'goal') {
     if (operation.action === 'delete') await deleteRow(TABLES.goals, operation.target.id);
     else if (operation.target) await updateRow(TABLES.goals, operation.target.id, compactObject({
@@ -973,7 +1025,7 @@ async function confirmOperation(chatId, actorId, operation) {
   }
 
   await saveSession(chatId, actorId, 'completed', null);
-  await sendMessage(chatId, `✅ Listo. ${operationTitle(operation)} quedó aplicado.`);
+  await sendMessage(chatId, `✅ Listo. ${operationTitle(operation)} quedó aplicado.${budgetNote}`);
 }
 
 // `expectedId` is the pending id in `nia:confirm:<id>`, the Confirm of a step of an adjustment chain: a tap for a step that is over confirms nothing.
@@ -994,7 +1046,7 @@ async function confirmPending(chatId, actorId, profile, updateId, expectedId = n
     return;
   }
   if (pending.kind === 'operation') {
-    await confirmOperation(chatId, actorId, pending);
+    await confirmOperation(chatId, actorId, pending, profile);
     return;
   }
   if (pending.missingFields?.length) {
@@ -1114,12 +1166,17 @@ async function handleTextOrReceipt(message, updateId, profile) {
 
   const operation = normaliseOperation(raw, profile);
   if (operation && (intent !== 'transaction' || ['update', 'delete'].includes(operation.action))) {
-    const snapshot = await workspaceSnapshot();
+    const snapshot = await workspaceSnapshot({ withBudget: operation.resource === 'budget' });
     const resolved = await resolveOperation(operation, snapshot, profile);
     if (resolved.action === 'list') {
       const reply = listReply(resolved.resource, snapshot);
       await saveSession(chatId, actorId, session?.status || 'conversation', previous, appendHistory(appendHistory(history, 'user', userContext), 'assistant', reply));
       await sendMessage(chatId, reply);
+      return;
+    }
+    if (resolved.refusal) {
+      await saveSession(chatId, actorId, session?.status || 'conversation', previous, appendHistory(appendHistory(history, 'user', userContext), 'assistant', resolved.refusal));
+      await sendMessage(chatId, resolved.refusal);
       return;
     }
     if (resolved.missingFields.length) {
@@ -1142,8 +1199,8 @@ async function handleTextOrReceipt(message, updateId, profile) {
   }
 
   if (intent === 'analysis') {
-    const snapshot = await workspaceSnapshot({ withDebts: true });
-    const analysis = await askGeminiAnalysis(text, snapshot, history, profile);
+    const { budgetInputs, ...promptSnapshot } = await workspaceSnapshot({ withDebts: true, withBudget: true });
+    const analysis = await askGeminiAnalysis(text, promptSnapshot, history, profile);
     const reply = String(analysis?.reply || '').trim() || 'No pude generar el análisis con los datos disponibles.';
     await saveSession(chatId, actorId, session?.status || 'conversation', previous, appendHistory(appendHistory(history, 'user', userContext), 'assistant', reply));
     await sendMessage(chatId, reply);

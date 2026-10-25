@@ -74,12 +74,30 @@ La Function no guarda la primera interpretación automáticamente. Guarda una se
 Nia también tiene tres modos de respuesta:
 
 - `transaction`: interpreta texto, fechas relativas, recibos e imágenes; pregunta por los datos faltantes y solicita confirmación.
-- `budget`: crea, actualiza, lista o elimina presupuestos y límites por categoría.
+- `budget`: fija, quita o lista el presupuesto de una categoría para el mes (ver [Presupuestos](#presupuestos)).
 - `goal`: crea, actualiza, lista, elimina o registra aportes a metas.
 - `category`: crea, actualiza, lista o archiva categorías.
 - `conversation`: responde preguntas generales, explica finanzas y puede describir sus capacidades e identidad configurada.
 - `analysis`: consulta movimientos, presupuestos, metas y categorías para analizar totales, tendencias y diferencias entre `you`, `partner` y `shared`. Las deudas llegan ya calculadas por el código (saldo, próxima cuota, tasa E.A. y monto vencido): el modelo las cita, pero no calcula nada de deudas.
 - `debt`: préstamos y tarjetas (ver [Deudas](#deudas)).
+
+## Presupuestos
+
+Nia lee y escribe el presupuesto en la tabla `budget_lines` (el mismo plan que la web) y **nunca escribe en la tabla `budgets`** anterior.
+
+- **Solo este mes**: un presupuesto por chat es una línea fija de un solo mes (`fromMonth` = `toMonth`) para la categoría. La vista previa nombra la categoría, el monto y «solo este mes»; solo se guarda al confirmar, y al confirmar el plan se calcula de nuevo con las líneas actuales. Si ya existe una línea de ese mes para la categoría, se actualiza (sin duplicar); el plan recurrente no cambia.
+- **Quitar**: escribe una línea de un mes con monto 0 (el plan recurrente sigue igual). No se aceptan categorías de ingreso.
+- **Modo antiguo**: si `budget_lines` no existe, o está vacía mientras `budgets` tiene filas, Nia sigue leyendo (los montos antiguos cuentan como líneas de un mes) pero rechaza escribir con el aviso de que la migración está pendiente.
+- **Cifras**: el análisis recibe las cifras ya calculadas por el código (`computeBudgetMonth`, las mismas de la web: Por asignar, real por grupo, base de ingreso); el modelo no hace aritmética de presupuesto.
+- **Tipos de categoría**: Nia ofrece `need`, `want`, `saving`, `investment` e `income`; no ofrece ni crea `debt`. Un tipo desconocido se lee como `need`. La categoría «Costos financieros» que crea el flujo de deudas es de tipo `debt`.
+
+### Orden de despliegue
+
+1. `npm run migrate:appwrite` (crea `budget_lines`).
+2. `npm run migrate:budgets -- --apply` (copia los presupuestos antiguos).
+3. Solo entonces, `npm run package:nia` y subir `functions/nia.tar.gz`.
+
+Antes del paso 2 la Function funciona en modo antiguo (solo lectura de presupuestos). Prueba en Telegram: fija un presupuesto («solo este mes»), confírmalo y pide el resumen del presupuesto.
 
 ## Deudas
 

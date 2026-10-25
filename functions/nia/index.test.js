@@ -14,7 +14,7 @@ const loanTerms = { kind: 'vehicle', principalMinor: 10000000, openedOn: '2026-0
 const plain = (text) => text.replace(/ /g, ' ');
 
 function makeNet(answers) {
-  const tables = { bot_sessions: [], ai_events: [], categories: [], transactions: [], budgets: [], goals: [], debts: [], debt_events: [] };
+  const tables = { bot_sessions: [], ai_events: [], categories: [], transactions: [], budgets: [], budget_lines: [], goals: [], debts: [], debt_events: [] };
   const telegram = [];
   const prompts = [];
   const gets = [];
@@ -946,6 +946,104 @@ describe('advisor adjust in the Nia entry point (chain of steps)', () => {
     expect(sent()[5].text).toBe('Ese paso ya quedó registrado.');
     expect(events('charge_change')).toHaveLength(0);
     expect(events('terms_correction')).toHaveLength(1);
+  });
+});
+
+describe('budget wiring in the Nia entry point (solo este mes)', () => {
+  const mercado = { $id: 'c-mercado', householdId: 'h1', name: 'Mercado', kind: 'need', archived: false };
+  const setBudget = { intent: 'budget', action: 'create', budget: { month: '2026-10', category: 'Mercado', plannedMinor: 900000 } };
+  const recurring = { $id: 'br1', householdId: 'h1', targetType: 'category', targetId: 'c-mercado', rule: 'fixed', amountMinor: 800000, percentBp: null, fromMonth: '2026-01', toMonth: null };
+  const untouched = () => expect([fake.tables.budgets, fake.patches.filter((patch) => patch.table === 'budgets'), fake.posts.filter((post) => post.table === 'budgets')]).toEqual([[], [], []]);
+
+  it('previews "solo este mes" first and writes one one-month line to budget_lines only after Confirm', async () => {
+    fake = makeNet([setBudget]);
+    fake.tables.categories.push(mercado);
+    fake.tables.budget_lines.push(recurring);
+
+    await run(message('presupuesto de mercado 900 mil'));
+    expect(sent()[0].text).toMatch(/Mercado/);
+    expect(sent()[0].text).toMatch(/solo este mes/);
+    expect(sent()[0].text).toContain('900.000');
+    expect(fake.tables.budget_lines).toEqual([recurring]);
+
+    await run(press('nia:confirm'));
+    await run(press('nia:confirm'));
+    const created = fake.tables.budget_lines.filter((line) => line.$id !== 'br1');
+    expect(created).toEqual([expect.objectContaining({ householdId: 'h1', targetType: 'category', targetId: 'c-mercado', rule: 'fixed', amountMinor: 900000, fromMonth: '2026-10', toMonth: '2026-10' })]);
+    expect(created[0].$id).toMatch(/^bo202610[0-9a-f]{16}$/);
+    expect(fake.tables.budget_lines[0]).toEqual(recurring);
+    expect(sent().filter((call) => /Listo/.test(call.text))).toHaveLength(1);
+    untouched();
+  });
+
+  it('updates the existing one-month line in place on a repeat, and a delete writes a zero tombstone', async () => {
+    fake = makeNet([setBudget, { ...setBudget, action: 'delete' }]);
+    fake.tables.categories.push(mercado);
+    fake.tables.budget_lines.push(recurring, { ...recurring, $id: 'blabc', amountMinor: 700000, fromMonth: '2026-10', toMonth: '2026-10' });
+
+    await run(message('presupuesto de mercado 900 mil'));
+    await run(press('nia:confirm'));
+    expect(fake.tables.budget_lines).toHaveLength(2);
+    expect(fake.tables.budget_lines.find((line) => line.$id === 'blabc')).toMatchObject({ amountMinor: 900000 });
+
+    await run(message('quita el presupuesto de mercado'));
+    await run(press('nia:confirm'));
+    expect(fake.tables.budget_lines.find((line) => line.$id === 'blabc')).toMatchObject({ amountMinor: 0, fromMonth: '2026-10', toMonth: '2026-10' });
+    expect(fake.tables.budget_lines.find((line) => line.$id === 'br1')).toEqual(recurring);
+    untouched();
+  });
+
+  it('refuses a budget write in legacy mode (budget_lines missing) and never writes', async () => {
+    fake = makeNet([setBudget]);
+    delete fake.tables.budget_lines;
+    fake.tables.categories.push(mercado);
+    fake.tables.budgets.push({ $id: 'b1', householdId: 'h1', month: '2026-10', categoryId: 'c-mercado', plannedMinor: 500000 });
+
+    await run(message('presupuesto de mercado 900 mil'));
+    expect(sent()[0].text).toMatch(/migrando/);
+    expect(sent()[0].reply_markup).toBeUndefined();
+    expect(fake.posts.filter((post) => post.table !== 'bot_sessions')).toEqual([]);
+    expect(fake.tables.budgets).toHaveLength(1);
+  });
+
+  it('refuses a budget for an income-kind category', async () => {
+    fake = makeNet([{ ...setBudget, budget: { ...setBudget.budget, category: 'Sueldo' } }]);
+    fake.tables.categories.push({ ...mercado, $id: 'c-sueldo', name: 'Sueldo', kind: 'income' });
+
+    await run(message('presupuesto de sueldo 900 mil'));
+    expect(sent()[0].text).toMatch(/ingres/i);
+    expect(sent()[0].reply_markup).toBeUndefined();
+    expect(fake.tables.budget_lines).toEqual([]);
+  });
+
+  it('feeds the analysis the code-computed budget figures read from budget_lines', async () => {
+    fake = makeNet([{ intent: 'analysis', action: 'none' }, { reply: 'ok' }]);
+    fake.tables.categories.push(mercado);
+    fake.tables.budget_lines.push(recurring);
+
+    await run(message('cómo voy con el presupuesto'));
+    const prompt = fake.prompts.at(-1);
+    expect(prompt).toContain('"porAsignarMinor":-800000');
+    expect(prompt).toContain('"linesMode":"lines"');
+  });
+});
+
+describe('category kinds in the Nia entry point', () => {
+  const create = (kind) => ({ intent: 'category', action: 'create', category: { name: 'Fondo', kind } });
+
+  it('offers investment (not debt) to the classifier and stores an investment category', async () => {
+    fake = makeNet([create('investment')]);
+    await run(message('crea la categoría Fondo de inversión'));
+    expect(fake.prompts[0]).toContain('"kind":"need|want|saving|investment|income|null"');
+    await run(press('nia:confirm'));
+    expect(fake.tables.categories).toEqual([expect.objectContaining({ name: 'Fondo', kind: 'investment' })]);
+  });
+
+  it('reads an unknown or debt kind as need', async () => {
+    fake = makeNet([create('debt')]);
+    await run(message('crea la categoría Fondo'));
+    await run(press('nia:confirm'));
+    expect(fake.tables.categories).toEqual([expect.objectContaining({ kind: 'need' })]);
   });
 });
 

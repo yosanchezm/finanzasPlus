@@ -174,6 +174,11 @@ describe('packageNia (CLI, --out redirected to a temp dir)', () => {
     expect(importSpecifiers(bundle).filter((specifier) => specifier.startsWith('.') || specifier.includes('packages'))).toEqual([]);
   });
 
+  it('inlines the budget module: line-based snapshot and one-month edit plan', () => {
+    for (const name of ['loadBudgetMonth', 'planBudgetEdit', 'budgetWrites']) expect(bundle, name).toMatch(new RegExp(`function ${name}\\(`));
+    expect(bundle).toContain('budget_lines');
+  });
+
   it('inlines the advice pipeline: strategies, verdict, cash flow and the numeric guard', () => {
     for (const name of ['compareStrategies', 'advise', 'cashflowSignals', 'guardParaphrase', 'simulateReply', 'adviseReply']) {
       expect(bundle, name).toMatch(new RegExp(`function ${name}\\(`));

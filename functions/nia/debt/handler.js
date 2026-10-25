@@ -28,7 +28,7 @@ import { adviseReply, clampTelegram, listReply, paraphrasePrompt, simulateReply 
 // `createRow` rejects with `status: 409` when the id or a unique key already exists; a `legal_rate` Confirm then calls `updateRow`.
 
 const T = { debts: 'debts', events: 'debt_events', transactions: 'transactions', categories: 'categories', legal: 'legal_rates' };
-const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
+const COST_CATEGORY = { name: 'Costos financieros', kind: 'debt', color: '#7A5AF8', icon: 'receipt' };
 const STATUS = { confirm: 'awaiting_confirmation', pick: 'awaiting_clarification', strategy: 'awaiting_clarification', convention: 'awaiting_clarification', simpay: 'awaiting_clarification', mode: 'awaiting_clarification', charge: 'awaiting_clarification', minimum: 'awaiting_clarification', answers: 'awaiting_clarification', adjust_kind: 'awaiting_clarification', other: 'awaiting_clarification' };
 const PARAPHRASE_TIMEOUT_MS = 8000;
 const LEGAL_SOURCE = 'Nia (Telegram)';

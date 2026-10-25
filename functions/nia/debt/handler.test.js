@@ -166,7 +166,7 @@ describe('confirm a payment (exactly once)', () => {
 
     expect(w.tables.debt_events.filter((event) => event.kind === 'payment')).toEqual([expect.objectContaining({ $id: 'dep1', debtId: 'd1', amountMinor: 380381, dedupeKey: 'debt:p1', source: 'telegram', actorId: ACTOR })]);
     expect(costRows(w)).toEqual([expect.objectContaining({ $id: 'dcdep1', debtId: 'd1', type: 'expense', amountMinor: 180876, ownerScope: 'shared', source: 'debt', categoryId: 'cfh1', dedupeKey: 'debt:dep1' })]);
-    expect(w.tables.categories).toEqual([expect.objectContaining({ $id: 'cfh1', name: 'Costos financieros' })]);
+    expect(w.tables.categories).toEqual([expect.objectContaining({ $id: 'cfh1', name: 'Costos financieros', kind: 'debt' })]);
     expect(w.sent[1].text).toContain('registré');
     expect(w.sessions[w.sessions.length - 1]).toMatchObject({ status: 'completed', pending: { kind: 'debt', id: 'p1', done: true } });
   });
