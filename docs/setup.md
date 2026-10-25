@@ -65,7 +65,7 @@ Antes de iniciar sesión, agrega `localhost` como plataforma Web en **Appwrite �
 
 ## 3. Migrar la base de datos
 
-La migración crea una base TablesDB, doce tablas (las nueve originales más `debts`, `debt_events` y `legal_rates`), columnas, índices y un bucket privado para recibos. Es idempotente: si una tabla ya existe, la conserva y no la borra. Para Appwrite self-hosted 1.8.1 usa el tipo `string`, que es el endpoint disponible en esa versión; no cambies el script a `varchar`.
+La migración crea una base TablesDB, trece tablas (las nueve originales más `debts`, `debt_events`, `legal_rates` y `budget_lines`), columnas, índices y un bucket privado para recibos. Es idempotente: si una tabla ya existe, la conserva y no la borra. Para Appwrite self-hosted 1.8.1 usa el tipo `string`, que es el endpoint disponible en esa versión; no cambies el script a `varchar`.
 
 Antes de ejecutar:
 
@@ -106,6 +106,19 @@ npm run migrate:appwrite
 
 - Si la tabla aún no existe, la web y Nia siguen funcionando con los valores de la app y avisan: "No pudimos leer las tasas legales del hogar; usamos los valores de la app.".
 - Las cifras de esta tabla son informativas: avisan, nunca bloquean, y el extracto del banco manda.
+- Si necesitas revertir el código, la tabla puede quedar sin uso.
+
+### Actualizar una base existente (presupuestos flexibles)
+
+Los presupuestos flexibles agregan una tabla nueva, `budget_lines`, con los índices `by_household_from` y `by_household_target`. Es aditiva y sin permiso de borrado; la tabla `budgets` no se modifica y queda como respaldo de solo lectura.
+
+Ejecuta la migración **antes** de desplegar esta versión o una posterior (primero dos veces en desarrollo; la segunda ejecución no debe crear nada):
+
+```bash
+npm run migrate:appwrite
+```
+
+- Mientras la tabla no exista o esté vacía, la web sigue mostrando los presupuestos anteriores y la edición queda deshabilitada.
 - Si necesitas revertir el código, la tabla puede quedar sin uso.
 
 Después de la migración, crea una fila inicial en `households` desde la consola con `name`, `currency`, `timezone` y el `$id` del usuario propietario en `ownerId`. Copia el `$id` de esa fila en `HOUSEHOLD_ID`. El `HOUSEHOLD_TEAM_ID` y el `HOUSEHOLD_ID` son cosas diferentes: el primero identifica al equipo; el segundo identifica la fila concreta del hogar.
