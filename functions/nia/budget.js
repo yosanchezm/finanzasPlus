@@ -49,8 +49,10 @@ async function readOptional(listRows, table, where) {
  * data, or exists empty with no legacy rows. Missing, unreadable, or empty while `budgets` has rows is 'legacy' (read-only).
  */
 export function resolveLinesMode({ budgetLines, budgets }) {
-  const legacy = budgetLines.status !== 'ok' || (budgetLines.rows.length === 0 && budgets.rows.length > 0);
-  return { linesMode: legacy ? 'legacy' : 'lines', lines: legacy ? linesFromLegacyBudgets(budgets.rows) : budgetLines.rows };
+  // Only legacy rows the migration would turn into lines count: zero-amount rows are skipped by it and must not lock writes.
+  const legacyLines = linesFromLegacyBudgets(budgets.rows);
+  const legacy = budgetLines.status !== 'ok' || (budgetLines.rows.length === 0 && legacyLines.length > 0);
+  return { linesMode: legacy ? 'legacy' : 'lines', lines: legacy ? legacyLines : budgetLines.rows };
 }
 
 /**

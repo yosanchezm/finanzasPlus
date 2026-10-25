@@ -11,8 +11,10 @@ const MISSING = { rows: [], status: 'missing' };
  */
 export function resolveBudgetLines({ budgetLines = MISSING, budgets = [] }) {
   const { rows = [], status = 'missing' } = budgetLines || MISSING;
-  const legacy = status !== 'ok' || (rows.length === 0 && budgets.length > 0);
-  return { linesMode: legacy ? 'legacy' : 'lines', linesStatus: status, lines: legacy ? linesFromLegacyBudgets(budgets) : rows };
+  // Only legacy rows the migration would turn into lines count: zero-amount rows are skipped by it and must not lock editing.
+  const legacyLines = linesFromLegacyBudgets(budgets);
+  const legacy = status !== 'ok' || (rows.length === 0 && legacyLines.length > 0);
+  return { linesMode: legacy ? 'legacy' : 'lines', linesStatus: status, lines: legacy ? legacyLines : rows };
 }
 
 export const canEditBudget = ({ scope, linesMode, linesStatus }) => scope === 'total' && linesMode === 'lines' && linesStatus === 'ok';

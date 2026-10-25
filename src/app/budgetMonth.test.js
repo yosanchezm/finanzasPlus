@@ -18,6 +18,11 @@ describe('resolveBudgetLines', () => {
     expect(result.lines).toHaveLength(1);
   });
 
+  it('is lines for an empty table when every legacy row is one the migration skips (zero amounts)', () => {
+    const zero = { ...LEGACY_ROW, $id: 'b0', plannedMinor: 0 };
+    expect(resolveBudgetLines({ budgetLines: ok([]), budgets: [zero, { ...zero, $id: 'b9' }] })).toMatchObject({ linesMode: 'lines', lines: [] });
+  });
+
   it('is lines for an empty table with no legacy rows (new household)', () => {
     expect(resolveBudgetLines({ budgetLines: ok([]), budgets: [] })).toMatchObject({ linesMode: 'lines', lines: [] });
   });

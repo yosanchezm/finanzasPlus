@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { computeBudgetMonth, lineIds, linesFromLegacyBudgets } from '../../packages/finance-core/index.js';
-import { LEGACY_REFUSAL, budgetFigures, budgetWindow, budgetWrites, loadBudgetMonth, planBudgetEdit } from './budget.js';
+import { LEGACY_REFUSAL, budgetFigures, budgetWindow, budgetWrites, loadBudgetMonth, planBudgetEdit, resolveLinesMode } from './budget.js';
 import { pesos } from './debt/format.js';
 
 const TZ = 'America/Bogota';
@@ -222,5 +222,20 @@ describe('budgetFigures', () => {
     const budgetMonth = computeBudgetMonth({ month: MONTH, lines: [recurring], categories, transactions: [], previousMonthIncomeMinor: 500000 });
 
     expect(budgetFigures(budgetMonth)).toMatchObject({ incomeSource: 'reference', porAsignarMinor: -300000 });
+  });
+});
+
+describe('resolveLinesMode', () => {
+  const zero = { $id: 'b0', month: MONTH, categoryId: 'c-mercado', plannedMinor: 0 };
+
+  it('is lines for an empty table when every legacy row is one the migration skips (zero amounts)', () => {
+    const result = resolveLinesMode({ budgetLines: { status: 'ok', rows: [] }, budgets: { status: 'ok', rows: [zero, { ...zero, $id: 'b9' }] } });
+    expect(result).toEqual({ linesMode: 'lines', lines: [] });
+  });
+
+  it('stays legacy for an empty table while a legacy row still maps to a line', () => {
+    const result = resolveLinesMode({ budgetLines: { status: 'ok', rows: [] }, budgets: { status: 'ok', rows: [zero, { ...zero, $id: 'b1', plannedMinor: 8000 }] } });
+    expect(result.linesMode).toBe('legacy');
+    expect(result.lines.map((line) => line.$id)).toEqual(['blb1']);
   });
 });
