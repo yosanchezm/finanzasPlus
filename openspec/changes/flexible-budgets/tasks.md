@@ -142,9 +142,9 @@ Depends on S1a. Closest slice to the limit: if the checkpoint exceeds 400, split
 
 Depends on S1c.
 
-- [ ] S1d.1 RED: `test/budget/outflows.test.js`: per month `{income, consumption, saving, investment, debt, outflow}` for several months; `outflow` = consumption + saving + investment + debt; income minus outflow equals `balanceMinor` from `computeBudgetMonth` for the same data (consistency); transfers ignored; debt uses payment events when provided and the cost-row fallback when `debtEvents` is null. Reqs: DM-1, DM-4, DM-5. Scenarios: Consistency, Balance, Cashflow net. Pair: S1d.2. Done: fails.
-- [ ] S1d.2 GREEN: `outflows.js`, barrel export, node16 list. Pair: S1d.1. Done: green.
-- [ ] S1d.3 REFACTOR and size checkpoint: reuse the classifier and debt helper; `npm test`.
+- [x] S1d.1 RED: `test/budget/outflows.test.js`: per month `{income, consumption, saving, investment, debt, outflow}` for several months; `outflow` = consumption + saving + investment + debt; income minus outflow equals `balanceMinor` from `computeBudgetMonth` for the same data (consistency); transfers ignored; debt uses payment events when provided and the cost-row fallback when `debtEvents` is null. Reqs: DM-1, DM-4, DM-5. Scenarios: Consistency, Balance, Cashflow net. Pair: S1d.2. Done: fails.
+- [x] S1d.2 GREEN: `outflows.js`, barrel export, node16 list. Pair: S1d.1. Done: green.
+- [x] S1d.3 REFACTOR and size checkpoint: reuse the classifier and debt helper; `npm test`.
 
 ## Phase S2a: budget_lines schema (140 lines)
 

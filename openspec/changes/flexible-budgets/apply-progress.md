@@ -67,3 +67,23 @@ New files 373 lines (src 159, tests 230 incl. none else) + tracked diff 21 = 394
 - `totals.incomeMinor` is the real income; Por asignar uses `base.incomeMinor` (may be the reference). Rates use real income and `savingsRateBp` = (saving + investment) / income.
 - `groups[g].envelope` is null when absent or zero; `remainingMinor` is 0 when the limit is 0. `householdFixed` is true only for non-zero fixed lines when `scoped`.
 - Group lines on `income`, income-kind categories and archived categories are ignored; warnings carry `group`/`amountMinor` only where the design lists them.
+
+## S1d (branch feat/fb-s1d-outflows): S1d.1-S1d.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S1d.1/2 | test/budget/outflows.test.js | module missing | 6 pass | empty months, all groups, transfers, consistency with computeBudgetMonth, void/scope/charge, cost-row replacement, null-events fallback | `debtPayments` exported from compute.js and reused (no duplicated classifier or debt logic) |
+| S1d.2 | test/node16.test.js | barrel key list failed before export | pass | n/a | barrel + node16 list |
+| S1d.3 | npm test | n/a | 169 files / 2996 tests pass (one unrelated web timeout on first run, passed on re-run) | n/a | clean |
+
+## Size
+Approx 130 lines (src 38, test 77, tracked diff 5 incl. barrel and node16).
+
+## Work Unit Evidence
+- Focused: `npx vitest run packages/finance-core/test/budget/outflows.test.js` green. Runtime harness: N/A (pure).
+- Rollback: delete `outflows.js`, `outflows.test.js`, the barrel line, the node16 additions; drop `export` on `debtPayments`.
+
+## Decisions
+- Signature `monthOutflows(transactions, debtEvents, debts, months, categoriesById, { inScope, monthOf })`; transactions are bucketed by `occurredAt.slice(0, 7)` unless `monthOf` is given (S7a can pass a local-time month key to match `monthKeyOf`).
+- Same debt rule as computeBudgetMonth: payments replace cost rows with a `debtId`, kind-only rows always add, and the cost rows are the fallback when `debtEvents` is null or unreadable.
+- `debtPayments` is exported from compute.js but not from the package barrel.
