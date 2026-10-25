@@ -31,4 +31,19 @@ describe('buildCashflowSeries', () => {
       { day: 2, income: 0, expenses: 0 },
     ]);
   });
+
+  it('plots income against outflow (saving, investment, debt) so the last net equals Balance, and ignores transfers', () => {
+    const categoriesById = new Map([['s', { $id: 's', kind: 'saving' }], ['n', { $id: 'n', kind: 'need' }]]);
+    const series = buildCashflowSeries([
+      { type: 'income', amountMinor: 4000000, occurredAt: at(1) },
+      { type: 'expense', amountMinor: 1500000, categoryId: 'n', occurredAt: at(2) },
+      { type: 'expense', amountMinor: 800000, categoryId: 's', occurredAt: at(2) },
+      { type: 'expense', amountMinor: 700000, debtId: 'd1', occurredAt: at(3) },
+      { type: 'transfer', amountMinor: 999999, occurredAt: at(3) },
+    ], new Date(2026, 9, 3), { categoriesById });
+
+    const last = series[series.length - 1];
+    expect(last).toEqual({ day: 3, income: 4000000, expenses: 3000000 });
+    expect(last.income - last.expenses).toBe(1000000);
+  });
 });

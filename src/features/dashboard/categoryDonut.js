@@ -1,3 +1,5 @@
+import { CONSUMPTION, groupOfKind } from '@finance-core';
+
 /**
  * Slot colors of the spending donut, in fixed order: the biggest slice always takes slot 1.
  * Colored by position, not by category, so every pair of neighbouring slices stays distinguishable
@@ -15,9 +17,11 @@ const byValueThenName = (a, b) => b.value - a.value || a.name.localeCompare(b.na
 /**
  * Donut slices of the categories with spending: the 5 biggest by name, the rest folded into "Otros"
  * (whose `members` keep the folded categories for the legend). `share` is the fraction of the total.
+ * Consumption only: saving, investment, debt and income categories never get a slice.
  */
 export const buildDonutSlices = (stats = []) => {
   const spent = (stats || [])
+    .filter((item) => CONSUMPTION.includes(groupOfKind(item.kind)))
     .map((item) => ({ categoryId: item.$id, name: item.name, value: Number(item.value) || 0 }))
     .filter((item) => item.value > 0)
     .sort(byValueThenName);

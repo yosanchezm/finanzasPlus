@@ -1,8 +1,11 @@
+import { classifyTransaction } from '@finance-core';
+
 /**
- * Daily cumulative income and expenses for today's month, from day 1 up to today.
+ * Daily cumulative income and outflow (consumption, saving, investment and debt; AD11) for today's month, from day 1
+ * up to today, so the last point's net is Balance. Transfers are ignored. `expenses` holds the outflow.
  * Only uses the transactions it receives; nothing is projected.
  */
-export const buildCashflowSeries = (transactions = [], today = new Date()) => {
+export const buildCashflowSeries = (transactions = [], today = new Date(), { categoriesById = new Map() } = {}) => {
   const year = today.getFullYear();
   const month = today.getMonth();
   const lastDay = today.getDate();
@@ -12,9 +15,11 @@ export const buildCashflowSeries = (transactions = [], today = new Date()) => {
   transactions.forEach((item) => {
     const date = new Date(item.occurredAt);
     if (Number.isNaN(date.getTime()) || date.getFullYear() !== year || date.getMonth() !== month) return;
+    const group = classifyTransaction(item, categoriesById);
+    if (!group) return;
     const index = date.getDate() - 1;
     if (index < 0 || index >= lastDay) return;
-    (item.type === 'income' ? income : expenses)[index] += Number(item.amountMinor || 0);
+    (group === 'income' ? income : expenses)[index] += Number(item.amountMinor || 0);
   });
 
   let incomeTotal = 0;

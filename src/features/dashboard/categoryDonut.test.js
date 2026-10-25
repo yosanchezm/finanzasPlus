@@ -36,4 +36,15 @@ describe('buildDonutSlices', () => {
     expect(buildDonutSlices([stat('a', 'Mercado', 0)])).toEqual({ total: 0, slices: [] });
     expect(buildDonutSlices(undefined)).toEqual({ total: 0, slices: [] });
   });
+
+  it('draws consumption categories only: saving, investment, debt and income never appear', () => {
+    const kinded = (id, name, value, kind) => ({ ...stat(id, name, value), kind });
+    const { total, slices } = buildDonutSlices([
+      kinded('a', 'Mercado', 100, 'need'), kinded('b', 'Ocio', 50, 'want'), kinded('c', 'Ahorro', 900, 'saving'),
+      kinded('d', 'Fondo', 800, 'investment'), kinded('e', 'Tarjeta', 700, 'debt'), stat('f', 'Sin tipo', 25),
+    ]);
+
+    expect(slices.map((slice) => slice.name)).toEqual(['Mercado', 'Ocio', 'Sin tipo']);
+    expect(total).toBe(175);
+  });
 });

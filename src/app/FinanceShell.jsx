@@ -111,11 +111,15 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     expenses: visibleTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + Number(item.amountMinor || 0), 0),
   }), [visibleTransactions]);
 
+  const categoriesById = useMemo(() => new Map(categories.map((category) => [category.$id, category])), [categories]);
+  const debtEventRows = debtEvents?.status === 'ok' && debts?.status === 'ok' ? debtEvents.rows : null;
+
   // Previous 5 months (aggregated from their rows) + the selected month, all with the same scope filter.
   const history = useMemo(() => aggregateMonthlyTotals(
     [...(data.periodReady ? data.period.history : []).filter(inScope), ...visibleTransactions],
     monthsEndingAt(selectedMonth, 6),
-  ), [data.period, data.periodReady, visibleTransactions, selectedMonth, storedScope]);
+    { categoriesById, debts: debts?.rows ?? [], debtEvents: debtEventRows, inScope },
+  ), [data.period, data.periodReady, visibleTransactions, selectedMonth, storedScope, categoriesById, debts, debtEventRows]);
 
   // The one budget computation of the month (AD6). Lines come from budget_lines, or from the read-only budgets while migrating.
   const { linesMode, linesStatus, lines } = useMemo(() => resolveBudgetLines({ budgetLines, budgets }), [budgetLines, budgets]);
@@ -127,8 +131,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   // Until the dashboard reads budgetMonth directly (S7) it keeps its planned/spent summary and category stats.
   const { budget: dashboardBudget, categoryStats } = useMemo(() => legacyDashboardProps(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
   const cashflow = useMemo(
-    () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth)),
-    [visibleTransactions, selectedMonth, dayOfMonth],
+    () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth), { categoriesById }),
+    [visibleTransactions, selectedMonth, dayOfMonth, categoriesById],
   );
 
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 3000); };
