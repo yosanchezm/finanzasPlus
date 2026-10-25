@@ -10,7 +10,7 @@ const SUGGESTIONS = [
 ];
 
 /** Nia side sheet (bottom sheet on mobile). The web chat is not available yet, so the composer stays disabled. */
-export default function AssistantPanel({ onClose, onNavigate, totals, transactionsCount }) {
+export default function AssistantPanel({ onClose, onNavigate, balanceMinor, transactionsCount }) {
   return (
     <DialogRoot open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent variant="side">
@@ -37,7 +37,7 @@ export default function AssistantPanel({ onClose, onNavigate, totals, transactio
           <dl className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1.5 rounded-sm border border-border p-3">
               <dt className="text-xs text-ink-faint">Balance del mes</dt>
-              <dd className="text-sm font-semibold text-ink tabular-nums">{formatSignedMoney(totals.income - totals.expenses)}</dd>
+              <dd className="text-sm font-semibold text-ink tabular-nums">{formatSignedMoney(balanceMinor)}</dd>
             </div>
             <div className="flex flex-col gap-1.5 rounded-sm border border-border p-3">
               <dt className="text-xs text-ink-faint">Movimientos sincronizados</dt>

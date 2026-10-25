@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, resolveBudgetLines } from './budgetMonth';
+import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, movementCounts, resolveBudgetLines } from './budgetMonth';
 
 const ok = (rows) => ({ rows, status: 'ok' });
 const LEGACY_ROW = { $id: 'b1', month: '2026-10', categoryId: 'c1', plannedMinor: 8000 };
@@ -93,5 +93,15 @@ describe('dashboardCategoryStats', () => {
     const categoryStats = dashboardCategoryStats(month, categories);
     expect(categoryStats).toHaveLength(1);
     expect(categoryStats[0]).toMatchObject({ $id: 'c1', name: 'Mercado', value: 3000, budget: 5000 });
+  });
+});
+
+describe('movementCounts', () => {
+  const categories = new Map([['n', { kind: 'need' }], ['w', { kind: 'want' }], ['s', { kind: 'saving' }]]);
+  const tx = (type, categoryId, extra = {}) => ({ type, categoryId, ...extra });
+
+  it('counts income and only consumption expenses (need and want), skipping saving, debt and transfers', () => {
+    const rows = [tx('income', 'x'), tx('expense', 'n'), tx('expense', 'w'), tx('expense', 's'), tx('expense', 'n', { debtId: 'd1' }), tx('transfer', 'n')];
+    expect(movementCounts(rows, categories)).toEqual({ income: 1, consumption: 2 });
   });
 });

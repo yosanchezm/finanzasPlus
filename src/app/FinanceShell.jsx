@@ -27,7 +27,7 @@ import { formatLongDate, formatMonth, formatMonthLabel } from '../shared/lib/for
 import { aggregateMonthlyTotals } from '../shared/lib/monthly';
 import { Toast } from '../shared/ui/Toast';
 import { useFinanceData } from './useFinanceData';
-import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, resolveBudgetLines } from './budgetMonth';
+import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, movementCounts, resolveBudgetLines } from './budgetMonth';
 import { PeriodError, ViewSkeleton } from './ViewSkeleton';
 
 // Sections other than the default one are split into their own chunks.
@@ -106,11 +106,6 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     [periodTransactions, categories, storedScope],
   );
 
-  const totals = useMemo(() => ({
-    income: visibleTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + Number(item.amountMinor || 0), 0),
-    expenses: visibleTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + Number(item.amountMinor || 0), 0),
-  }), [visibleTransactions]);
-
   const categoriesById = useMemo(() => new Map(categories.map((category) => [category.$id, category])), [categories]);
   const debtEventRows = debtEvents?.status === 'ok' && debts?.status === 'ok' ? debtEvents.rows : null;
 
@@ -128,6 +123,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     month: selectedMonth, lines, categories, transactions: visibleTransactions, history: data.periodReady ? data.period.history : [],
     debts, debtEvents, inScope, scoped: storedScope !== 'total',
   }), [selectedMonth, lines, categories, visibleTransactions, data.period, data.periodReady, debts, debtEvents, storedScope]);
+  const counts = useMemo(() => movementCounts(visibleTransactions, categoriesById), [visibleTransactions, categoriesById]);
   const categoryStats = useMemo(() => dashboardCategoryStats(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
   const cashflow = useMemo(
     () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth), { categoriesById, debts: debts?.rows ?? [], debtEvents: debtEventRows, inScope }),
@@ -272,8 +268,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             scope={scope}
             onScopeChange={setScope}
             budgetMonth={budgetMonth}
-            incomeCount={visibleTransactions.filter((item) => item.type === 'income').length}
-            expenseCount={visibleTransactions.filter((item) => item.type === 'expense').length}
+            incomeCount={counts.income}
+            expenseCount={counts.consumption}
             remainingDays={remainingDays}
             isCurrentMonth={isCurrentMonth}
             cashflow={cashflow}
@@ -333,7 +329,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         />
       )}
       {showGoal && <GoalModal onClose={() => setShowGoal(false)} onSubmit={saveGoal} />}
-      {showAssistant && <AssistantPanel onClose={() => setShowAssistant(false)} onNavigate={(view) => { setActiveView(view); setShowAssistant(false); }} totals={totals} transactionsCount={periodTransactions.length} />}
+      {showAssistant && <AssistantPanel onClose={() => setShowAssistant(false)} onNavigate={(view) => { setActiveView(view); setShowAssistant(false); }} balanceMinor={budgetMonth.totals.balanceMinor} transactionsCount={periodTransactions.length} />}
       <Toast message={toast} />
     </>
   );

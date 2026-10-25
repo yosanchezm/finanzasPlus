@@ -1,4 +1,4 @@
-import { computeBudgetMonth, linesFromLegacyBudgets } from '@finance-core';
+import { CONSUMPTION, classifyTransaction, computeBudgetMonth, linesFromLegacyBudgets } from '@finance-core';
 import { addMonths, monthKey } from '../shared/lib/dates';
 import { categoryColor } from '../shared/lib/categories';
 
@@ -31,6 +31,17 @@ export function buildBudgetMonth({ month, lines, categories, transactions, histo
     debts: debts?.rows ?? [],
     debtEvents: debtEvents?.status === 'ok' && debts?.status === 'ok' ? debtEvents.rows : null,
   });
+}
+
+/** Movement counts the KPI notes show: income rows and consumption (need + want) expense rows; transfers and the rest are excluded. */
+export function movementCounts(transactions, categoriesById) {
+  const counts = { income: 0, consumption: 0 };
+  for (const tx of transactions) {
+    const group = classifyTransaction(tx, categoriesById);
+    if (group === 'income') counts.income += 1;
+    else if (CONSUMPTION.includes(group)) counts.consumption += 1;
+  }
+  return counts;
 }
 
 /** Per-category rows (any group) with the month's limit and actual, as the dashboard donut reads them. */

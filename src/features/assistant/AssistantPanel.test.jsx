@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import AssistantPanel from './AssistantPanel';
 
 const renderPanel = () => {
-  const props = { onClose: vi.fn(), onNavigate: vi.fn(), totals: { income: 5200000, expenses: 1200000 }, transactionsCount: 12 };
+  const props = { onClose: vi.fn(), onNavigate: vi.fn(), balanceMinor: 4000000, transactionsCount: 12 };
   render(<AssistantPanel {...props} />);
   return { props, user: userEvent.setup() };
 };

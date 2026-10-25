@@ -1,18 +1,17 @@
 /**
  * One-off, re-runnable data migration: merges duplicate categories.
  *
- * Every transaction and budget pointing to a duplicate is repointed to the
- * category that stays, then the duplicate is archived (never deleted).
- * Same-month budgets are summed into the kept budget and the duplicate budget
- * is removed.
+ * Every transaction pointing to a duplicate is repointed to the category that
+ * stays, then the duplicate is archived (never deleted). Budgets are NOT
+ * touched: the legacy `budgets` table is the rollback source after the
+ * flexible-budgets cut-over, and `budget_lines` category targets are not
+ * rewritten, so repoint those by hand if a line targets a duplicate.
  *
  * Usage:
  *   npm run merge:categories            # dry run, writes nothing
  *   npm run merge:categories -- --apply # backup + writes
  *
- * Re-running after a successful apply is a no-op. If an apply stops halfway,
- * check the backup before re-running: a stop between a budget sum (PATCH) and
- * the duplicate budget removal (DELETE) would add that amount twice.
+ * Re-running after a successful apply is a no-op.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -118,24 +117,18 @@ async function main() {
     const from = byName.get(entry.from);
     const into = byName.get(entry.into);
     const state = from?.archived ? ' (ya archivada)' : '';
-    console.log(`${index + 1}. "${entry.from}"${state} → "${entry.into}": ${entry.transactions} movimientos, ${entry.budgets} presupuestos`);
+    console.log(`${index + 1}. "${entry.from}"${state} → "${entry.into}": ${entry.transactions} movimientos`);
     if (from && into && from.kind !== into.kind) {
       console.log(`   ⚠ tipos distintos: "${entry.from}" es ${from.kind}, "${entry.into}" es ${into.kind}`);
     }
   });
-  const budgetById = new Map(budgetRows.map((row) => [row.$id, row]));
-  for (const merge of plan.budgetMerges) {
-    const removed = budgetById.get(merge.removeId);
-    console.log(`   · presupuesto ${removed?.month}: se suma ${removed?.plannedMinor} al presupuesto ${merge.keepId} (total ${merge.plannedMinor}, alerta ${merge.alertAtPercent ?? '—'}) y se elimina ${merge.removeId}`);
-  }
+  console.log('\n⚠ Los presupuestos (budgets y budget_lines) no se modifican: las líneas de presupuesto que apunten a una categoría duplicada no se reasignan.');
 
   console.log('\nTotales:');
   console.log(`  Movimientos a reasignar:      ${plan.transactionUpdates.length}`);
-  console.log(`  Presupuestos a reasignar:     ${plan.budgetUpdates.length}`);
-  console.log(`  Presupuestos a fusionar:      ${plan.budgetMerges.length}`);
   console.log(`  Categorías a archivar:        ${plan.archive.length}`);
 
-  const writes = plan.transactionUpdates.length + plan.budgetUpdates.length + plan.budgetMerges.length + plan.archive.length;
+  const writes = plan.transactionUpdates.length + plan.archive.length;
   if (!writes) {
     console.log('\nNada que hacer: los datos ya están fusionados.');
     return;
@@ -147,10 +140,6 @@ async function main() {
 
   // Backup every original row this run will touch before the first write.
   const touchedTransactions = new Set(plan.transactionUpdates.map((update) => update.id));
-  const touchedBudgets = new Set([
-    ...plan.budgetUpdates.map((update) => update.id),
-    ...plan.budgetMerges.flatMap((merge) => [merge.keepId, merge.removeId]),
-  ]);
   const touchedCategories = new Set(plan.archive);
   const backup = {
     createdAt: new Date().toISOString(),
@@ -160,7 +149,6 @@ async function main() {
     rows: {
       categories: categoryRows.filter((row) => touchedCategories.has(row.$id)),
       transactions: transactionRows.filter((row) => touchedTransactions.has(row.$id)),
-      budgets: budgetRows.filter((row) => touchedBudgets.has(row.$id)),
     },
   };
   const backupDir = resolve(process.cwd(), 'backups');
@@ -174,21 +162,6 @@ async function main() {
     await write(`movimiento ${update.id}: ${update.from} → ${update.to}`, rowPath('transactions', update.id), {
       method: 'PATCH', body: { data: { categoryId: update.to } },
     });
-  }
-
-  console.log('Reasignando presupuestos…');
-  for (const update of plan.budgetUpdates) {
-    await write(`presupuesto ${update.id} → ${update.categoryId}`, rowPath('budgets', update.id), {
-      method: 'PATCH', body: { data: { categoryId: update.categoryId } },
-    });
-  }
-
-  console.log('Fusionando presupuestos del mismo mes…');
-  for (const merge of plan.budgetMerges) {
-    await write(`presupuesto ${merge.keepId}: plannedMinor ${merge.plannedMinor}, alerta ${merge.alertAtPercent ?? '—'}`, rowPath('budgets', merge.keepId), {
-      method: 'PATCH', body: { data: { plannedMinor: merge.plannedMinor, alertAtPercent: merge.alertAtPercent } },
-    });
-    await write(`presupuesto ${merge.removeId} eliminado`, rowPath('budgets', merge.removeId), { method: 'DELETE' });
   }
 
   console.log('Archivando categorías duplicadas…');
