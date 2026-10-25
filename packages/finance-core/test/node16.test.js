@@ -100,6 +100,7 @@ describe('finance-core sources', () => {
         'index.js',
         'src/advice/advice.js',
         'src/advice/facts.js',
+        'src/budget/edit.js',
         'src/budget/groups.js',
         'src/budget/ids.js',
         'src/budget/lines.js',
@@ -265,6 +266,7 @@ describe('public barrel (index.js)', () => {
         'groupOfKind',
         'lineIds',
         'linesFromLegacyBudgets',
+        'planLineEdit',
         'resolveLines',
         'targetKey',
         'validateLine',
@@ -277,6 +279,7 @@ describe('public barrel (index.js)', () => {
     expect(api.lineIds.override({ targetType: 'category', targetId: 'abc' }, '2026-10')).toBe('bo202610a6b009ca135b60af');
     expect(api.validateLine({ targetType: 'group', targetId: 'income', rule: 'fixed', amountMinor: 1, fromMonth: '2026-10' }).ok).toBe(false);
     expect(api.resolveLines(api.linesFromLegacyBudgets([{ $id: 'x', categoryId: 'c', month: '2026-10', plannedMinor: 5 }]), '2026-10').get('category:c').amountMinor).toBe(5);
+    expect(api.planLineEdit([], { target: { targetType: 'category', targetId: 'c' }, rule: 'fixed', value: 5, month: '2026-10', span: 'month', action: 'set', actorId: 'u', source: 'web' }).creates).toHaveLength(1);
     expect(api.roundUnit(-2.5)).toBe(-3);
     expect(api.addMonthsClamped('2026-01-31', 1)).toBe('2026-02-28');
     expect(api.rateLabel(api.normalizeRate({ convention: 'MV', value: 2.1 }))).toBe('2.1% MV ≈ 28.32% EA');

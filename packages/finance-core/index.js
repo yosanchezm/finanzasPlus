@@ -58,6 +58,7 @@ export { allowedTexts } from './src/explain/allowed.js';
 export { EXPLAIN_COPY, copyStatus, releasedTopics } from './src/explain/copy.js';
 export { explainFacts } from './src/explain/explain.js';
 export { EXPLAIN_TOPICS } from './src/explain/topics.js';
+export { planLineEdit } from './src/budget/edit.js';
 export { CONSUMPTION, GROUPS, classifyTransaction, groupOfKind } from './src/budget/groups.js';
 export { fnv1a64hex, lineIds, targetKey } from './src/budget/ids.js';
 export { coversMonth, linesFromLegacyBudgets, resolveLines, validateLine } from './src/budget/lines.js';
