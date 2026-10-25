@@ -189,9 +189,9 @@ Depends on S1c. Valve: S4a (data layer) / S4b (`linesMode` and shell).
 
 Depends on S4. Files under `src/features/budget/`.
 
-- [ ] S5a.1 RED: `BudgetContainer.test.jsx` and header test: container receives `budgetMonth`, `canEdit`, `linesMode`; shows the legacy notice "Los presupuestos se están migrando; la edición se habilita al terminar." in legacy mode and no edit controls; shows the "Referencia: {mes anterior}" badge when `base.source` is `reference` and a missing-income hint for `none`; header shows income base, Asignado, Por asignar (negative styled with the `over_allocated` indication); scope Tú/Pareja shows lines read-only with a note to switch to Hogar; `saveState` is not optimistic (idle -> saving -> idle/error with `readableError` and "Reintentar"). Reqs: BP-7, BM-8, BC-7. Scenarios: Edit blocked in personal scope, Table not yet created, Table created but not migrated, Over-allocated (display). Pair: S5a.2. Done: fails.
-- [ ] S5a.2 GREEN: `BudgetContainer.jsx` (container, editor state shell, `onRefresh` hook-up) and `BudgetView` header. Pair: S5a.1. Done: green.
-- [ ] S5a.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
+- [x] S5a.1 RED: `BudgetContainer.test.jsx` and header test: container receives `budgetMonth`, `canEdit`, `linesMode`; shows the legacy notice "Los presupuestos se están migrando; la edición se habilita al terminar." in legacy mode and no edit controls; shows the "Referencia: {mes anterior}" badge when `base.source` is `reference` and a missing-income hint for `none`; header shows income base, Asignado, Por asignar (negative styled with the `over_allocated` indication); scope Tú/Pareja shows lines read-only with a note to switch to Hogar; `saveState` is not optimistic (idle -> saving -> idle/error with `readableError` and "Reintentar"). Reqs: BP-7, BM-8, BC-7. Scenarios: Edit blocked in personal scope, Table not yet created, Table created but not migrated, Over-allocated (display). Pair: S5a.2. Done: fails.
+- [x] S5a.2 GREEN: `BudgetContainer.jsx` (container, editor state shell, `onRefresh` hook-up) and `BudgetView` header. Pair: S5a.1. Done: green.
+- [x] S5a.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
 
 ## Phase S5b: Group sections and category rows (260 lines)
 

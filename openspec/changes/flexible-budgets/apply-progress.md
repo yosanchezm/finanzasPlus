@@ -173,3 +173,25 @@ About 334 lines (tracked diff 186 incl. deletions, new files 148).
 - New `src/app/budgetMonth.js`: `resolveBudgetLines`, `canEditBudget`, `buildBudgetMonth`, `legacyDashboardProps`. An unavailable table is treated as legacy (lines from `budgets`), editing off.
 - Debt events are null unless both `debts` and `debt_events` reads are ok. Reference income = previous month income rows of the 5-month history, scope filtered.
 - Interim bridge until S5/S7: the shell derives the old `budget`, `categoryStats` and view `budgets` props from `budgetMonth` (`legacyDashboardProps`); the old BudgetView editor gets a paused handler (notify, no write) so `budgets` is never written. `upsertBudget` stays exported in appwrite.js but is unused by the shell. `budgetMonth`, `canEdit`, `linesMode` are already passed to BudgetView (ignored until S5a).
+
+## S5a (branch feat/fb-s5a-budget-container): S5a.1-S5a.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S5a.1/2 | src/features/budget/BudgetHeader.test.jsx | module missing | 7 pass | actual/reference/none sources, over-allocated styling, legacy notice, personal scope note, no notice in Hogar | n/a |
+| S5a.1/2 | src/features/budget/BudgetContainer.test.jsx | module missing | 4 pass | saving -> refresh -> idle (not optimistic), error with `readableError` and "Reintentar" repeating the same write, legacy mode, canEdit passthrough | n/a |
+| S5a.2 | src/features/budget/BudgetView.test.jsx | 2 failures (header slot, read-only) | 20 pass | canEdit false vs true | `locked` threaded through the old row hook |
+| S5a.3 | npm test, npm run build | n/a | 175 files / 3059 tests pass; build ok | n/a | n/a |
+
+## Size
+About 278 lines (tracked diff 47, new files 231).
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/features/budget` green (37 tests). Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S5a commit (delete `BudgetContainer.jsx`, `BudgetHeader.jsx`; shell lazy-imports `BudgetView` again).
+
+## Decisions
+- `BudgetContainer` owns `saveState` and exposes `onCommit(write)` to the view (write -> `onRefresh` -> idle; failure keeps the error and throws so the caller can react). "Reintentar" re-runs the last write. The S6a dialog will call `onCommit` with its `planLineEdit` writes.
+- The header and the error banner are passed to `BudgetView` through a `header` slot; `BudgetHeader` is a separate presentational component.
+- `BudgetView` takes `canEdit` (default true): when false, the old limit fields are read-only and the copy-previous action is hidden. The paused handler and the legacy BudgetView props stay in the shell until S5b/S6a replace the body.
+- Legacy notice wins over the personal-scope note. Shell passes `scope` and `onRefresh={refreshInPlace}`.
