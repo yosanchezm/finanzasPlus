@@ -326,3 +326,28 @@ About 300 changed lines (tracked 144 additions + 64 deletions, new KpiCards.test
 - `planBudgetEdit({draft, lines, linesMode, categories, ctx})` serves both the preview and the post-confirmation plan (re-plan with fresh lines); issues: `legacy_mode`, `unknown_category`, `income_category`, `debt_category`, `invalid_amount`. `budgetWrites(plan, householdId)` yields ordered `{op, table, id, data}`.
 - Pending shape and callbacks are left to S8b; the draft is `{action, categoryId, amountMinor, month}` (well under the pending size limit).
 - Nia's AI prompt kind enum and `COST_CATEGORY.kind = 'debt'` stay in S8b.
+
+## S8b (branch feat/fb-s8b-nia-wiring): S8b.1-S8b.4 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S8b.1/2 | functions/nia/index.test.js (budget wiring) | 5 failed (preview, repeat/tombstone, legacy refusal, income refusal, analysis figures) | 5 pass | preview writes nothing, double Confirm writes once; existing one-month line `blabc` updated in place; delete writes amount 0 tombstone with recurring untouched; legacy mode refuses with no markup and no write; `budgets` never touched | `debtListRows` gained the optional capped `range` instead of a second reader |
+| S8b.1/2 | functions/nia/index.test.js (category kinds) | 1 failed (enum had no `investment`) | 2 pass | `investment` stored; `debt` and unknown read as `need` | n/a |
+| S8b.1/2 | functions/nia/debt/handler.test.js | 1 failed (`COST_CATEGORY.kind` was `need`) | pass | n/a | n/a |
+| S8b.1 | scripts/package-nia.test.js | 1 failed (bundle lacked the budget module) | pass | bundle inlines `loadBudgetMonth`, `planBudgetEdit`, `budgetWrites`, `budget_lines`; Node 16 scan and smoke GET unchanged | n/a |
+| S8b.3 | functions/nia/README.md | n/a | n/a | n/a | n/a |
+| S8b.4 | npm test, npm run build, npm run package:nia | n/a | `npx vitest run --maxWorkers=6`: 178 files / 3126 tests pass; build ok; package:nia (local only) wrote the tarball | n/a | n/a |
+
+## Size
+About 258 changed lines excluding openspec (code commit: 218 insertions, 40 deletions, README included).
+
+## Work Unit Evidence
+- Focused: `npx vitest run functions/nia scripts/package-nia.test.js` 1024 pass. Runtime harness: the entry point runs against the in-memory Appwrite/Telegram/Gemini fake; `npm run package:nia` (local packaging only) built the tarball. Live Telegram smoke is OP-6 (operator).
+- Rollback: revert the S8b code commit (wiring, kind enum, `COST_CATEGORY`, README); redeploy the previous tarball.
+
+## Decisions
+- Pending carries `{draft: {action, categoryId, amountMinor, month}, preview}`; Confirm re-plans with fresh lines (`applyBudgetDraft`) and writes with `updateRow` (updates) and `upsertRow` with team read+update permissions (creates, idempotent).
+- Nia no longer defines the `budgets` table (reads happen only inside `budget.js`); the snapshot loads the budget only for budget operations and analysis (`withBudget`). Analysis gets `budget` (mode, figures, planned categories); raw lines stay out of the prompt.
+- After a write the reply adds "Por asignar este mes" from a fresh `loadBudgetMonth` when an income base exists.
+- Transaction reads use a capped (50 pages) offset-paginated range read; past the cap the budget degrades to "unavailable" and nothing is written.
+- Remaining checklist item left open: OP-1..OP-7 reporting (operator steps).

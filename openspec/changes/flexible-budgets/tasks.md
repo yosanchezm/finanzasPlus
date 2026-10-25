@@ -249,10 +249,10 @@ Depends on S1b and S1c. Files: `functions/nia/budget.js` and tests.
 
 Depends on S8a.
 
-- [ ] S8b.1 RED: wiring tests in `functions/nia` (injected deps as in existing handler tests): the budget intent routes to the new module and the pending/confirm flow carries the "solo este mes" preview; the kind enum in extraction accepts `investment` and does not accept or offer `debt`; unknown legacy kinds still read as `need`; creating a category of kind investment stores `investment`; `COST_CATEGORY.kind` in `functions/nia/debt/handler.js` is `'debt'`; `scripts/package-nia.test.js` still builds and passes the Node 16 scan and smoke GET with the budget module bundled. Reqs: NB-1, NB-2, NB-4, BM-7. Scenarios: New category, Cost row, Set budget (wiring). Pair: S8b.2. Done: fails.
-- [ ] S8b.2 GREEN: `functions/nia/index.js` wiring, kind enum, `COST_CATEGORY.kind = 'debt'`. Pair: S8b.1. Done: green.
-- [ ] S8b.3 Docs: `functions/nia/README.md` documents `budget_lines`, "solo este mes" semantics, legacy refusal, and the deploy order (after `migrate:budgets --apply`). Reqs: NB-1, NB-3, BM-9. Pair: n/a (docs). Done: matches OP-6.
-- [ ] S8b.4 REFACTOR and final verification: `npm test`, `npm run build`, `npm run package:nia` and smoke GET, size checkpoint. Done: OP-1 to OP-7 reported as done/pending in PR descriptions; ready for sdd-verify.
+- [x] S8b.1 RED: wiring tests in `functions/nia` (injected deps as in existing handler tests): the budget intent routes to the new module and the pending/confirm flow carries the "solo este mes" preview; the kind enum in extraction accepts `investment` and does not accept or offer `debt`; unknown legacy kinds still read as `need`; creating a category of kind investment stores `investment`; `COST_CATEGORY.kind` in `functions/nia/debt/handler.js` is `'debt'`; `scripts/package-nia.test.js` still builds and passes the Node 16 scan and smoke GET with the budget module bundled. Reqs: NB-1, NB-2, NB-4, BM-7. Scenarios: New category, Cost row, Set budget (wiring). Pair: S8b.2. Done: fails.
+- [x] S8b.2 GREEN: `functions/nia/index.js` wiring, kind enum, `COST_CATEGORY.kind = 'debt'`. Pair: S8b.1. Done: green.
+- [x] S8b.3 Docs: `functions/nia/README.md` documents `budget_lines`, "solo este mes" semantics, legacy refusal, and the deploy order (after `migrate:budgets --apply`). Reqs: NB-1, NB-3, BM-9. Pair: n/a (docs). Done: matches OP-6.
+- [x] S8b.4 REFACTOR and final verification: `npm test`, `npm run build`, `npm run package:nia` and smoke GET, size checkpoint. Done: OP-1 to OP-7 reported as done/pending in PR descriptions; ready for sdd-verify.
 
 ## Requirement index and traceability
 
@@ -301,8 +301,8 @@ Coverage: 38 of 38 spec requirements map to at least one task. Threat Matrix: N/
 
 ## Final verification checklist (end of S8b, before sdd-verify)
 
-- [ ] `npm test` and `npm run build` pass; `npm run package:nia` produces `functions/nia.tar.gz` that passes the smoke test and the Node 16 scan.
-- [ ] `packages/finance-core/test/node16.test.js` lists every new budget file and passes.
-- [ ] `budgets` table is never written by web or Nia code (grep shows only reads and the migration backup).
-- [ ] No slice PR exceeded 400 changed lines, or the overflow valve was used and noted in the PR.
+- [x] `npm test` and `npm run build` pass; `npm run package:nia` produces `functions/nia.tar.gz` that passes the smoke test and the Node 16 scan.
+- [x] `packages/finance-core/test/node16.test.js` lists every new budget file and passes.
+- [x] `budgets` table is never written by web or Nia code (grep shows only reads and the migration backup).
+- [x] No slice PR exceeded 400 changed lines, or the overflow valve was used and noted in the PR.
 - [ ] Operator steps OP-1 to OP-7 each marked done, skipped with reason, or pending in the PR descriptions.
