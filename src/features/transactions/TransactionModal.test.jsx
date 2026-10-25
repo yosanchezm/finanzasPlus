@@ -12,9 +12,9 @@ const CATEGORIES = [
 
 const EMPTY_FORM = { merchant: '', amount: '', categoryId: 'c1', type: 'expense', owner: 'you', date: '2026-10-12', note: '' };
 
-function Harness({ initialForm = EMPTY_FORM, ...props }) {
+function Harness({ initialForm = EMPTY_FORM, categories = CATEGORIES, ...props }) {
   const [form, setForm] = useState(initialForm);
-  return <TransactionModal form={form} setForm={setForm} categories={CATEGORIES} {...props} />;
+  return <TransactionModal form={form} setForm={setForm} categories={categories} {...props} />;
 }
 
 const renderModal = (overrides = {}) => {
@@ -34,6 +34,31 @@ const renderModal = (overrides = {}) => {
 const optionNames = () => within(screen.getByRole('combobox', { name: 'Categoría' })).getAllByRole('option').map((option) => option.textContent);
 
 describe('TransactionModal', () => {
+  it('groups expense categories by budget group and skips empty groups', () => {
+    const categories = [
+      { $id: 'a', name: 'Mercado', kind: 'need' },
+      { $id: 'b', name: 'Cine', kind: 'want' },
+      { $id: 'c', name: 'ETF', kind: 'investment' },
+      { $id: 'd', name: 'Tarjeta', kind: 'debt' },
+      { $id: 'e', name: 'Sueldo', kind: 'income' },
+    ];
+    render(<Harness categories={categories} initialForm={{ ...EMPTY_FORM, categoryId: 'a' }} receiptFile={null} setReceiptFile={vi.fn()} editing={null} saving={false} onClose={vi.fn()} onSubmit={vi.fn()} />);
+
+    const groups = within(screen.getByRole('combobox', { name: 'Categoría' })).getAllByRole('group');
+    expect(groups.map((group) => [group.getAttribute('label'), within(group).getAllByRole('option').map((option) => option.textContent)])).toEqual([
+      ['Necesidades', ['Mercado']], ['Gustos', ['Cine']], ['Inversión', ['ETF']], ['Deudas', ['Tarjeta']],
+    ]);
+  });
+
+  it('keeps income categories in a flat list', async () => {
+    const { user } = renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Ingreso' }));
+
+    expect(screen.queryAllByRole('group', { name: /Necesidades/ })).toHaveLength(0);
+    expect(optionNames()).toEqual(['Ingresos']);
+  });
+
   it('opens as a labelled dialog', () => {
     renderModal();
 

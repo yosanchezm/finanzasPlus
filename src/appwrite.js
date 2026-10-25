@@ -269,17 +269,6 @@ export async function createReceipt(file, userId, transactionId) {
   return uploaded;
 }
 
-export async function upsertBudget(rowId, data) {
-  assertConfig();
-  return tablesDB.upsertRow({
-    databaseId: appwriteConfig.databaseId,
-    tableId: TABLES.budgets,
-    rowId: rowId || ID.unique(),
-    data,
-    permissions: rowId ? undefined : [permissions.readTeam, permissions.updateTeam],
-  });
-}
-
 /** Creates the line with a deterministic id, or updates it when it exists (409), so saving twice never leaves two rows. */
 export async function saveBudgetLine(rowId, data) {
   assertConfig();

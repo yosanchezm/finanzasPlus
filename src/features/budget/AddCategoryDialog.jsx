@@ -4,11 +4,14 @@ import { foldCategoryName } from '@finance-core';
 import { CATEGORY_ICON_OPTIONS, CATEGORY_PALETTE, PALETTE_NAMES } from '../../shared/lib/categories';
 import { Button } from '../../shared/ui/Button';
 import { DialogContent, DialogHeader, DialogRoot } from '../../shared/ui/Dialog';
-import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { SelectField, TextField, labelClass } from '../../shared/ui/TextField';
+import { GROUP_LABELS } from './groupLabels';
 
-// Expense categories are stored with kind "need", the same default the Nia function uses.
-const KIND_OPTIONS = [{ value: 'need', label: 'Gasto' }, { value: 'income', label: 'Ingreso' }];
+// The kind is the budget group. `debt` is system-owned (credit-card and debt categories), so it is not offered.
+const KIND_OPTIONS = [
+  ...['need', 'want', 'saving', 'investment'].map((value) => ({ value, label: GROUP_LABELS[value] })),
+  { value: 'income', label: 'Ingreso' },
+];
 
 /** New category: name, kind, a palette color (no free hex) and an optional icon key. */
 export default function AddCategoryDialog({ existingNames = [], onClose, onSubmit }) {
@@ -53,10 +56,9 @@ export default function AddCategoryDialog({ existingNames = [], onClose, onSubmi
               aria-describedby={error ? ids.error : undefined}
             />
 
-            <div className="flex flex-col gap-1.5">
-              <span className={labelClass}>Tipo</span>
-              <SegmentedControl label="Tipo" options={KIND_OPTIONS} value={form.kind} onChange={(kind) => setForm({ ...form, kind })} fill />
-            </div>
+            <SelectField label="Tipo" value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value })}>
+              {KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </SelectField>
 
             <div className="flex flex-col gap-1.5">
               <span id={ids.color} className={labelClass}>Color</span>

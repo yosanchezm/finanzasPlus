@@ -19,7 +19,6 @@ vi.mock('../appwrite', () => ({
   updateTransaction: vi.fn(),
   deleteTransaction: vi.fn(),
   createReceipt: vi.fn(),
-  upsertBudget: vi.fn(),
   createGoal: vi.fn(),
   updateGoal: vi.fn(),
   createCategory: vi.fn(),

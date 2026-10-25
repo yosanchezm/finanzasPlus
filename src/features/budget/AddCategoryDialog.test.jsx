@@ -29,12 +29,31 @@ describe('AddCategoryDialog', () => {
     const { props, user } = renderDialog();
 
     await user.type(screen.getByLabelText('Nombre'), '  Mascotas ');
-    await user.click(within(screen.getByRole('group', { name: 'Tipo' })).getByRole('button', { name: 'Ingreso' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tipo' }), 'income');
     await user.click(screen.getByRole('radio', { name: 'Morado' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Icono (opcional)' }), 'sparkles');
     await user.click(screen.getByRole('button', { name: 'Crear categoría' }));
 
     expect(props.onSubmit).toHaveBeenCalledWith({ name: 'Mascotas', kind: 'income', color: '#7A5AF8', icon: 'sparkles' });
+  });
+
+  it('offers the expense groups and income, never the system-owned debt kind', () => {
+    renderDialog();
+
+    const options = within(screen.getByRole('combobox', { name: 'Tipo' })).getAllByRole('option');
+    expect(options.map((option) => [option.value, option.textContent])).toEqual([
+      ['need', 'Necesidades'], ['want', 'Gustos'], ['saving', 'Ahorro'], ['investment', 'Inversión'], ['income', 'Ingreso'],
+    ]);
+  });
+
+  it('stores the chosen group as the category kind', async () => {
+    const { props, user } = renderDialog();
+
+    await user.type(screen.getByLabelText('Nombre'), 'ETF');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tipo' }), 'investment');
+    await user.click(screen.getByRole('button', { name: 'Crear categoría' }));
+
+    expect(props.onSubmit).toHaveBeenCalledWith({ name: 'ETF', kind: 'investment', color: CATEGORY_PALETTE[0], icon: '' });
   });
 
   it('defaults to an expense category without icon', async () => {

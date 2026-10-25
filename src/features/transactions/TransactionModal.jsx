@@ -6,6 +6,8 @@ import { DialogContent, DialogHeader, DialogRoot } from '../../shared/ui/Dialog'
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { SelectField, TextField, labelClass } from '../../shared/ui/TextField';
 import { cn } from '../../shared/ui/cn';
+import { GROUP_LABELS } from '../budget/groupLabels';
+import { GROUPS, groupOfKind } from '@finance-core';
 
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const RECEIPT_TYPES = 'image/jpeg,image/png,image/webp,application/pdf';
@@ -16,6 +18,11 @@ const OWNER_OPTIONS = [{ value: 'you', label: 'Tú' }, { value: 'partner', label
 const categoriesForType = (categories, type) => categories.filter((category) => (type === 'income'
   ? category.kind === 'income' || category.name.toLowerCase().includes('ingreso')
   : category.kind !== 'income'));
+
+/** Expense categories bucketed by budget group, in group order, without empty groups. */
+const groupExpenseCategories = (categories) => GROUPS
+  .map((group) => ({ group, items: categories.filter((category) => groupOfKind(category.kind) === group) }))
+  .filter(({ items }) => items.length > 0);
 
 const submitLabel = ({ saving, editing, type }) => {
   if (saving) return 'Guardando…';
@@ -86,7 +93,13 @@ export default function TransactionModal({ form, setForm, categories, receiptFil
 
             <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
               <SelectField label="Categoría" value={form.categoryId} onChange={update('categoryId')}>
-                {availableCategories.map((category) => <option key={category.$id} value={category.$id}>{category.name}</option>)}
+                {form.type === 'income'
+                  ? availableCategories.map((category) => <option key={category.$id} value={category.$id}>{category.name}</option>)
+                  : groupExpenseCategories(availableCategories).map(({ group, items }) => (
+                    <optgroup key={group} label={GROUP_LABELS[group]}>
+                      {items.map((category) => <option key={category.$id} value={category.$id}>{category.name}</option>)}
+                    </optgroup>
+                  ))}
               </SelectField>
               <TextField label="Fecha" required type="date" value={form.date} onChange={update('date')} />
             </div>
