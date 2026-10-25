@@ -25,3 +25,23 @@ New files 373 lines (src 159, tests 230 incl. none else) + tracked diff 21 = 394
 - `categoryOf` (Map or plain object lookup) lives in groups.js and is not exported from the barrel.
 - Id helpers take `(target, 'YYYY-MM')`; `migrated(budgetId)`.
 - linesFromLegacyBudgets also skips rows without categoryId; sets `actorId`/`source` to `migration`.
+
+## S1b (branch feat/fb-s1b-line-edit): S1b.1-S1b.4 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S1b.1/2 | test/budget/edit.test.js | module missing | 16 pass | set/remove x month/onward, migrated `bl` reuse, year boundary, percent rule, later lines kept, existing br row becomes update | clean |
+| S1b.3 | same | n/a | income target and invalid percent plan nothing | n/a | n/a |
+| S1b.4 | npm test | n/a | 167 files / 2972 tests pass (one unrelated web timeout on first run, passed on re-run) | n/a | barrel + node16 list |
+
+## Size
+209 lines (src 64, test 141, tracked diff 4).
+
+## Work Unit Evidence
+- Focused: `npx vitest run packages/finance-core/test/budget/edit.test.js` green. Runtime harness: N/A (pure).
+- Rollback: delete `edit.js`, `edit.test.js`, the barrel line and node16 additions.
+
+## Decisions
+- `planLineEdit(lines, {target, rule, value, month, span, action, actorId, source, categoriesById})` returns `{ok:true, creates, updates}` or `{ok:false, code, creates:[], updates:[]}`; rows are `{id, data}` with full row data (no `$` fields).
+- Closing a line when the target is also in `lines` uses the latest open-ended line with `fromMonth <= M` as "covering".
+- set/onward leaves an existing one-month line for M untouched (per Edit plan table), so it still shadows month M; callers (S6a) may want to warn.
