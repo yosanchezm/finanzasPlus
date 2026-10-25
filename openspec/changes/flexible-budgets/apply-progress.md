@@ -152,3 +152,24 @@ Exactly 400 (runner 213 + test 165 new, tracked diff 22 incl. docs). Trimmed com
 - Dry run does not need the team id; `--apply` requires it for row permissions `read`/`update` on `team:{id}`.
 - Dry run with a missing `budget_lines` warns and continues with no existing ids; `--apply` aborts before the backup.
 - Backup JSON: `{createdAt, databaseId, budgets, costCategories, existingLineIds, plan}`. Nia's `COST_CATEGORY` stays `need` until S8b.
+
+## S4 (branch feat/fb-s4-web-data): S4.1-S4.5 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S4.1/2 | src/appwrite.test.js | 10 failures (readOptional, saveBudgetLine, updateBudgetLine, getWorkspace keys, TABLES missing) | 57 pass | ok/missing/unavailable (404, 500, network error), create vs 409 update vs non-409 rethrow, getWorkspace with a missing and a failing optional table | reused `hasStatus` for the 404 rule |
+| S4.3/4 | src/app/budgetMonth.test.js | module missing | 12 pass | linesMode: missing, empty+legacy, empty+none, non-empty, absent field, unavailable; canEdit four cases; reference income previous month only and scoped; null debt events on non-ok | n/a |
+| S4.5 | npm test, npm run build | n/a | 3045 tests pass (173 files); build ok | n/a | n/a |
+
+## Size
+About 334 lines (tracked diff 186 incl. deletions, new files 148).
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/appwrite.test.js src/app` green. Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S4 commit; `budgets` is untouched and still read.
+
+## Decisions
+- `getWorkspace` adds `budgetLines`, `debts`, `debtEvents`, each `{rows, status}`; existing fields unchanged. `permissions.budgetLineRow()` = team read + update.
+- New `src/app/budgetMonth.js`: `resolveBudgetLines`, `canEditBudget`, `buildBudgetMonth`, `legacyDashboardProps`. An unavailable table is treated as legacy (lines from `budgets`), editing off.
+- Debt events are null unless both `debts` and `debt_events` reads are ok. Reference income = previous month income rows of the 5-month history, scope filtered.
+- Interim bridge until S5/S7: the shell derives the old `budget`, `categoryStats` and view `budgets` props from `budgetMonth` (`legacyDashboardProps`); the old BudgetView editor gets a paused handler (notify, no write) so `budgets` is never written. `upsertBudget` stays exported in appwrite.js but is unused by the shell. `budgetMonth`, `canEdit`, `linesMode` are already passed to BudgetView (ignored until S5a).
