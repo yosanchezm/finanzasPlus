@@ -125,7 +125,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     debts, debtEvents, inScope, scoped: storedScope !== 'total',
   }), [selectedMonth, lines, categories, visibleTransactions, data.period, data.periodReady, debts, debtEvents, storedScope]);
   // Until the dashboard reads budgetMonth directly (S7) it keeps its planned/spent summary and category stats.
-  const { budget: dashboardBudget, categoryStats, budgets: viewBudgets } = useMemo(() => legacyDashboardProps(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
+  const { budget: dashboardBudget, categoryStats } = useMemo(() => legacyDashboardProps(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
   const cashflow = useMemo(
     () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth)),
     [visibleTransactions, selectedMonth, dayOfMonth],
@@ -164,9 +164,6 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   const removeTransaction = async (item) => {
     try { await deleteTransaction(item.$id); await data.refresh(); notify('Movimiento eliminado.'); } catch (error) { notify(readableError(error)); }
   };
-
-  // Budget editing returns in S5/S6; the old row editor must not write the read-only `budgets` table.
-  const budgetEditingPaused = async () => { notify('La edición de presupuestos se habilita pronto.'); throw new Error('budget_editing_paused'); };
 
   const addCategory = async (category) => {
     try {
@@ -231,15 +228,11 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         return (
           <BudgetContainer
             key={selectedMonth}
-            categories={categoryStats}
             allCategories={categories}
-            budgets={viewBudgets}
             month={selectedMonth}
             isCurrentMonth={isCurrentMonth}
             dayOfMonth={dayOfMonth}
             daysInMonth={monthDays}
-            onSave={budgetEditingPaused}
-            onCopyPrevious={() => { notify('La edición de presupuestos se habilita pronto.'); }}
             budgetMonth={budgetMonth}
             canEdit={canEdit}
             linesMode={linesMode}

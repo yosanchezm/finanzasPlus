@@ -3,32 +3,44 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import BudgetView from './BudgetView';
 
-const BUDGETS = [
-  { $id: 'b1', categoryId: 'c1', month: '2026-10', plannedMinor: 600000 },
-  { $id: 'b2', categoryId: 'c2', month: '2026-10', plannedMinor: 1800000 },
-];
+const row = (categoryId, name, overrides = {}) => ({
+  categoryId, name, color: '#0B6E4F', line: null, plannedMinor: 0, actualMinor: 0, remainingMinor: 0, overBudget: false, householdFixed: false, ...overrides,
+});
+const group = (categories, overrides = {}) => ({
+  envelope: null, allocatedMinor: 0, subLimitsMinor: 0, actualMinor: 0, remainingMinor: 0, overBudget: false, categories, ...overrides,
+});
+const fixed = (amountMinor) => ({ rule: 'fixed', amountMinor, percentBp: null });
+const percent = (percentBp) => ({ rule: 'percent', amountMinor: null, percentBp });
 
-const PREVIOUS_BUDGETS = [
-  { $id: 'p1', categoryId: 'c1', month: '2026-09', plannedMinor: 700000 },
-];
+const budgetMonth = () => ({
+  month: '2026-10',
+  base: { source: 'actual', incomeMinor: 5000000 },
+  groups: {
+    need: group([
+      row('c1', 'Mercado', { line: fixed(600000), plannedMinor: 600000, actualMinor: 845300, remainingMinor: -245300, overBudget: true, householdFixed: true }),
+      row('c2', 'Arriendo', { line: percent(2000), plannedMinor: 1000000, actualMinor: 1000000 }),
+      row('c3', 'Transporte', { line: fixed(0) }),
+    ], { envelope: 2000000, allocatedMinor: 2000000, subLimitsMinor: 1600000, actualMinor: 1845300, remainingMinor: 154700 }),
+    want: group([row('c4', 'Ocio')]),
+    saving: group([row('c5', 'Fondo de emergencia', { line: fixed(300000), plannedMinor: 300000, actualMinor: 450000, remainingMinor: -150000, overBudget: true })], { allocatedMinor: 300000, subLimitsMinor: 300000, actualMinor: 450000, overBudget: true }),
+    investment: group([row('c6', 'CDT')]),
+    debt: group([row('c7', 'Tarjeta')]),
+  },
+  totals: { budgetUsed: { plannedMinor: 1600000, spentMinor: 1845300 } },
+  warnings: [],
+});
 
-const CATEGORIES = [
-  { $id: 'c1', name: 'Restaurantes', color: '#E8875A', value: 845300, budget: 600000 },
-  { $id: 'c2', name: 'Mercado', color: '#0B6E4F', value: 1480000, budget: 1800000 },
-  { $id: 'c3', name: 'Ocio', color: '#7A5AF8', value: 0, budget: 0 },
-];
+const CATEGORIES = [{ $id: 'c1', name: 'Mercado' }];
 
 const renderView = (overrides = {}) => {
   const props = {
-    categories: CATEGORIES,
+    budgetMonth: budgetMonth(),
     allCategories: CATEGORIES,
-    budgets: BUDGETS,
     month: '2026-10',
     isCurrentMonth: true,
     dayOfMonth: 28,
     daysInMonth: 31,
-    onSave: vi.fn().mockResolvedValue(undefined),
-    onCopyPrevious: vi.fn().mockResolvedValue(undefined),
+    canEdit: true,
     onCreateCategory: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -36,211 +48,131 @@ const renderView = (overrides = {}) => {
   return { props, user: userEvent.setup() };
 };
 
-describe('BudgetView', () => {
-  it('flags over-budget rows with "Excedido" and a negative remainder', () => {
+const section = (name) => screen.getByRole('region', { name });
+
+describe('BudgetView group sections', () => {
+  it('renders the five groups in order', () => {
     renderView();
-
-    const over = screen.getByRole('row', { name: /Restaurantes/ });
-    expect(within(over).getByText('Excedido')).toBeInTheDocument();
-    expect(within(over).getByText('141 %')).toBeInTheDocument();
-    expect(within(over).getByText('− $ 245.300')).toBeInTheDocument();
-
-    const healthy = screen.getByRole('row', { name: /Mercado/ });
-    expect(within(healthy).queryByText('Excedido')).not.toBeInTheDocument();
-    expect(within(healthy).getByText('$ 320.000')).toBeInTheDocument();
+    const names = screen.getAllByRole('region').map((region) => region.getAttribute('aria-label')).filter((label) => label.startsWith('Grupo '));
+    expect(names).toEqual(['Grupo Necesidades', 'Grupo Gustos', 'Grupo Ahorro', 'Grupo Inversión', 'Grupo Deudas']);
   });
 
-  it('summarises planned, spent, available and exceeded categories', () => {
+  it('shows planned, actual and remaining plus the rule chip of each category row', () => {
+    renderView();
+    const mercado = within(section('Grupo Necesidades')).getByRole('row', { name: /Mercado/ });
+    expect(within(mercado).getByText('Fijo')).toBeInTheDocument();
+    expect(within(mercado).getByText('$ 600.000')).toBeInTheDocument();
+    expect(within(mercado).getByText('$ 845.300')).toBeInTheDocument();
+    expect(within(mercado).getByText('− $ 245.300')).toBeInTheDocument();
+
+    const arriendo = within(section('Grupo Necesidades')).getByRole('row', { name: /Arriendo/ });
+    expect(within(arriendo).getByText('20 %')).toBeInTheDocument();
+  });
+
+  it('marks household fixed lines with a Hogar chip', () => {
+    renderView();
+    expect(within(within(section('Grupo Necesidades')).getByRole('row', { name: /Mercado/ })).getByText('Hogar')).toBeInTheDocument();
+    expect(within(within(section('Grupo Necesidades')).getByRole('row', { name: /Arriendo/ })).queryByText('Hogar')).not.toBeInTheDocument();
+  });
+
+  it('styles an over-budget consumption row as over and a saving overshoot as achieved', () => {
+    renderView();
+    const mercado = within(section('Grupo Necesidades')).getByRole('row', { name: /Mercado/ });
+    expect(within(mercado).getByText('Excedido')).toBeInTheDocument();
+
+    const fondo = within(section('Grupo Ahorro')).getByRole('row', { name: /Fondo de emergencia/ });
+    expect(within(fondo).queryByText('Excedido')).not.toBeInTheDocument();
+    expect(within(fondo).getByText('Meta superada')).toBeInTheDocument();
+    expect(within(fondo).getByText('+ $ 150.000')).toBeInTheDocument();
+  });
+
+  it('shows "Sin límite" for rows without a limit and for a removed line', () => {
+    renderView();
+    const transporte = within(section('Grupo Necesidades')).getByRole('row', { name: /Transporte/ });
+    expect(within(transporte).getByText('Sin límite')).toBeInTheDocument();
+    expect(within(within(section('Grupo Gustos')).getByRole('row', { name: /Ocio/ })).getByText('Sin límite')).toBeInTheDocument();
+  });
+
+  it('tells the group envelope apart from the sub-limits and warns when they exceed it', () => {
+    renderView({ budgetMonth: { ...budgetMonth(), warnings: [{ code: 'sublimits_exceed_envelope', group: 'need', amountMinor: 100000 }] } });
+    const need = section('Grupo Necesidades');
+    expect(within(need).getByText('Tope del grupo')).toBeInTheDocument();
+    expect(within(need).getByText('$ 2.000.000')).toBeInTheDocument();
+    expect(within(need).getByText(/Los límites de las categorías suman \$ 100\.000 más que el tope/)).toBeInTheDocument();
+    expect(within(section('Grupo Gustos')).queryByText(/suman/)).not.toBeInTheDocument();
+  });
+
+  it('warns when the debt data could not be read', () => {
+    renderView({ budgetMonth: { ...budgetMonth(), warnings: [{ code: 'debt_data_unavailable' }] } });
+    expect(screen.getByText(/No pudimos leer los pagos de deudas/)).toBeInTheDocument();
+  });
+
+  it('documents the credit-card double counting limitation', () => {
+    renderView();
+    expect(screen.getByText(/compra con tarjeta de crédito cuenta en su categoría/)).toBeInTheDocument();
+  });
+
+  it('has no copy-previous control and no limit inputs', () => {
+    renderView();
+    expect(screen.queryByRole('button', { name: /Copiar del mes anterior/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+  });
+
+  it('offers the line editor hook only when editing is on and a handler exists', async () => {
+    const onEditLine = vi.fn();
+    const { user } = renderView({ onEditLine });
+    await user.click(within(within(section('Grupo Necesidades')).getByRole('row', { name: /Mercado/ })).getByRole('button', { name: 'Editar límite de Mercado' }));
+    expect(onEditLine).toHaveBeenCalledWith({ targetType: 'category', targetId: 'c1' });
+  });
+
+  it('hides the editor hook when editing is off', () => {
+    renderView({ onEditLine: vi.fn(), canEdit: false });
+    expect(screen.queryByRole('button', { name: /Editar límite/ })).not.toBeInTheDocument();
+  });
+
+  it('hides the editor hook without a handler', () => {
+    renderView();
+    expect(screen.queryByRole('button', { name: /Editar límite/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('BudgetView summary and header', () => {
+  it('summarises planned, spent and available over the limited targets', () => {
     renderView();
     const summary = screen.getByRole('region', { name: 'Resumen del presupuesto' });
-
-    expect(within(summary).getByText('$ 2.400.000')).toBeInTheDocument();
-    expect(within(summary).getByText('$ 2.325.300')).toBeInTheDocument();
-    expect(within(summary).getByText('$ 74.700')).toBeInTheDocument();
-    expect(within(summary).getByText('1 de 2')).toBeInTheDocument();
+    expect(within(summary).getByText('$ 1.600.000')).toBeInTheDocument();
+    expect(within(summary).getByText('$ 1.845.300')).toBeInTheDocument();
+    expect(within(summary).getByText('− $ 245.300')).toBeInTheDocument();
     expect(within(summary).getByText('Día 28 de 31')).toBeInTheDocument();
   });
 
   it('labels a past month as closed', () => {
     renderView({ isCurrentMonth: false });
-
     expect(within(screen.getByRole('region', { name: 'Resumen del presupuesto' })).getByText('Mes cerrado')).toBeInTheDocument();
   });
 
-  it('saves a changed limit when the field loses focus and confirms it', async () => {
-    const { props, user } = renderView();
-    const input = screen.getByLabelText('Límite de Mercado');
-
-    await user.clear(input);
-    await user.type(input, '2000000');
-    await user.tab();
-
-    expect(props.onSave).toHaveBeenCalledWith('c2', '2000000', BUDGETS[1]);
-    expect(await within(screen.getByRole('row', { name: /Mercado/ })).findByText('Guardado')).toBeInTheDocument();
+  it('renders the header slot', () => {
+    renderView({ header: <p>Encabezado de prueba</p> });
+    expect(screen.getByText('Encabezado de prueba')).toBeInTheDocument();
   });
 
-  it('does not save when the value did not change', async () => {
-    const { props, user } = renderView();
-
-    await user.click(screen.getByLabelText('Límite de Mercado'));
-    await user.tab();
-
-    expect(props.onSave).not.toHaveBeenCalled();
-  });
-
-  it('saves once with Enter', async () => {
-    const { props, user } = renderView();
-
-    await user.type(screen.getByLabelText('Límite de Ocio'), '150000{Enter}');
-
-    expect(props.onSave).toHaveBeenCalledTimes(1);
-    expect(props.onSave).toHaveBeenCalledWith('c3', '150000', undefined);
-  });
-
-  it('locks the field while its save is in flight', async () => {
-    let finish;
-    const { user } = renderView({ onSave: vi.fn(() => new Promise((resolve) => { finish = resolve; })) });
-    const input = screen.getByLabelText('Límite de Ocio');
-
-    await user.type(input, '9000');
-    await user.tab();
-
-    expect(input).toHaveAttribute('readonly');
-    expect(within(screen.getByRole('row', { name: /Ocio/ })).getByText('Guardando…')).toBeInTheDocument();
-    finish();
-    expect(await within(screen.getByRole('row', { name: /Ocio/ })).findByText('Guardado')).toBeInTheDocument();
-    expect(input).not.toHaveAttribute('readonly');
-  });
-
-  it('shows an inline error when the save fails', async () => {
-    const { user } = renderView({ onSave: vi.fn().mockRejectedValue(new Error('boom')) });
-    const input = screen.getByLabelText('Límite de Ocio');
-
-    await user.type(input, '9000');
-    await user.tab();
-
-    expect(await within(screen.getByRole('row', { name: /Ocio/ })).findByText('No se guardó')).toBeInTheDocument();
-  });
-});
-
-describe('BudgetView copy from the previous month', () => {
-  it('is disabled when the previous month has no limits', () => {
-    renderView();
-
-    expect(screen.getByRole('button', { name: 'Copiar del mes anterior' })).toBeDisabled();
-  });
-
-  it('asks for confirmation when the month already has limits', async () => {
-    const { props, user } = renderView({ budgets: [...BUDGETS, ...PREVIOUS_BUDGETS] });
-
-    await user.click(screen.getByRole('button', { name: 'Copiar del mes anterior' }));
-    const dialog = screen.getByRole('alertdialog', { name: '¿Reemplazar los límites de octubre de 2026?' });
-    expect(props.onCopyPrevious).not.toHaveBeenCalled();
-
-    await user.click(within(dialog).getByRole('button', { name: 'Copiar límites' }));
-
-    expect(props.onCopyPrevious).toHaveBeenCalledTimes(1);
-  });
-
-  it('copies directly when the month has no limits yet', async () => {
-    const { props, user } = renderView({ budgets: PREVIOUS_BUDGETS });
-
-    await user.click(screen.getByRole('button', { name: 'Copiar del mes anterior' }));
-
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(props.onCopyPrevious).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('BudgetView add category', () => {
   it('opens the new category dialog', async () => {
     const { user } = renderView();
-
     await user.click(screen.getByRole('button', { name: 'Agregar categoría' }));
-
     expect(screen.getByRole('dialog', { name: 'Nueva categoría' })).toBeInTheDocument();
   });
 });
 
 describe('BudgetView on a phone', () => {
-  it('renders each category as a stacked card instead of the table', () => {
+  it('renders each category as a stacked card instead of a table', () => {
     window.innerWidth = 375;
     renderView();
-
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    const cards = within(screen.getByRole('list', { name: 'Categorías' })).getAllByRole('listitem');
+    const cards = within(within(section('Grupo Necesidades')).getByRole('list', { name: 'Categorías de Necesidades' })).getAllByRole('listitem');
     expect(cards).toHaveLength(3);
-    expect(cards[0]).toHaveTextContent('Restaurantes');
+    expect(cards[0]).toHaveTextContent('Mercado');
     expect(within(cards[0]).getByText('Excedido')).toBeInTheDocument();
-    expect(within(cards[0]).getByText('141 %')).toBeInTheDocument();
+    expect(within(cards[0]).getByText('Hogar')).toBeInTheDocument();
     expect(within(cards[0]).getByText('− $ 245.300')).toBeInTheDocument();
-    expect(within(cards[0]).getByLabelText('Límite de Restaurantes')).toBeInTheDocument();
-  });
-
-  it('keeps save-on-blur and its indicator in the card', async () => {
-    window.innerWidth = 375;
-    const { props, user } = renderView();
-    const input = screen.getByLabelText('Límite de Mercado');
-
-    await user.clear(input);
-    await user.type(input, '2000000');
-    await user.tab();
-
-    expect(props.onSave).toHaveBeenCalledWith('c2', '2000000', BUDGETS[1]);
-    const card = within(screen.getByRole('list', { name: 'Categorías' })).getAllByRole('listitem')[1];
-    expect(await within(card).findByText('Guardado')).toBeInTheDocument();
-  });
-});
-
-describe('BudgetView summary', () => {
-  const UNBUDGETED = CATEGORIES.map((category) => ({ ...category, budget: 0 }));
-
-  it('without limits shows "Sin definir", a dash, no exceeded count and a prompt with the copy action', async () => {
-    const { props, user } = renderView({ categories: UNBUDGETED, budgets: PREVIOUS_BUDGETS });
-    const summary = screen.getByRole('region', { name: 'Resumen del presupuesto' });
-
-    expect(within(summary).getByText('Sin definir')).toBeInTheDocument();
-    expect(within(summary).getByText('—')).toBeInTheDocument();
-    expect(within(summary).queryByText('Categorías excedidas')).not.toBeInTheDocument();
-    expect(within(summary).queryByText(/− \$/)).not.toBeInTheDocument();
-    expect(within(summary).getByText('Define un límite por categoría para ver cuánto te queda.')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Copiar del mes anterior' })).toHaveLength(1);
-
-    await user.click(within(summary).getByRole('button', { name: 'Copiar del mes anterior' }));
-    expect(props.onCopyPrevious).toHaveBeenCalledTimes(1);
-  });
-
-  it('without limits and nothing to copy shows only the prompt', () => {
-    renderView({ categories: UNBUDGETED, budgets: [] });
-
-    expect(screen.getByText('Define un límite por categoría para ver cuánto te queda.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copiar del mes anterior' })).not.toBeInTheDocument();
-  });
-
-  it('with limits counts only budgeted categories and shows unbudgeted spending apart', () => {
-    renderView({ categories: CATEGORIES.map((category) => (category.$id === 'c3' ? { ...category, value: 50000 } : category)) });
-    const summary = screen.getByRole('region', { name: 'Resumen del presupuesto' });
-
-    expect(within(summary).getByText('$ 2.400.000')).toBeInTheDocument();
-    expect(within(summary).getByText('$ 2.325.300')).toBeInTheDocument();
-    expect(within(summary).getByText('$ 74.700')).toBeInTheDocument();
-    expect(within(summary).getByText('1 de 2')).toBeInTheDocument();
-    expect(summary).toHaveTextContent('Gasto sin límite: $ 50.000');
-  });
-
-  it('renders the header slot above the summary', () => {
-    renderView({ header: <p>Encabezado de prueba</p> });
-    expect(screen.getByText('Encabezado de prueba')).toBeInTheDocument();
-  });
-
-  it('is read-only when editing is off: no copy action and locked limit fields', () => {
-    renderView({ canEdit: false });
-    expect(screen.queryByRole('button', { name: 'Copiar del mes anterior' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Límite de Mercado')).toHaveAttribute('readonly');
-  });
-
-  it('keeps limit fields editable when editing is on', () => {
-    renderView({ canEdit: true });
-    expect(screen.getByLabelText('Límite de Mercado')).not.toHaveAttribute('readonly');
   });
 });
