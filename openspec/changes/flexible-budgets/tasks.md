@@ -223,9 +223,9 @@ Depends on S5a.
 
 Depends on S1d and S4.
 
-- [ ] S7a.1 RED: `monthly` tests: `aggregateMonthlyTotals` and month deltas delegate to `monthOutflows` (savings do not count as Gastos; delta uses the same definition on both months); `cashflow` tests: plots income against outflow per period, net equals Balance (1,000,000 for the example), transfers ignored; `categoryDonut` tests: consumption categories only, saving/investment/debt excluded. Reqs: DM-1, DM-2, DM-4, DM-5. Scenarios: Consistency, Savings not spending, Balance, Cashflow net. Pair: S7a.2. Done: fails.
-- [ ] S7a.2 GREEN: `monthly.js`, `cashflow.js`, `categoryDonut` changes. Pair: S7a.1. Done: green.
-- [ ] S7a.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
+- [x] S7a.1 RED: `monthly` tests: `aggregateMonthlyTotals` and month deltas delegate to `monthOutflows` (savings do not count as Gastos; delta uses the same definition on both months); `cashflow` tests: plots income against outflow per period, net equals Balance (1,000,000 for the example), transfers ignored; `categoryDonut` tests: consumption categories only, saving/investment/debt excluded. Reqs: DM-1, DM-2, DM-4, DM-5. Scenarios: Consistency, Savings not spending, Balance, Cashflow net. Pair: S7a.2. Done: fails.
+- [x] S7a.2 GREEN: `monthly.js`, `cashflow.js`, `categoryDonut` changes. Pair: S7a.1. Done: green.
+- [x] S7a.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
 
 ## Phase S7b: KpiCards and DashboardView (260 lines)
 

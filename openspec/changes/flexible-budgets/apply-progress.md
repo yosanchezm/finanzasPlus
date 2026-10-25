@@ -258,3 +258,25 @@ About 93 changed lines (70 additions, 23 deletions).
 ## Decisions
 - Deviation from task text: `debt` is NOT offered in AddCategoryDialog (system-owned per the design); the kind select offers Necesidades, Gustos, Ahorro, Inversión and Ingreso.
 - Tipo is now a native select (five options do not fit a segmented control on phones).
+
+## S7a (branch feat/fb-s7a-dashboard-data): S7a.1-S7a.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S7a.1/2 | src/shared/lib/monthly.test.js | 3 new tests failed (no group split, savings counted nowhere, no debt rule) | 7 pass | zero-filled months, saving/investment/debt in outflow but not consumption, transfer ignored, income - expenses = 2,500 in the mixed case, debt payments replace cost rows | n/a |
+| S7a.1/2 | src/features/dashboard/cashflow.test.js | 1 failed (transfer and saving mixed into expenses) | 3 pass | 4,000,000 income, 3,000,000 outflow, net 1,000,000 = Balance; transfer ignored | n/a |
+| S7a.1/2 | src/features/dashboard/categoryDonut.test.js | 1 failed (saving, investment, debt slices drawn) | 5 pass | need/want/untyped kept; saving/investment/debt dropped | n/a |
+| S7a.3 | npm test, npm run build | n/a | `npx vitest run --maxWorkers=6`: 3082 tests pass; build ok | n/a | n/a |
+
+## Size
+About 128 changed lines (96 additions, 32 deletions).
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/shared/lib/monthly.test.js src/features/dashboard`. Runtime harness: N/A (no live Appwrite by rule).
+- Rollback: revert the S7a commit (monthly, cashflow, donut and the three shell option args).
+
+## Decisions
+- `monthly.js` stays in `src/shared/lib`. `aggregateMonthlyTotals(transactions, months, {categoriesById, debts, debtEvents, inScope})` delegates to `monthOutflows` with a local-time `monthOf`; rows keep the group split and `outflow`, and `expenses` aliases `outflow` so charts and the old KpiCards deltas keep working (income - expenses = Balance). S7b should read `consumption` for "Gastos (consumo)".
+- `buildCashflowSeries(..., {categoriesById})` accumulates by `classifyTransaction`: outflow = every non-income group; transfers ignored. Daily debt uses cost rows with `debtId` (no event dates), while monthly bars use debt payments.
+- `buildDonutSlices` filters by `groupOfKind(kind)` in CONSUMPTION; `legacyDashboardProps` already carries `kind`.
+- Shell passes `categoriesById`, `debts.rows` and ok-only `debtEvents` rows; no change to DashboardView.
