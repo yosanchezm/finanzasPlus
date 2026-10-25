@@ -231,9 +231,9 @@ Depends on S1d and S4.
 
 Depends on S7a.
 
-- [ ] S7b.1 RED: `KpiCards.test.jsx`: Balance, Ingresos, Gastos labeled as consumption ("Gastos (consumo)"), Ahorro e inversión (saving + investment), Tasa de ahorro 20% for the 4,000,000 example, Deudas (% of income), Presupuesto usado shows 50% for the unlimited-spending example and the Por asignar subline (negative with over-allocated indication when `over_allocated`); empty states, never NaN or Infinity, for savings rate and debt share with income 0 and for Presupuesto usado when the ratio is null; reference/missing income base is indicated on income-based KPIs; help text mentions the credit-card double counting and that Balance includes ahorro, inversión y pagos de deuda; `DashboardView` receives `budgetMonth` and shows the same figures as BudgetView. Reqs: DM-2, DM-3, DM-4, DM-6, BC-10, BC-11. Scenarios: Presupuesto usado ignores unlimited spending, Savings rate, Zero income, Label, Documented limitation. Pair: S7b.2. Done: fails.
-- [ ] S7b.2 GREEN: `KpiCards`, `DashboardView`, shell wiring of `budgetMonth`. Pair: S7b.1. Done: green.
-- [ ] S7b.3 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint. Done: web slices S4-S7 complete; OP-4 may proceed only after OP-3.
+- [x] S7b.1 RED: `KpiCards.test.jsx`: Balance, Ingresos, Gastos labeled as consumption ("Gastos (consumo)"), Ahorro e inversión (saving + investment), Tasa de ahorro 20% for the 4,000,000 example, Deudas (% of income), Presupuesto usado shows 50% for the unlimited-spending example and the Por asignar subline (negative with over-allocated indication when `over_allocated`); empty states, never NaN or Infinity, for savings rate and debt share with income 0 and for Presupuesto usado when the ratio is null; reference/missing income base is indicated on income-based KPIs; help text mentions the credit-card double counting and that Balance includes ahorro, inversión y pagos de deuda; `DashboardView` receives `budgetMonth` and shows the same figures as BudgetView. Reqs: DM-2, DM-3, DM-4, DM-6, BC-10, BC-11. Scenarios: Presupuesto usado ignores unlimited spending, Savings rate, Zero income, Label, Documented limitation. Pair: S7b.2. Done: fails.
+- [x] S7b.2 GREEN: `KpiCards`, `DashboardView`, shell wiring of `budgetMonth`. Pair: S7b.1. Done: green.
+- [x] S7b.3 REFACTOR and verify: `npm test`, `npm run build`, size checkpoint. Done: web slices S4-S7 complete; OP-4 may proceed only after OP-3.
 
 ## Phase S8a: Nia budget module (320 lines)
 

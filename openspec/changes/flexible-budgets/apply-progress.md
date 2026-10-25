@@ -280,3 +280,26 @@ About 128 changed lines (96 additions, 32 deletions).
 - `buildCashflowSeries(..., {categoriesById})` accumulates by `classifyTransaction`: outflow = every non-income group; transfers ignored. Daily debt uses cost rows with `debtId` (no event dates), while monthly bars use debt payments.
 - `buildDonutSlices` filters by `groupOfKind(kind)` in CONSUMPTION; `legacyDashboardProps` already carries `kind`.
 - Shell passes `categoriesById`, `debts.rows` and ok-only `debtEvents` rows; no change to DashboardView.
+
+## S7b (branch feat/fb-s7b-kpis): S7b.1-S7b.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S7b.1/2 | src/features/dashboard/KpiCards.test.jsx (new) | 12 failed (props `totals`/`budget` replaced by `budgetMonth`) | 12 pass | Gastos (consumo) excludes saving; Balance 1,000,000 with debt; savings rate 20 %; debt share; Presupuesto usado 50 % ignoring unlimited spending; empty states with no NaN/Infinity; Por asignar positive and over-allocated; reference and none income base notes; delta uses previous `consumption`; credit-card double counting help | n/a |
+| S7b.1/2 | src/features/dashboard/DashboardView.test.jsx | 9 failed (no `budgetMonth` prop) | 14 pass | existing tests moved to a `computeBudgetMonth` fixture; new test for Balance, Por asignar, Presupuesto usado and the Nia insight sharing one budget month | n/a |
+| S7b.2 | src/features/dashboard/cashflow.test.js | 1 failed (debtId cost row counted on its own day, payments ignored) | 6 pass | void and out-of-scope payments, unavailable events fall back to cost rows | `debtPayments` now sums the new exported `debtPaymentEvents` (no duplication) |
+| S7b.3 | npm test, npm run build | n/a | `npx vitest run --maxWorkers=6`: 177 files / 3098 tests pass; build ok | n/a | `legacyDashboardProps` replaced by `dashboardCategoryStats` (stats only) |
+
+## Size
+About 300 changed lines (tracked 144 additions + 64 deletions, new KpiCards.test.jsx 93).
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/features/dashboard src/app packages/finance-core`. Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S7b commit (KPI cards, DashboardView props, shell wiring, daily debt payments).
+
+## Decisions
+- `DashboardView` takes `budgetMonth` instead of `totals` and `budget`; Nia's insight reads `totals.budgetUsed`, the same numbers as the Presupuesto usado card.
+- Eight KPI cards; Tasa de ahorro, Deudas and Por asignar show "Base: ingreso del mes anterior" or "Sin ingreso de referencia" when the base is not actual income. Help line under the grid explains consumption-only Gastos and credit-card double counting.
+- Known gap closed: the daily cashflow uses `debtPaymentEvents` (new core export) by `effectiveOn` day and drops `debtId` cost rows when events are readable.
+- The Gastos "movimientos" counter still counts every expense row (not only consumption).
+- `FinanceShell` keeps `totals` for the AssistantPanel only.
