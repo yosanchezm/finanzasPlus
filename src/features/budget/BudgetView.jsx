@@ -94,7 +94,7 @@ function BudgetSummary({ categories, monthHasLimits, isCurrentMonth, dayOfMonth,
  * the value changed; the field is read-only until the save and its refresh finish, so a second blur
  * can never create a duplicate budget row.
  */
-function useBudgetLimit(category, existing, onSave) {
+function useBudgetLimit(category, existing, onSave, locked) {
   const savedValue = existing?.plannedMinor ?? '';
   const [draft, setDraft] = useState(null);
   const [status, setStatus] = useState('idle');
@@ -133,7 +133,7 @@ function useBudgetLimit(category, existing, onSave) {
       min: '0',
       inputMode: 'numeric',
       value,
-      readOnly: status === 'saving',
+      readOnly: locked || status === 'saving',
       placeholder: 'Sin límite',
       onChange: (event) => { setDraft(event.target.value); if (status !== 'saving') setStatus('idle'); },
       onBlur: save,
@@ -190,8 +190,8 @@ function Progress({ limit, percent, over, color }) {
 
 const remainingClass = (remaining) => (remaining === null ? 'text-ink-faint' : remaining < 0 ? 'font-semibold text-danger' : 'font-medium text-accent');
 
-function BudgetTableRow({ category, existing, onSave }) {
-  const row = useBudgetLimit(category, existing, onSave);
+function BudgetTableRow({ category, existing, onSave, locked }) {
+  const row = useBudgetLimit(category, existing, onSave, locked);
   return (
     <tr className={row.over ? 'bg-[#fff8f3]' : 'hover:bg-surface-2'}>
       <td className={tdClass}><CategoryLabel category={category} over={row.over} color={row.color} /></td>
@@ -211,8 +211,8 @@ function BudgetTableRow({ category, existing, onSave }) {
 }
 
 /** Stacked card used below 640px so the page never scrolls sideways. */
-function BudgetCard({ category, existing, onSave }) {
-  const row = useBudgetLimit(category, existing, onSave);
+function BudgetCard({ category, existing, onSave, locked }) {
+  const row = useBudgetLimit(category, existing, onSave, locked);
   return (
     <li className={cn('flex flex-col gap-3 border-b border-[#eef1ed] px-4 py-4 last:border-b-0', row.over && 'bg-[#fff8f3]')}>
       <CategoryLabel category={category} over={row.over} color={row.color} />
@@ -237,8 +237,9 @@ function BudgetCard({ category, existing, onSave }) {
 
 export default function BudgetView({
   categories, allCategories = categories, budgets, month, isCurrentMonth, dayOfMonth, daysInMonth,
-  onSave, onCopyPrevious, onCreateCategory, scopeControl,
+  onSave, onCopyPrevious, onCreateCategory, scopeControl, header, canEdit = true,
 }) {
+  const locked = !canEdit;
   const [confirmCopy, setConfirmCopy] = useState(false);
   const [copying, setCopying] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
@@ -284,10 +285,12 @@ export default function BudgetView({
           <>
             {scopeControl}
             {/* Without limits this month, the copy action lives in the summary prompt instead. */}
-            {monthHasLimits && copyButton}
+            {monthHasLimits && !locked && copyButton}
           </>
         )}
       />
+
+      {header}
 
       <BudgetSummary
         categories={expenseCategories}
@@ -295,7 +298,7 @@ export default function BudgetView({
         isCurrentMonth={isCurrentMonth}
         dayOfMonth={dayOfMonth}
         daysInMonth={daysInMonth}
-        copyAction={canCopy ? copyButton : null}
+        copyAction={canCopy && !locked ? copyButton : null}
       />
 
       <Card padded={false} className="overflow-hidden">
@@ -315,7 +318,7 @@ export default function BudgetView({
               </thead>
               <tbody>
                 {expenseCategories.map((category) => (
-                  <BudgetTableRow key={category.$id} category={category} existing={existingFor(category)} onSave={onSave} />
+                  <BudgetTableRow key={category.$id} category={category} existing={existingFor(category)} onSave={onSave} locked={locked} />
                 ))}
               </tbody>
             </table>
@@ -323,7 +326,7 @@ export default function BudgetView({
         ) : (
           <ul aria-label="Categorías" className="flex flex-col">
             {expenseCategories.map((category) => (
-              <BudgetCard key={category.$id} category={category} existing={existingFor(category)} onSave={onSave} />
+              <BudgetCard key={category.$id} category={category} existing={existingFor(category)} onSave={onSave} locked={locked} />
             ))}
           </ul>
         )}

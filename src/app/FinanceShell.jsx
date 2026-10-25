@@ -32,7 +32,7 @@ import { PeriodError, ViewSkeleton } from './ViewSkeleton';
 
 // Sections other than the default one are split into their own chunks.
 const TransactionsView = lazy(() => import('../features/transactions/TransactionsView'));
-const BudgetView = lazy(() => import('../features/budget/BudgetView'));
+const BudgetContainer = lazy(() => import('../features/budget/BudgetContainer'));
 const GoalsView = lazy(() => import('../features/goals/GoalsView'));
 const DebtsContainer = lazy(() => import('../features/debts/DebtsContainer'));
 const SettingsContainer = lazy(() => import('../features/settings/SettingsContainer'));
@@ -229,7 +229,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
         );
       case 'Presupuesto':
         return (
-          <BudgetView
+          <BudgetContainer
             key={selectedMonth}
             categories={categoryStats}
             allCategories={categories}
@@ -243,6 +243,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             budgetMonth={budgetMonth}
             canEdit={canEdit}
             linesMode={linesMode}
+            scope={scope}
+            onRefresh={refreshInPlace}
             onCreateCategory={addCategory}
             scopeControl={scopeControl}
           />

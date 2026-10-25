@@ -227,4 +227,20 @@ describe('BudgetView summary', () => {
     expect(within(summary).getByText('1 de 2')).toBeInTheDocument();
     expect(summary).toHaveTextContent('Gasto sin límite: $ 50.000');
   });
+
+  it('renders the header slot above the summary', () => {
+    renderView({ header: <p>Encabezado de prueba</p> });
+    expect(screen.getByText('Encabezado de prueba')).toBeInTheDocument();
+  });
+
+  it('is read-only when editing is off: no copy action and locked limit fields', () => {
+    renderView({ canEdit: false });
+    expect(screen.queryByRole('button', { name: 'Copiar del mes anterior' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Límite de Mercado')).toHaveAttribute('readonly');
+  });
+
+  it('keeps limit fields editable when editing is on', () => {
+    renderView({ canEdit: true });
+    expect(screen.getByLabelText('Límite de Mercado')).not.toHaveAttribute('readonly');
+  });
 });
