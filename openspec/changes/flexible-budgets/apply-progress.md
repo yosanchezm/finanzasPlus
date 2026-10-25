@@ -216,3 +216,25 @@ OVER the 400 budget: tracked diff 298 additions + 435 deletions (about 733). Alm
 - Saving and investment overshoot shows "Meta superada" and "+ $ X" (not danger); debt overshoot is styled as over.
 - Edit hook: `onEditLine({ targetType, targetId })`, rendered as pencil buttons (44px on phones) only when `canEdit` and a handler exist; S6a wires it from the container. Group buttons target the group envelope.
 - Copy-previous removed from the view; `ConfirmDialog`/`Button` imports removed.
+
+## S6a (branch feat/fb-s6a-line-editor): S6a.1-S6a.5 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S6a.1/2 | src/features/budget/LineEditorDialog.test.jsx | module missing | 10 pass | fixed vs percent (12,5 -> 1250 bp), month vs onward, over 100 % blocked, empty and non-integer disabled, no-base notice, both remove actions, income has no form, one-month override note, error with Reintentar, initial rule | n/a |
+| S6a.3/4 | src/features/budget/BudgetContainer.test.jsx | 7 of 8 new tests failed (onEditLine never provided) | 12 pass | close-then-upsert order with deterministic `br` id, migrated `bl` line updated (no create), remove onward closes at M-1, remove month writes `bo` tombstone, invalid plan writes nothing, write error keeps dialog and retry reuses ids and closes it, override note, canEdit off | `GROUP_LABELS` moved to `groupLabels.js` |
+| S6a.5 | npm test, npm run build | n/a | 176 files / 3074 tests pass (one unrelated flaky failure on the first run, green on re-run); build ok | n/a | n/a |
+
+## Size
+About 351 lines (tracked diff 151, new files 200). The S6a-1/S6a-2 valve was not needed.
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/features/budget` green (52 tests). Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S6a commit; the view returns to read-only (no `onEditLine`).
+
+## Decisions
+- The container owns the editor state and renders `LineEditorDialog` through the `header` slot; the shell passes `lines` and `actorId`. Writes: all `updates` first (close old line), then `creates` via `saveBudgetLine`; one `commit` so retry repeats the same ids.
+- Errors show inside the dialog (Reintentar); the page banner is hidden while the dialog is open. A plan that fails `validateLine` writes nothing and shows an inline message without Reintentar.
+- Known S1b risk handled: when a one-month line exists for (target, M) and the user saves "Desde este mes", the dialog shows "Este mes tiene un ajuste puntual que seguirá aplicando".
+- Fixed values are whole amounts (minor = pesos, as `formatMoney`); percent is entered in % (up to 2 decimals, comma or dot) and stored as basis points.
+- Income category: dialog shows a notice instead of a form (the view never lists them).
