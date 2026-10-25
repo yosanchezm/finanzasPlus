@@ -108,6 +108,19 @@ npm run migrate:appwrite
 - Las cifras de esta tabla son informativas: avisan, nunca bloquean, y el extracto del banco manda.
 - Si necesitas revertir el código, la tabla puede quedar sin uso.
 
+Después, copia los presupuestos anteriores a `budget_lines` (orden obligatorio: tabla, simulación, aplicar, despliegue):
+
+```bash
+npm run migrate:budgets                # simulación: no escribe nada
+npm run migrate:budgets -- --apply     # respaldo + escrituras
+```
+
+1. Revisa la simulación: filas leídas, líneas a crear, omitidas con su motivo, plan sembrado, duplicados y categorías a parchear. Usa `--no-seed` solo si rechazas el plan sembrado.
+2. Aplica con `--apply`. Antes de escribir, el script guarda `backups/budget-migration-*.json` (filas de `budgets`, categorías "Costos financieros" originales e ids de líneas existentes) y se detiene si no puede escribirlo. Si `budget_lines` no existe, se detiene y pide ejecutar `npm run migrate:appwrite`.
+3. Ejecútalo una segunda vez: no debe crear líneas ni parchear categorías. Una ejecución interrumpida se reanuda volviendo a ejecutar `--apply`.
+4. Despliega la web y Nia **después** de aplicar.
+5. Reversión: revierte los despliegues (`budgets` nunca se modifica, así que vuelve el comportamiento anterior) y restaura el `kind` de las categorías desde el respaldo.
+
 ### Actualizar una base existente (presupuestos flexibles)
 
 Los presupuestos flexibles agregan una tabla nueva, `budget_lines`, con los índices `by_household_from` y `by_household_target`. Es aditiva y sin permiso de borrado; la tabla `budgets` no se modifica y queda como respaldo de solo lectura.

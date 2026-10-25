@@ -397,7 +397,7 @@ describe('ensureCostCategory', () => {
 
   it('reuses an existing category found by folded name (case, accents and spaces ignored)', async () => {
     api.tablesDB.listRows.mockResolvedValueOnce({
-      rows: [{ $id: 'c1', name: 'Hogar' }, { $id: 'c2', name: '  COSTÓS Financieros ' }],
+      rows: [{ $id: 'c1', name: 'Hogar' }, { $id: 'c2', name: '  COSTÓS Financieros ', kind: 'need' }],
     });
 
     await expect(api.ensureCostCategory('household-test')).resolves.toBe('c2');
@@ -405,7 +405,7 @@ describe('ensureCostCategory', () => {
     expect(api.tablesDB.listRows.mock.calls[0][0].tableId).toBe('categories');
   });
 
-  it('creates "Costos financieros" (need, palette color, known icon) with id cf{householdId}', async () => {
+  it('creates "Costos financieros" (debt, palette color, known icon) with id cf{householdId}', async () => {
     api.tablesDB.listRows.mockResolvedValueOnce({ rows: [{ $id: 'c1', name: 'Hogar' }] });
     api.tablesDB.createRow.mockResolvedValueOnce({ $id: 'cfhousehold-test' });
 
@@ -415,7 +415,7 @@ describe('ensureCostCategory', () => {
       databaseId: 'db-test',
       tableId: 'categories',
       rowId: 'cfhousehold-test',
-      data: { householdId: 'household-test', name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt', archived: false },
+      data: { householdId: 'household-test', name: 'Costos financieros', kind: 'debt', color: '#7A5AF8', icon: 'receipt', archived: false },
       permissions: [`read("${TEAM}")`, `update("${TEAM}")`],
     });
   });

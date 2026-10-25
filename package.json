@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "migrate:appwrite": "node --env-file=.env scripts/migrate-appwrite.mjs",
     "merge:categories": "node --env-file=.env scripts/merge-categories.mjs",
+    "migrate:budgets": "node --env-file=.env scripts/migrate-budgets.mjs",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs",
     "package:nia": "node scripts/package-nia.mjs"

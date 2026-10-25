@@ -388,7 +388,7 @@ export async function listCostRows(debtId) {
   return listAllRows(TABLES.transactions, [Query.equal('debtId', debtId)]);
 }
 
-const COST_CATEGORY = { name: 'Costos financieros', kind: 'need', color: '#7A5AF8', icon: 'receipt' };
+const COST_CATEGORY = { name: 'Costos financieros', kind: 'debt', color: '#7A5AF8', icon: 'receipt' };
 const foldName = (value) => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
 
 async function findCostCategory() {
