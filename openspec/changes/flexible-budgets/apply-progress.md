@@ -87,3 +87,23 @@ Approx 130 lines (src 38, test 77, tracked diff 5 incl. barrel and node16).
 - Signature `monthOutflows(transactions, debtEvents, debts, months, categoriesById, { inScope, monthOf })`; transactions are bucketed by `occurredAt.slice(0, 7)` unless `monthOf` is given (S7a can pass a local-time month key to match `monthKeyOf`).
 - Same debt rule as computeBudgetMonth: payments replace cost rows with a `debtId`, kind-only rows always add, and the cost rows are the fallback when `debtEvents` is null or unreadable.
 - `debtPayments` is exported from compute.js but not from the package barrel.
+
+## S2a (branch feat/fb-s2a-schema): S2a.1-S2a.4 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S2a.1/2 | scripts/lib/budget-schema.test.js | module missing | 12 pass | columns/sizes/required snapshot, indexes (no unique), permissions, redefinition throws (also second merge), no mutation, full chain keeps prior tables, static checks of migrate-appwrite.mjs | clean |
+| S2a.3 | docs/setup.md | n/a | section added, table count now thirteen | n/a | n/a |
+| S2a.4 | npm test | n/a | 170 files / 3008 tests pass | n/a | n/a |
+
+## Size
+About 181 lines (src 53, test 106 incl. blanks, tracked diff 22 incl. docs).
+
+## Work Unit Evidence
+- Focused: `npx vitest run scripts/lib/budget-schema.test.js` green; `node --check scripts/migrate-appwrite.mjs` ok; existing legal/debt schema tests still pass. Runtime harness: N/A here; the migration was never run (OP-1 is the operator's step).
+- Rollback: delete `budget-schema.mjs` and its test, revert the import and chain line in `migrate-appwrite.mjs` and the docs section; the table may stay unused.
+
+## Decisions
+- Test file is `.test.js` as the task says (legal uses `.test.mjs`); vitest picks up both.
+- Table display name `Líneas de presupuesto`, matching the Spanish names of the other tables.
+- Import placed alphabetically; the legal test's chain regex still matches the nested call.

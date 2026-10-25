@@ -150,10 +150,10 @@ Depends on S1c.
 
 No code dependencies. Merge early (unblocks OP-1).
 
-- [ ] S2a.1 RED: `scripts/lib/budget-schema.test.js`: snapshot of `BUDGET_TABLES` (`budget_lines` columns, types, sizes and required flags exactly as in the design table; `householdId` 36, `targetType` 16, `targetId` 36, `rule` 16, `fromMonth`/`toMonth` 7, `source` 16, `actorId` 36), indexes `by_household_from` and `by_household_target`, no unique index, permissions (table team read/create/update; no delete); `withBudgetSchema(tables, team)` appends the table, throws on redefinition (as `withLegalSchema` does), and leaves `budgets` untouched; chain `withBudgetSchema(withLegalSchema(withDebtSchema(base, team), team), team)` yields all prior tables unchanged. Reqs: BM-1. Scenarios: Idempotent schema (schema part). Pair: S2a.2. Done: fails.
-- [ ] S2a.2 GREEN: `scripts/lib/budget-schema.mjs`; chain it in `scripts/migrate-appwrite.mjs` (the existing create-only `ensure*` loops give rerun idempotence). `node --check scripts/migrate-appwrite.mjs`. Never run against live Appwrite here (OP-1). Reqs: BM-1. Pair: S2a.1. Done: green.
-- [ ] S2a.3 Docs: `docs/setup.md` section 3 (re-run `npm run migrate:appwrite`; additive; second run changes nothing), matching the file's existing language. Reqs: BM-1, BM-9. Pair: n/a (docs). Done: matches OP-1.
-- [ ] S2a.4 REFACTOR and size checkpoint: `npm test`.
+- [x] S2a.1 RED: `scripts/lib/budget-schema.test.js`: snapshot of `BUDGET_TABLES` (`budget_lines` columns, types, sizes and required flags exactly as in the design table; `householdId` 36, `targetType` 16, `targetId` 36, `rule` 16, `fromMonth`/`toMonth` 7, `source` 16, `actorId` 36), indexes `by_household_from` and `by_household_target`, no unique index, permissions (table team read/create/update; no delete); `withBudgetSchema(tables, team)` appends the table, throws on redefinition (as `withLegalSchema` does), and leaves `budgets` untouched; chain `withBudgetSchema(withLegalSchema(withDebtSchema(base, team), team), team)` yields all prior tables unchanged. Reqs: BM-1. Scenarios: Idempotent schema (schema part). Pair: S2a.2. Done: fails.
+- [x] S2a.2 GREEN: `scripts/lib/budget-schema.mjs`; chain it in `scripts/migrate-appwrite.mjs` (the existing create-only `ensure*` loops give rerun idempotence). `node --check scripts/migrate-appwrite.mjs`. Never run against live Appwrite here (OP-1). Reqs: BM-1. Pair: S2a.1. Done: green.
+- [x] S2a.3 Docs: `docs/setup.md` section 3 (re-run `npm run migrate:appwrite`; additive; second run changes nothing), matching the file's existing language. Reqs: BM-1, BM-9. Pair: n/a (docs). Done: matches OP-1.
+- [x] S2a.4 REFACTOR and size checkpoint: `npm test`.
 
 ## Phase S2b: Migration planner (320 lines)
 
