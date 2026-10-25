@@ -45,3 +45,25 @@ New files 373 lines (src 159, tests 230 incl. none else) + tracked diff 21 = 394
 - `planLineEdit(lines, {target, rule, value, month, span, action, actorId, source, categoriesById})` returns `{ok:true, creates, updates}` or `{ok:false, code, creates:[], updates:[]}`; rows are `{id, data}` with full row data (no `$` fields).
 - Closing a line when the target is also in `lines` uses the latest open-ended line with `fromMonth <= M` as "covering".
 - set/onward leaves an existing one-month line for M untouched (per Edit plan table), so it still shadows month M; callers (S6a) may want to warn.
+
+## S1c (branch feat/fb-s1c-compute): S1c.1-S1c.6 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S1c.1-4 | test/budget/compute.test.js | module missing (suite failed to load) | 17 pass after `compute.js`; 2 fixture fixes (extra_payment and charge need valid payloads) | base actual/reference/none, envelope vs sub-limits, tombstones, void-aware, scope, unreadable events | clean |
+| S1c.5 | same | n/a | 18 pass with the unreadable-events case | n/a | n/a |
+| S1c.6 | npm test | barrel key-list test failed before the export line | 168 files / 2990 tests pass | n/a | barrel + node16 list |
+
+## Size
+270 lines (src 102, test 165, tracked diff 3). No split into `debtActual.js` needed.
+
+## Work Unit Evidence
+- Focused: `npx vitest run packages/finance-core/test/budget/compute.test.js` green. Runtime harness: N/A (pure).
+- Rollback: delete `compute.js`, `compute.test.js`, the barrel line and the node16 additions.
+
+## Decisions
+- `transactions` must already be the month's rows (not filtered by date inside); callers pass `previousMonthIncomeMinor` separately. Debt events are filtered by `effectiveOn` month.
+- Debt events are read with `activeEvents`; any unreadable event makes debt data unavailable (cost-row fallback plus `debt_data_unavailable`).
+- `totals.incomeMinor` is the real income; Por asignar uses `base.incomeMinor` (may be the reference). Rates use real income and `savingsRateBp` = (saving + investment) / income.
+- `groups[g].envelope` is null when absent or zero; `remainingMinor` is 0 when the limit is 0. `householdFixed` is true only for non-zero fixed lines when `scoped`.
+- Group lines on `income`, income-kind categories and archived categories are ignored; warnings carry `group`/`amountMinor` only where the design lists them.
