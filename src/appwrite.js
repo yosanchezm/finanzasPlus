@@ -270,8 +270,10 @@ export async function createReceipt(file, userId, transactionId) {
 }
 
 /** Creates the line with a deterministic id, or updates it when it exists (409), so saving twice never leaves two rows. */
-export async function saveBudgetLine(rowId, data) {
+export async function saveBudgetLine(rowId, line) {
   assertConfig();
+  // planLineEdit builds rows without the household; every row this client writes belongs to it.
+  const data = { householdId: appwriteConfig.householdId, ...line };
   try {
     return await tablesDB.createRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.budgetLines, rowId, data, permissions: permissions.budgetLineRow() });
   } catch (error) {

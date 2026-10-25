@@ -160,7 +160,7 @@ describe('readOptional', () => {
 describe('budget lines', () => {
   const data = { targetType: 'category', targetId: 'c1', rule: 'fixed', amountMinor: 5000 };
 
-  it('creates the row with the given id and team read + update only (no delete)', async () => {
+  it('creates the row with the given id, the household and team read + update only (no delete)', async () => {
     api.tablesDB.createRow.mockResolvedValueOnce({ $id: 'bo1' });
 
     await api.saveBudgetLine('bo1', data);
@@ -169,7 +169,7 @@ describe('budget lines', () => {
       databaseId: 'db-test',
       tableId: 'budget_lines',
       rowId: 'bo1',
-      data,
+      data: { householdId: 'household-test', ...data },
       permissions: ['read("team:team-test")', 'update("team:team-test")'],
     });
     expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
@@ -180,7 +180,7 @@ describe('budget lines', () => {
     api.tablesDB.updateRow.mockResolvedValueOnce({ $id: 'bo1', amountMinor: 5000 });
 
     await expect(api.saveBudgetLine('bo1', data)).resolves.toEqual({ $id: 'bo1', amountMinor: 5000 });
-    expect(api.tablesDB.updateRow).toHaveBeenCalledWith({ databaseId: 'db-test', tableId: 'budget_lines', rowId: 'bo1', data });
+    expect(api.tablesDB.updateRow).toHaveBeenCalledWith({ databaseId: 'db-test', tableId: 'budget_lines', rowId: 'bo1', data: { householdId: 'household-test', ...data } });
 
     api.tablesDB.updateRow.mockClear();
     api.tablesDB.createRow.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: 500 }));
