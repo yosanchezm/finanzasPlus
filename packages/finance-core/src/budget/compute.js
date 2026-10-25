@@ -14,7 +14,7 @@ const PAID_KINDS = ['payment', 'extra_payment'];
 const sum = (items, pick) => items.reduce((total, item) => total + pick(item), 0);
 
 // Debt payments of the month: active (not voided) events of in-scope debts. Null when the events cannot be read.
-function debtPayments(month, debts, debtEvents, inScope) {
+export function debtPayments(month, debts, debtEvents, inScope) {
   const inScopeDebts = new Set((debts || []).filter(inScope).map((debt) => debt.$id ?? debt.id));
   try {
     return activeEvents(debtEvents)
