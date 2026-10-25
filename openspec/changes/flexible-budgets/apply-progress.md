@@ -107,3 +107,25 @@ About 181 lines (src 53, test 106 incl. blanks, tracked diff 22 incl. docs).
 - Test file is `.test.js` as the task says (legal uses `.test.mjs`); vitest picks up both.
 - Table display name `Líneas de presupuesto`, matching the Spanish names of the other tables.
 - Import placed alphabetically; the legal test's chain regex still matches the nested call.
+
+## S2b (branch feat/fb-s2b-migration-planner): S2b.1-S2b.5 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S2b.1 | scripts/lib/budget-migration.test.js | module missing (suite failed to load) | 10 pass after `budget-migration.mjs` | 1:1 mapping, six skip reasons, existing ids listed as present (resume) | clean |
+| S2b.2 | same | same | same | seed from M+1, December rollover, tie-break duplicates, no rows / `seed: false`, seed skip-if-exists | clean |
+| S2b.3 | same | same | same | case/accent/archived matches, already `debt` -> none, several patches | clean |
+| S2b.4/5 | npm test | n/a | 171 files / 3018 tests pass | n/a | n/a |
+
+## Size
+244 lines (src 124, test 120). No tracked-file changes.
+
+## Work Unit Evidence
+- Focused: `npx vitest run scripts/lib/budget-migration.test.js` green (10 tests). Runtime harness: N/A (pure planner).
+- Rollback: delete `scripts/lib/budget-migration.mjs` and its test.
+
+## Decisions
+- Result adds `present` (ids already in `budget_lines`, mapped rows and seeds) next to the designed keys; `summary` = `{read, create, present, skipped, seed, duplicates, patches}`.
+- `skipped` entries are `{id, reason}` with reasons `missing_month`, `zero_amount`, `missing_category`, `income_category`, `id_too_long`, `invalid_line:{code}` (from `validateLine`, e.g. a non-integer amount).
+- `creates` holds only the 1:1 lines; `seeds` is separate. Lines carry `householdId` from the source row; the runner adds team permissions.
+- Seeds and duplicates come from mapped rows (after skips), independent of whether their ids already exist. `duplicates` entries: `{targetId, month, keptId, ignoredIds}`.
