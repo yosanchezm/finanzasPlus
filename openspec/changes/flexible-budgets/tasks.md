@@ -306,3 +306,9 @@ Coverage: 38 of 38 spec requirements map to at least one task. Threat Matrix: N/
 - [x] `budgets` table is never written by web or Nia code (grep shows only reads and the migration backup).
 - [x] No slice PR exceeded 400 changed lines, or the overflow valve was used and noted in the PR.
 - [ ] Operator steps OP-1 to OP-7 each marked done, skipped with reason, or pending in the PR descriptions.
+
+## Phase S9: Verify follow-ups
+
+- [x] W1: the Gastos (consumo) KPI note counts only consumption rows (need + want) via `movementCounts`.
+- [x] W2: AssistantPanel reads the balance from `budgetMonth`; the old `totals` computation is removed.
+- [x] `scripts/merge-categories.mjs` no longer rewrites or deletes `budgets` rows and warns that `budget_lines` targets are not rewritten.

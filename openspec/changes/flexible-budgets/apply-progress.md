@@ -351,3 +351,9 @@ About 258 changed lines excluding openspec (code commit: 218 insertions, 40 dele
 - After a write the reply adds "Por asignar este mes" from a fresh `loadBudgetMonth` when an income base exists.
 - Transaction reads use a capped (50 pages) offset-paginated range read; past the cap the budget degrades to "unavailable" and nothing is written.
 - Remaining checklist item left open: OP-1..OP-7 reporting (operator steps).
+
+## S9: Verify follow-ups (branch feat/fb-s9-verify-warnings)
+- Files: `src/app/budgetMonth.js` (+`movementCounts`), `src/app/FinanceShell.jsx`, `src/features/assistant/AssistantPanel.jsx` (prop `totals` replaced by `balanceMinor`), `scripts/merge-categories.mjs`, plus tests in `budgetMonth.test.js` and `AssistantPanel.test.jsx`. About 90 changed lines.
+- RED: `movementCounts` test failed (no export) and the AssistantPanel test failed (no `balanceMinor` prop). GREEN: both pass. Full suite 178 files, 3127 tests pass.
+- Deviation: for the merge script the smaller option was chosen (stop touching `budgets`, print a warning); `scripts/lib/category-merge.mjs` is unchanged, its budget plan output is simply unused by the script.
+- Rollback: revert the S9 code commit.
