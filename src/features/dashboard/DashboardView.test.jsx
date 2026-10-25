@@ -1,7 +1,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { computeBudgetMonth } from '@finance-core';
 import DashboardView from './DashboardView';
+
+const CATEGORIES = [{ $id: 'in', kind: 'income' }, { $id: 'mk', kind: 'need' }];
+const row = (categoryId, amountMinor, type) => ({ $id: `${categoryId}${amountMinor}`, type, categoryId, amountMinor, occurredAt: '2026-10-05T12:00:00.000Z' });
+const limit = (amountMinor) => ({ $id: 'bo1', targetType: 'category', targetId: 'mk', rule: 'fixed', amountMinor, percentBp: null, fromMonth: '2026-10', toMonth: null });
+const monthOf = ({ income = 0, spent = 0, planned = 0 } = {}) => computeBudgetMonth({
+  month: '2026-10', categories: CATEGORIES, lines: planned ? [limit(planned)] : [],
+  transactions: [...(income ? [row('in', income, 'income')] : []), ...(spent ? [row('mk', spent, 'expense')] : [])],
+});
 
 const at = (day) => new Date(2026, 9, day, 12).toISOString();
 
@@ -15,10 +24,9 @@ const baseProps = () => ({
   periodLabel: 'octubre de 2026',
   scope: 'total',
   onScopeChange: vi.fn(),
-  totals: { income: 0, expenses: 0 },
+  budgetMonth: monthOf(),
   incomeCount: 0,
   expenseCount: 0,
-  budget: { planned: 0, spent: 0 },
   remainingDays: 19,
   isCurrentMonth: true,
   cashflow: [],
@@ -73,10 +81,9 @@ describe('DashboardView', () => {
 
   it('shows the KPIs, the budget insight and real data', () => {
     renderDashboard({
-      totals: { income: 5200000, expenses: 1200000 },
+      budgetMonth: monthOf({ income: 5200000, spent: 1200000, planned: 2400000 }),
       incomeCount: 1,
       expenseCount: 2,
-      budget: { planned: 2400000, spent: 1200000 },
       categoryStats: [
         { $id: 'c1', name: 'Mercado', color: '#0B6E4F', value: 900000 },
         { $id: 'c2', name: 'Transporte', color: '#7A5AF8', value: 300000 },
@@ -88,7 +95,7 @@ describe('DashboardView', () => {
     });
 
     expect(within(kpi('Balance del mes')).getByText('$ 4.000.000')).toBeInTheDocument();
-    expect(within(kpi('Gastos')).getByText('2 movimientos')).toBeInTheDocument();
+    expect(within(kpi('Gastos (consumo)')).getByText('2 movimientos')).toBeInTheDocument();
     expect(within(kpi('Presupuesto usado')).getByText('50 %')).toBeInTheDocument();
     expect(screen.getByText('Han usado el 50% del presupuesto.')).toBeInTheDocument();
     expect(within(screen.getByRole('figure', { name: /Gastos por categoría/ })).getByText('75 %')).toBeInTheDocument();
@@ -98,23 +105,23 @@ describe('DashboardView', () => {
 
   it('compares the KPIs with the previous month', () => {
     renderDashboard({
-      totals: { income: 5200000, expenses: 1200000 },
-      history: withMonths({ '2026-09': { income: 4000000, expenses: 1500000 }, '2026-10': { income: 5200000, expenses: 1200000 } }),
+      budgetMonth: monthOf({ income: 5200000, spent: 1200000 }),
+      history: withMonths({ '2026-09': { income: 4000000, expenses: 1500000, consumption: 1500000 }, '2026-10': { income: 5200000, expenses: 1200000, consumption: 1200000 } }),
     });
 
     expect(kpi('Ingresos')).toHaveTextContent('+30 % vs. septiembre');
-    expect(kpi('Gastos')).toHaveTextContent('−20 % vs. septiembre');
+    expect(kpi('Gastos (consumo)')).toHaveTextContent('−20 % vs. septiembre');
     expect(kpi('Balance del mes')).toHaveTextContent('+ $ 1.500.000 vs. septiembre');
   });
 
   it('shows the absolute change when the previous month was zero, and equality when unchanged', () => {
     renderDashboard({
-      totals: { income: 5200000, expenses: 0 },
-      history: withMonths({ '2026-10': { income: 5200000, expenses: 0 } }),
+      budgetMonth: monthOf({ income: 5200000 }),
+      history: withMonths({ '2026-10': { income: 5200000, expenses: 0, consumption: 0 } }),
     });
 
     expect(kpi('Ingresos')).toHaveTextContent('+ $ 5.200.000 vs. septiembre');
-    expect(within(kpi('Gastos')).getByText('Igual que septiembre')).toBeInTheDocument();
+    expect(within(kpi('Gastos (consumo)')).getByText('Igual que septiembre')).toBeInTheDocument();
   });
 
   it('defaults to the 6-month chart with a data table that shows months without data as zero', () => {
@@ -150,6 +157,17 @@ describe('DashboardView', () => {
     await user.click(screen.getByRole('button', { name: 'Preguntarle a Nia' }));
 
     expect(props.onOpenAssistant).toHaveBeenCalled();
+  });
+});
+
+describe('DashboardView budget month', () => {
+  it('shows the same figures as the budget month: Balance, Por asignar and the Nia insight', () => {
+    renderDashboard({ budgetMonth: monthOf({ income: 4000000, spent: 500000, planned: 1000000 }) });
+
+    expect(within(kpi('Balance del mes')).getByText('$ 3.500.000')).toBeInTheDocument();
+    expect(within(kpi('Por asignar')).getByText('$ 3.000.000')).toBeInTheDocument();
+    expect(within(kpi('Presupuesto usado')).getByText('50 %')).toBeInTheDocument();
+    expect(screen.getByText('Han usado el 50% del presupuesto.')).toBeInTheDocument();
   });
 });
 

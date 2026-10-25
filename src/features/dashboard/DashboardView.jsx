@@ -89,16 +89,18 @@ function NiaInsight({ budget, remainingDays, isCurrentMonth, onOpenAssistant, on
 }
 
 export default function DashboardView({
-  dateLabel, periodLabel, scope, onScopeChange, totals, incomeCount, expenseCount, budget, remainingDays,
+  dateLabel, periodLabel, scope, onScopeChange, budgetMonth, incomeCount, expenseCount, remainingDays,
   isCurrentMonth = true, cashflow, history = [], categoryStats, recentTransactions, goals, currentOwnerScope,
   onNavigate, onAddTransaction, onAddGoal, onOpenAssistant, onOpenDetail, onSelectCategory, onSelectMonth,
 }) {
   const seeBudget = () => onNavigate('Presupuesto');
+  // Nia's pace insight reads the same Presupuesto usado figures as the KPI card.
+  const budget = { planned: budgetMonth.totals.budgetUsed.plannedMinor, spent: budgetMonth.totals.budgetUsed.spentMinor };
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Resumen" subtitle={dateLabel} actions={<ScopeControl scope={scope} onScopeChange={onScopeChange} />} />
 
-      <KpiCards totals={totals} incomeCount={incomeCount} expenseCount={expenseCount} budget={budget} history={history} />
+      <KpiCards budgetMonth={budgetMonth} incomeCount={incomeCount} expenseCount={expenseCount} history={history} />
 
       <div className={twoToOne}>
         <CashflowCard history={history} series={cashflow} periodLabel={periodLabel} onSelectMonth={onSelectMonth} />

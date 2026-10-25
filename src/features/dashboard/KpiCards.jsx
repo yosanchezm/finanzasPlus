@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, PiggyBank, Wallet } from 'lucide-react';
 import { formatMoney, formatMonthName, formatPercent, formatSignedMoney } from '../../shared/lib/format';
 import { computeDelta } from '../../shared/lib/monthly';
 import { Card } from '../../shared/ui/Card';
@@ -46,42 +46,69 @@ function KpiCard({ label, aside, value, children }) {
   );
 }
 
-export function KpiCards({ totals, incomeCount, expenseCount, budget, history = [] }) {
-  const balance = totals.income - totals.expenses;
-  const used = budget.planned ? (budget.spent / budget.planned) * 100 : 0;
-  const free = budget.planned - budget.spent;
+const BASE_NOTES = { reference: 'Base: ingreso del mes anterior', none: 'Sin ingreso de referencia' };
+const NO_INCOME = 'Sin ingresos este mes';
+const bpToPercent = (bp) => bp / 100;
+
+const Note = ({ children }) => <p className="text-[13px] text-ink-muted tabular-nums">{children}</p>;
+
+export function KpiCards({ budgetMonth, incomeCount, expenseCount, history = [] }) {
+  const { totals, rates, base, warnings } = budgetMonth;
+  const { plannedMinor, spentMinor } = totals.budgetUsed;
+  const used = totals.budgetUsedRatio == null ? null : totals.budgetUsedRatio * 100;
+  const free = plannedMinor - spentMinor;
   const previous = history.length > 1 ? history[history.length - 2] : null;
   const previousMonth = previous?.month;
+  const saved = totals.savingMinor + totals.investmentMinor;
+  const baseNote = BASE_NOTES[base.source] ? <Note>{BASE_NOTES[base.source]}</Note> : null;
+  const overAllocated = warnings.some((warning) => warning.code === 'over_allocated');
 
   return (
     <section aria-label="Indicadores del mes" className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-      <KpiCard label="Balance del mes" aside={<Wallet size={18} aria-hidden="true" className="text-accent" />} value={formatSignedMoney(balance)}>
-        {previous
-          ? <Delta current={balance} previous={previous.income - previous.expenses} previousMonth={previousMonth} mode="amount" />
-          : <p className="text-[13px] text-ink-muted">Ingresos menos gastos</p>}
+      <KpiCard label="Balance del mes" aside={<Wallet size={18} aria-hidden="true" className="text-accent" />} value={formatSignedMoney(totals.balanceMinor)}>
+        <Note>Incluye ahorro, inversión y pagos de deuda</Note>
+        {previous && <Delta current={totals.balanceMinor} previous={previous.income - previous.expenses} previousMonth={previousMonth} mode="amount" />}
       </KpiCard>
-      <KpiCard label="Ingresos" aside={<ArrowDownLeft size={18} aria-hidden="true" className="text-accent" />} value={formatMoney(totals.income)}>
-        <p className="text-[13px] text-ink-muted tabular-nums">{movements(incomeCount)}</p>
-        {previous && <Delta current={totals.income} previous={previous.income} previousMonth={previousMonth} />}
+      <KpiCard label="Ingresos" aside={<ArrowDownLeft size={18} aria-hidden="true" className="text-accent" />} value={formatMoney(totals.incomeMinor)}>
+        <Note>{movements(incomeCount)}</Note>
+        {previous && <Delta current={totals.incomeMinor} previous={previous.income} previousMonth={previousMonth} />}
       </KpiCard>
-      <KpiCard label="Gastos" aside={<ArrowUpRight size={18} aria-hidden="true" className="text-ink-muted" />} value={formatMoney(totals.expenses)}>
-        <p className="text-[13px] text-ink-muted tabular-nums">{movements(expenseCount)}</p>
-        {previous && <Delta current={totals.expenses} previous={previous.expenses} previousMonth={previousMonth} goodWhen="down" />}
+      <KpiCard label="Gastos (consumo)" aside={<ArrowUpRight size={18} aria-hidden="true" className="text-ink-muted" />} value={formatMoney(totals.consumptionMinor)}>
+        <Note>{movements(expenseCount)}</Note>
+        {previous && <Delta current={totals.consumptionMinor} previous={previous.consumption} previousMonth={previousMonth} goodWhen="down" />}
+      </KpiCard>
+      <KpiCard label="Ahorro e inversión" aside={<PiggyBank size={18} aria-hidden="true" className="text-accent" />} value={formatMoney(saved)}>
+        <Note>Ahorro {formatMoney(totals.savingMinor)} · Inversión {formatMoney(totals.investmentMinor)}</Note>
+      </KpiCard>
+      <KpiCard label="Tasa de ahorro" value={rates.savingsRateBp == null ? '—' : formatPercent(bpToPercent(rates.savingsRateBp))}>
+        {rates.savingsRateBp == null ? <Note>{NO_INCOME}</Note> : <Note>del ingreso del mes</Note>}
+        {rates.savingsRateBp == null && baseNote}
+      </KpiCard>
+      <KpiCard label="Deudas (% del ingreso)" value={rates.debtShareBp == null ? '—' : formatPercent(bpToPercent(rates.debtShareBp))}>
+        {rates.debtShareBp == null ? <Note>{NO_INCOME}</Note> : <Note>{formatMoney(totals.debtMinor)} en pagos de deuda</Note>}
+        {rates.debtShareBp == null && baseNote}
       </KpiCard>
       <KpiCard
         label="Presupuesto usado"
-        aside={budget.planned ? <span className={cn('font-semibold tabular-nums', used > 100 ? 'text-danger' : 'text-ink-2')}>{formatPercent(used)}</span> : null}
-        value={budget.planned ? (
+        aside={used == null ? null : <span className={cn('font-semibold tabular-nums', used > 100 ? 'text-danger' : 'text-ink-2')}>{formatPercent(used)}</span>}
+        value={used == null ? '—' : (
           <>
             <span className={free < 0 ? 'text-danger' : undefined}>{formatMoney(Math.abs(free))}</span>{' '}
             <span className="text-sm font-medium tracking-normal text-ink-muted">{free < 0 ? 'excedidos' : 'libres'}</span>
           </>
-        ) : '—'}
+        )}
       >
-        {budget.planned
-          ? <ProgressBar value={used} tone={used > 100 ? 'danger' : 'accent'} size="sm" />
-          : <p className="text-[13px] text-ink-muted">Sin presupuesto definido</p>}
+        {used == null
+          ? <Note>Sin presupuesto definido</Note>
+          : <ProgressBar value={used} tone={used > 100 ? 'danger' : 'accent'} size="sm" />}
       </KpiCard>
+      <KpiCard label="Por asignar" value={<span className={overAllocated ? 'text-danger' : undefined}>{formatSignedMoney(totals.porAsignarMinor)}</span>}>
+        {overAllocated ? <Note>Asignaste más de lo que ingresa</Note> : <Note>Ingreso menos lo presupuestado</Note>}
+        {baseNote}
+      </KpiCard>
+      <p className="col-span-full text-[13px] text-ink-muted">
+        Gastos cuenta solo consumo (necesidades y gustos). Una compra con tarjeta de crédito cuenta al comprar y otra vez al pagar la tarjeta: se registra dos veces.
+      </p>
     </section>
   );
 }

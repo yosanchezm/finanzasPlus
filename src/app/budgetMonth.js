@@ -33,17 +33,12 @@ export function buildBudgetMonth({ month, lines, categories, transactions, histo
   });
 }
 
-/** Bridge until the dashboard is rewired (S7): the planned/spent summary, per-category stats and
-// month limits (as `budgets`-shaped rows) that the old views still read. */
-export function legacyDashboardProps(budgetMonth, categories) {
+/** Per-category rows (any group) with the month's limit and actual, as the dashboard donut reads them. */
+export function dashboardCategoryStats(budgetMonth, categories) {
   const rows = new Map();
   for (const group of Object.values(budgetMonth.groups)) for (const row of group.categories) rows.set(row.categoryId, row);
-  const categoryStats = categories.filter((category) => rows.has(category.$id)).map((category) => {
+  return categories.filter((category) => rows.has(category.$id)).map((category) => {
     const row = rows.get(category.$id);
     return { ...category, color: categoryColor(category), value: row.actualMinor, budget: row.plannedMinor };
   });
-  const { plannedMinor, spentMinor } = budgetMonth.totals.budgetUsed;
-  const budgets = [...rows.values()].filter((row) => row.plannedMinor > 0)
-    .map((row) => ({ $id: `view-${row.categoryId}`, month: budgetMonth.month, categoryId: row.categoryId, plannedMinor: row.plannedMinor }));
-  return { budget: { planned: plannedMinor, spent: spentMinor }, categoryStats, budgets };
 }

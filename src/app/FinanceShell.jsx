@@ -27,7 +27,7 @@ import { formatLongDate, formatMonth, formatMonthLabel } from '../shared/lib/for
 import { aggregateMonthlyTotals } from '../shared/lib/monthly';
 import { Toast } from '../shared/ui/Toast';
 import { useFinanceData } from './useFinanceData';
-import { buildBudgetMonth, canEditBudget, legacyDashboardProps, resolveBudgetLines } from './budgetMonth';
+import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, resolveBudgetLines } from './budgetMonth';
 import { PeriodError, ViewSkeleton } from './ViewSkeleton';
 
 // Sections other than the default one are split into their own chunks.
@@ -128,11 +128,10 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     month: selectedMonth, lines, categories, transactions: visibleTransactions, history: data.periodReady ? data.period.history : [],
     debts, debtEvents, inScope, scoped: storedScope !== 'total',
   }), [selectedMonth, lines, categories, visibleTransactions, data.period, data.periodReady, debts, debtEvents, storedScope]);
-  // Until the dashboard reads budgetMonth directly (S7) it keeps its planned/spent summary and category stats.
-  const { budget: dashboardBudget, categoryStats } = useMemo(() => legacyDashboardProps(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
+  const categoryStats = useMemo(() => dashboardCategoryStats(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
   const cashflow = useMemo(
-    () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth), { categoriesById }),
-    [visibleTransactions, selectedMonth, dayOfMonth, categoriesById],
+    () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth), { categoriesById, debts: debts?.rows ?? [], debtEvents: debtEventRows, inScope }),
+    [visibleTransactions, selectedMonth, dayOfMonth, categoriesById, debts, debtEventRows, storedScope],
   );
 
   const notify = (message) => { setToast(message); window.setTimeout(() => setToast(''), 3000); };
@@ -272,10 +271,9 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             periodLabel={periodLabel}
             scope={scope}
             onScopeChange={setScope}
-            totals={totals}
+            budgetMonth={budgetMonth}
             incomeCount={visibleTransactions.filter((item) => item.type === 'income').length}
             expenseCount={visibleTransactions.filter((item) => item.type === 'expense').length}
-            budget={dashboardBudget}
             remainingDays={remainingDays}
             isCurrentMonth={isCurrentMonth}
             cashflow={cashflow}

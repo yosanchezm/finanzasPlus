@@ -58,7 +58,7 @@ export { allowedTexts } from './src/explain/allowed.js';
 export { EXPLAIN_COPY, copyStatus, releasedTopics } from './src/explain/copy.js';
 export { explainFacts } from './src/explain/explain.js';
 export { EXPLAIN_TOPICS } from './src/explain/topics.js';
-export { computeBudgetMonth } from './src/budget/compute.js';
+export { computeBudgetMonth, debtPaymentEvents } from './src/budget/compute.js';
 export { monthOutflows } from './src/budget/outflows.js';
 export { planLineEdit } from './src/budget/edit.js';
 export { CONSUMPTION, GROUPS, classifyTransaction, groupOfKind } from './src/budget/groups.js';

@@ -13,16 +13,21 @@ const BUDGET_GROUPS = GROUPS.filter((group) => group !== 'income');
 const PAID_KINDS = ['payment', 'extra_payment'];
 const sum = (items, pick) => items.reduce((total, item) => total + pick(item), 0);
 
-// Debt payments of the month: active (not voided) events of in-scope debts. Null when the events cannot be read.
-export function debtPayments(month, debts, debtEvents, inScope) {
+// Active (not voided) payment events of in-scope debts in the month. Null when the events cannot be read.
+export function debtPaymentEvents(month, debts, debtEvents, inScope) {
   const inScopeDebts = new Set((debts || []).filter(inScope).map((debt) => debt.$id ?? debt.id));
   try {
     return activeEvents(debtEvents)
-      .filter((event) => PAID_KINDS.includes(event.kind) && event.effectiveOn.slice(0, 7) === month && inScopeDebts.has(event.debtId))
-      .reduce((total, event) => total + event.amountMinor, 0);
+      .filter((event) => PAID_KINDS.includes(event.kind) && event.effectiveOn.slice(0, 7) === month && inScopeDebts.has(event.debtId));
   } catch (error) {
     return null;
   }
+}
+
+// Debt payments of the month, summed. Null when the events cannot be read.
+export function debtPayments(month, debts, debtEvents, inScope) {
+  const events = debtPaymentEvents(month, debts, debtEvents, inScope);
+  return events == null ? null : events.reduce((total, event) => total + event.amountMinor, 0);
 }
 
 export function computeBudgetMonth({ month, lines = [], categories = [], transactions = [], previousMonthIncomeMinor = 0, debts = [], debtEvents = null, inScope = () => true, scoped = false }) {

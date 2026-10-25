@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBudgetMonth, canEditBudget, legacyDashboardProps, resolveBudgetLines } from './budgetMonth';
+import { buildBudgetMonth, canEditBudget, dashboardCategoryStats, resolveBudgetLines } from './budgetMonth';
 
 const ok = (rows) => ({ rows, status: 'ok' });
 const LEGACY_ROW = { $id: 'b1', month: '2026-10', categoryId: 'c1', plannedMinor: 8000 };
@@ -83,16 +83,14 @@ describe('buildBudgetMonth', () => {
   });
 });
 
-describe('legacyDashboardProps', () => {
-  it('derives the limited-category budget and per-category stats the dashboard still reads', () => {
+describe('dashboardCategoryStats', () => {
+  it('derives the per-category stats the dashboard donut reads', () => {
     const categories = [{ $id: 'c1', name: 'Mercado', kind: 'need', color: '#0B6E4F' }, { $id: 'c2', name: 'Salario', kind: 'income' }];
     const month = buildBudgetMonth({
       month: '2026-10', lines: [LINE], categories, history: [], debts: ok([]), debtEvents: ok([]),
       transactions: [{ $id: 't1', type: 'expense', categoryId: 'c1', amountMinor: 3000, occurredAt: '2026-10-05T12:00:00.000Z' }],
     });
-    const { budget, categoryStats, budgets } = legacyDashboardProps(month, categories);
-    expect(budgets).toEqual([{ $id: 'view-c1', month: '2026-10', categoryId: 'c1', plannedMinor: 5000 }]);
-    expect(budget).toEqual({ planned: 5000, spent: 3000 });
+    const categoryStats = dashboardCategoryStats(month, categories);
     expect(categoryStats).toHaveLength(1);
     expect(categoryStats[0]).toMatchObject({ $id: 'c1', name: 'Mercado', value: 3000, budget: 5000 });
   });

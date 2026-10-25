@@ -265,6 +265,7 @@ describe('public barrel (index.js)', () => {
         'classifyTransaction',
         'computeBudgetMonth',
         'coversMonth',
+        'debtPaymentEvents',
         'fnv1a64hex',
         'groupOfKind',
         'lineIds',
