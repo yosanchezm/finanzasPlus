@@ -357,3 +357,10 @@ About 258 changed lines excluding openspec (code commit: 218 insertions, 40 dele
 - RED: `movementCounts` test failed (no export) and the AssistantPanel test failed (no `balanceMinor` prop). GREEN: both pass. Full suite 178 files, 3127 tests pass.
 - Deviation: for the merge script the smaller option was chosen (stop touching `budgets`, print a warning); `scripts/lib/category-merge.mjs` is unchanged, its budget plan output is simply unused by the script.
 - Rollback: revert the S9 code commit.
+
+## S10: Zero-amount legacy rows
+
+- Found in the OP-2 dry run on 2026-10-25: the household has 6 legacy `budgets` rows, all `plannedMinor` 0, so the migration creates no lines. The old rule (`budget_lines` empty and `budgets` non-empty means legacy) would have kept the web and Nia read-only forever.
+- Fix: `src/app/budgetMonth.js` `resolveBudgetLines` and `functions/nia/budget.js` `resolveLinesMode` decide on `linesFromLegacyBudgets(budgets).length`.
+- RED: 2 new tests failed (one web, one Nia). GREEN: 36 focused; full `npx vitest run --maxWorkers=6`: 178 files, 3130 tests passed.
+- Rollback: revert the S10 code commit.

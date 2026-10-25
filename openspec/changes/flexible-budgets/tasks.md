@@ -312,3 +312,8 @@ Coverage: 38 of 38 spec requirements map to at least one task. Threat Matrix: N/
 - [x] W1: the Gastos (consumo) KPI note counts only consumption rows (need + want) via `movementCounts`.
 - [x] W2: AssistantPanel reads the balance from `budgetMonth`; the old `totals` computation is removed.
 - [x] `scripts/merge-categories.mjs` no longer rewrites or deletes `budgets` rows and warns that `budget_lines` targets are not rewritten.
+
+## Phase S10: Zero-amount legacy rows (found in the OP-2 dry run)
+
+- [x] S10.1 RED: `resolveBudgetLines` (web) and `resolveLinesMode` (Nia) return `lines` mode for an empty `budget_lines` when every legacy `budgets` row is one the migration skips (`plannedMinor` 0). Refines AD15 / the "Legacy read-only fallback" requirement: "legacy rows" means rows `linesFromLegacyBudgets` maps to a line.
+- [x] S10.2 GREEN: both rules count `linesFromLegacyBudgets(budgets)` instead of raw `budgets` rows.
