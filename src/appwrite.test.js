@@ -109,15 +109,90 @@ describe('getTransactionsInRange', () => {
 });
 
 describe('getWorkspace', () => {
-  it('loads every table except transactions through pagination', async () => {
+  it('loads every table except transactions through pagination, plus the optional budget and debt tables', async () => {
     api.tablesDB.getRow.mockResolvedValueOnce({ $id: 'household-test', name: 'Casa' });
     api.tablesDB.listRows.mockResolvedValue({ rows: [{ $id: 'x', name: 'Mercado' }] });
 
     const workspace = await api.getWorkspace();
 
-    expect(Object.keys(workspace).sort()).toEqual(['budgets', 'categories', 'goals', 'household', 'members']);
+    expect(Object.keys(workspace).sort()).toEqual(['budgetLines', 'budgets', 'categories', 'debtEvents', 'debts', 'goals', 'household', 'members']);
+    expect(workspace.budgetLines).toEqual({ rows: [{ $id: 'x', name: 'Mercado' }], status: 'ok' });
+    expect(workspace.debts.status).toBe('ok');
+    expect(workspace.debtEvents.status).toBe('ok');
     const tables = api.tablesDB.listRows.mock.calls.map(([params]) => params.tableId).sort();
-    expect(tables).toEqual(['budgets', 'categories', 'goals', 'household_members']);
+    expect(tables).toEqual(['budget_lines', 'budgets', 'categories', 'debt_events', 'debts', 'goals', 'household_members']);
+  });
+
+  it('keeps loading when the optional tables are missing or failing, reporting each status', async () => {
+    api.tablesDB.getRow.mockResolvedValueOnce({ $id: 'household-test', name: 'Casa' });
+    api.tablesDB.listRows.mockImplementation(async ({ tableId }) => {
+      if (tableId === 'budget_lines') throw Object.assign(new Error('table not found'), { code: 404 });
+      if (tableId === 'debts') throw Object.assign(new Error('boom'), { code: 500 });
+      return { rows: [{ $id: 'x' }] };
+    });
+
+    const workspace = await api.getWorkspace();
+
+    expect(workspace.budgetLines).toEqual({ rows: [], status: 'missing' });
+    expect(workspace.debts).toEqual({ rows: [], status: 'unavailable' });
+    expect(workspace.debtEvents).toEqual({ rows: [{ $id: 'x' }], status: 'ok' });
+    expect(workspace.budgets).toEqual([{ $id: 'x' }]);
+    api.tablesDB.listRows.mockReset();
+  });
+});
+
+describe('readOptional', () => {
+  it('returns the rows with status ok', async () => {
+    api.tablesDB.listRows.mockResolvedValueOnce({ rows: [{ $id: 'a' }] });
+    await expect(api.readOptional(api.TABLES.budgetLines)).resolves.toEqual({ rows: [{ $id: 'a' }], status: 'ok' });
+  });
+
+  it('maps a 404 to missing and any other failure to unavailable, and never throws', async () => {
+    api.tablesDB.listRows.mockRejectedValueOnce(Object.assign(new Error('nf'), { code: 404 }));
+    await expect(api.readOptional(api.TABLES.budgetLines)).resolves.toEqual({ rows: [], status: 'missing' });
+    api.tablesDB.listRows.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: 500 }));
+    await expect(api.readOptional(api.TABLES.budgetLines)).resolves.toEqual({ rows: [], status: 'unavailable' });
+    api.tablesDB.listRows.mockRejectedValueOnce(new Error('network'));
+    await expect(api.readOptional(api.TABLES.budgetLines)).resolves.toEqual({ rows: [], status: 'unavailable' });
+  });
+});
+
+describe('budget lines', () => {
+  const data = { targetType: 'category', targetId: 'c1', rule: 'fixed', amountMinor: 5000 };
+
+  it('creates the row with the given id and team read + update only (no delete)', async () => {
+    api.tablesDB.createRow.mockResolvedValueOnce({ $id: 'bo1' });
+
+    await api.saveBudgetLine('bo1', data);
+
+    expect(api.tablesDB.createRow).toHaveBeenCalledWith({
+      databaseId: 'db-test',
+      tableId: 'budget_lines',
+      rowId: 'bo1',
+      data,
+      permissions: ['read("team:team-test")', 'update("team:team-test")'],
+    });
+    expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
+  });
+
+  it('turns a 409 into an update of the same row, and does not hide other failures', async () => {
+    api.tablesDB.createRow.mockRejectedValueOnce(Object.assign(new Error('exists'), { code: 409 }));
+    api.tablesDB.updateRow.mockResolvedValueOnce({ $id: 'bo1', amountMinor: 5000 });
+
+    await expect(api.saveBudgetLine('bo1', data)).resolves.toEqual({ $id: 'bo1', amountMinor: 5000 });
+    expect(api.tablesDB.updateRow).toHaveBeenCalledWith({ databaseId: 'db-test', tableId: 'budget_lines', rowId: 'bo1', data });
+
+    api.tablesDB.updateRow.mockClear();
+    api.tablesDB.createRow.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: 500 }));
+    await expect(api.saveBudgetLine('bo2', data)).rejects.toMatchObject({ code: 500 });
+    expect(api.tablesDB.updateRow).not.toHaveBeenCalled();
+  });
+
+  it('updateBudgetLine updates the row by id', async () => {
+    api.tablesDB.updateRow.mockResolvedValueOnce({ $id: 'bo1', toMonth: '2026-10' });
+
+    await expect(api.updateBudgetLine('bo1', { toMonth: '2026-10' })).resolves.toEqual({ $id: 'bo1', toMonth: '2026-10' });
+    expect(api.tablesDB.updateRow).toHaveBeenCalledWith({ databaseId: 'db-test', tableId: 'budget_lines', rowId: 'bo1', data: { toMonth: '2026-10' } });
   });
 });
 
@@ -218,6 +293,7 @@ describe('debt tables', () => {
       categories: 'categories',
       transactions: 'transactions',
       budgets: 'budgets',
+      budgetLines: 'budget_lines',
       goals: 'goals',
       attachments: 'attachments',
       debts: 'debts',

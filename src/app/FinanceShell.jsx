@@ -11,7 +11,6 @@ import {
   listAttachments,
   updateGoal,
   updateTransaction,
-  upsertBudget,
 } from '../appwrite';
 import AssistantPanel from '../features/assistant/AssistantPanel';
 import { buildCashflowSeries } from '../features/dashboard/cashflow';
@@ -22,12 +21,13 @@ import AppShell from '../features/shell/AppShell';
 import TransactionDetail from '../features/transactions/TransactionDetail';
 import TransactionModal from '../features/transactions/TransactionModal';
 import { categoryColor, iconForCategory } from '../shared/lib/categories';
-import { addMonths, dateInputValue, daysInMonth, monthKey, monthStartDate, monthsEndingAt } from '../shared/lib/dates';
+import { dateInputValue, daysInMonth, monthKey, monthStartDate, monthsEndingAt } from '../shared/lib/dates';
 import { readableError } from '../shared/lib/errors';
 import { formatLongDate, formatMonth, formatMonthLabel } from '../shared/lib/format';
 import { aggregateMonthlyTotals } from '../shared/lib/monthly';
 import { Toast } from '../shared/ui/Toast';
 import { useFinanceData } from './useFinanceData';
+import { buildBudgetMonth, canEditBudget, legacyDashboardProps, resolveBudgetLines } from './budgetMonth';
 import { PeriodError, ViewSkeleton } from './ViewSkeleton';
 
 // Sections other than the default one are split into their own chunks.
@@ -80,7 +80,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
   const [detailTransaction, setDetailTransaction] = useState(null);
 
   const data = useFinanceData(initialWorkspace, selectedMonth);
-  const { household, members, categories, budgets, goals } = data.workspace;
+  const { household, members, categories, budgets, goals, budgetLines, debts, debtEvents } = data.workspace;
   // Archived (merged or deleted) categories still name their old movements, but are never offered or charted.
   const pickableCategories = useMemo(() => activeCategories(categories), [categories]);
   const isCurrentMonth = selectedMonth === currentMonth;
@@ -117,15 +117,15 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     monthsEndingAt(selectedMonth, 6),
   ), [data.period, data.periodReady, visibleTransactions, selectedMonth, storedScope]);
 
-  const categoryStats = useMemo(() => pickableCategories.filter((category) => category.kind !== 'income').map((category) => {
-    const value = visibleTransactions.filter((item) => item.type === 'expense' && item.categoryId === category.$id)
-      .reduce((sum, item) => sum + Number(item.amountMinor || 0), 0);
-    const budget = budgets.find((item) => item.categoryId === category.$id && item.month === selectedMonth);
-    return { ...category, color: categoryColor(category), value, budget: Number(budget?.plannedMinor || 0) };
-  }), [pickableCategories, visibleTransactions, budgets, selectedMonth]);
-  // Same rule as the Presupuesto summary: only categories with a limit count against the budget.
-  const budgetedSpent = categoryStats.filter((item) => item.budget > 0).reduce((sum, item) => sum + item.value, 0);
-  const budgetTotal = categoryStats.reduce((sum, item) => sum + item.budget, 0);
+  // The one budget computation of the month (AD6). Lines come from budget_lines, or from the read-only budgets while migrating.
+  const { linesMode, linesStatus, lines } = useMemo(() => resolveBudgetLines({ budgetLines, budgets }), [budgetLines, budgets]);
+  const canEdit = canEditBudget({ scope, linesMode, linesStatus });
+  const budgetMonth = useMemo(() => buildBudgetMonth({
+    month: selectedMonth, lines, categories, transactions: visibleTransactions, history: data.periodReady ? data.period.history : [],
+    debts, debtEvents, inScope, scoped: storedScope !== 'total',
+  }), [selectedMonth, lines, categories, visibleTransactions, data.period, data.periodReady, debts, debtEvents, storedScope]);
+  // Until the dashboard reads budgetMonth directly (S7) it keeps its planned/spent summary and category stats.
+  const { budget: dashboardBudget, categoryStats, budgets: viewBudgets } = useMemo(() => legacyDashboardProps(budgetMonth, pickableCategories), [budgetMonth, pickableCategories]);
   const cashflow = useMemo(
     () => buildCashflowSeries(visibleTransactions, new Date(monthStart.getFullYear(), monthStart.getMonth(), dayOfMonth)),
     [visibleTransactions, selectedMonth, dayOfMonth],
@@ -165,35 +165,8 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
     try { await deleteTransaction(item.$id); await data.refresh(); notify('Movimiento eliminado.'); } catch (error) { notify(readableError(error)); }
   };
 
-  /** Rejects on failure so the row can show "No se guardó". */
-  const saveBudget = async (categoryId, value, existing) => {
-    const plannedMinor = Math.round(Number(value));
-    if (plannedMinor < 0 || Number.isNaN(plannedMinor)) { notify('Escribe un presupuesto válido.'); throw new Error('invalid'); }
-    try {
-      await upsertBudget(existing?.$id, { householdId: household.$id, month: selectedMonth, categoryId, plannedMinor, alertAtPercent: existing?.alertAtPercent ?? 80 });
-      await data.refresh();
-    } catch (error) {
-      notify(readableError(error));
-      throw error;
-    }
-  };
-
-  const copyPreviousBudgets = async () => {
-    const previousMonth = addMonths(selectedMonth, -1);
-    const source = budgets.filter((item) => item.month === previousMonth && Number(item.plannedMinor) > 0);
-    try {
-      // Sequential on purpose: one upsert per category, never two for the same row.
-      for (const item of source) {
-        const existing = budgets.find((budget) => budget.categoryId === item.categoryId && budget.month === selectedMonth);
-        await upsertBudget(existing?.$id, { householdId: household.$id, month: selectedMonth, categoryId: item.categoryId, plannedMinor: Number(item.plannedMinor), alertAtPercent: item.alertAtPercent ?? 80 });
-      }
-      notify(`Se copiaron ${source.length} límites de ${formatMonth(previousMonth)}.`);
-    } catch (error) {
-      notify(readableError(error));
-    } finally {
-      await data.refresh().catch(() => {});
-    }
-  };
+  // Budget editing returns in S5/S6; the old row editor must not write the read-only `budgets` table.
+  const budgetEditingPaused = async () => { notify('La edición de presupuestos se habilita pronto.'); throw new Error('budget_editing_paused'); };
 
   const addCategory = async (category) => {
     try {
@@ -260,13 +233,16 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             key={selectedMonth}
             categories={categoryStats}
             allCategories={categories}
-            budgets={budgets}
+            budgets={viewBudgets}
             month={selectedMonth}
             isCurrentMonth={isCurrentMonth}
             dayOfMonth={dayOfMonth}
             daysInMonth={monthDays}
-            onSave={saveBudget}
-            onCopyPrevious={copyPreviousBudgets}
+            onSave={budgetEditingPaused}
+            onCopyPrevious={() => { notify('La edición de presupuestos se habilita pronto.'); }}
+            budgetMonth={budgetMonth}
+            canEdit={canEdit}
+            linesMode={linesMode}
             onCreateCategory={addCategory}
             scopeControl={scopeControl}
           />
@@ -298,7 +274,7 @@ export default function FinanceShell({ user, initialWorkspace, onLogout }) {
             totals={totals}
             incomeCount={visibleTransactions.filter((item) => item.type === 'income').length}
             expenseCount={visibleTransactions.filter((item) => item.type === 'expense').length}
-            budget={{ planned: budgetTotal, spent: budgetedSpent }}
+            budget={dashboardBudget}
             remainingDays={remainingDays}
             isCurrentMonth={isCurrentMonth}
             cashflow={cashflow}

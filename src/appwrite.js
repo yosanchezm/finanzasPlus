@@ -35,6 +35,7 @@ export const TABLES = {
   categories: 'categories',
   transactions: 'transactions',
   budgets: 'budgets',
+  budgetLines: 'budget_lines',
   goals: 'goals',
   attachments: 'attachments',
   debts: 'debts',
@@ -62,6 +63,8 @@ export const permissions = {
   debtEventRow: () => [Permission.read(teamRole)],
   // Legal rates are superseded by editing, never deleted.
   legalRateRow: () => [Permission.read(teamRole), Permission.update(teamRole)],
+  // Budget lines are upserted by id and end-dated, never deleted.
+  budgetLineRow: () => [Permission.read(teamRole), Permission.update(teamRole)],
   // Cost rows are deleted when their payment is voided (AD7), by either member.
   costRow: () => [Permission.read(teamRole), Permission.update(teamRole), Permission.delete(teamRole)],
 };
@@ -142,22 +145,37 @@ export async function signOut() {
 }
 
 /**
+ * Reads every row of a table that may not exist yet, and never throws (the `readLegal` rule): `status` is 'ok',
+ * 'missing' (404: the migration has not run) or 'unavailable' (any other failure), with empty rows unless 'ok'.
+ */
+export async function readOptional(tableId, extraQueries = []) {
+  try {
+    return { rows: await listAllRows(tableId, extraQueries), status: 'ok' };
+  } catch (error) {
+    return { rows: [], status: hasStatus(error, 404) ? 'missing' : 'unavailable' };
+  }
+}
+
+/**
  * Household data that is not month-scoped. Transactions are loaded per period
  * with getTransactionsInRange.
  */
 export async function getWorkspace() {
   assertConfig();
-  const [household, members, categories, budgets, goals] = await Promise.all([
+  const [household, members, categories, budgets, goals, budgetLines, debts, debtEvents] = await Promise.all([
     tablesDB.getRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.households, rowId: appwriteConfig.householdId }),
     listAllRows(TABLES.members),
     listAllRows(TABLES.categories, [Query.orderAsc('name')]),
     listAllRows(TABLES.budgets, [Query.orderDesc('month')]),
     listAllRows(TABLES.goals),
+    readOptional(TABLES.budgetLines),
+    readOptional(TABLES.debts),
+    readOptional(TABLES.debtEvents),
   ]);
 
   let workspaceCategories = categories;
   if (!workspaceCategories.length) workspaceCategories = await createDefaultCategories();
-  return { household, members, categories: workspaceCategories, budgets, goals };
+  return { household, members, categories: workspaceCategories, budgets, goals, budgetLines, debts, debtEvents };
 }
 
 // Seed colors come from the UI palette (src/shared/lib/categories.js CATEGORY_PALETTE).
@@ -260,6 +278,22 @@ export async function upsertBudget(rowId, data) {
     data,
     permissions: rowId ? undefined : [permissions.readTeam, permissions.updateTeam],
   });
+}
+
+/** Creates the line with a deterministic id, or updates it when it exists (409), so saving twice never leaves two rows. */
+export async function saveBudgetLine(rowId, data) {
+  assertConfig();
+  try {
+    return await tablesDB.createRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.budgetLines, rowId, data, permissions: permissions.budgetLineRow() });
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+    return tablesDB.updateRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.budgetLines, rowId, data });
+  }
+}
+
+export async function updateBudgetLine(rowId, data) {
+  assertConfig();
+  return tablesDB.updateRow({ databaseId: appwriteConfig.databaseId, tableId: TABLES.budgetLines, rowId, data });
 }
 
 export async function createGoal(data) {
