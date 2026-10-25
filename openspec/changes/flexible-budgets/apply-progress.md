@@ -129,3 +129,26 @@ About 181 lines (src 53, test 106 incl. blanks, tracked diff 22 incl. docs).
 - `skipped` entries are `{id, reason}` with reasons `missing_month`, `zero_amount`, `missing_category`, `income_category`, `id_too_long`, `invalid_line:{code}` (from `validateLine`, e.g. a non-integer amount).
 - `creates` holds only the 1:1 lines; `seeds` is separate. Lines carry `householdId` from the source row; the runner adds team permissions.
 - Seeds and duplicates come from mapped rows (after skips), independent of whether their ids already exist. `duplicates` entries: `{targetId, month, keptId, ignoredIds}`.
+
+## S3 (branch feat/fb-s3-migration-runner): S3.1-S3.5 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S3.1/2 | scripts/migrate-budgets.test.js | module missing (suite failed to load) | 9 pass after `migrate-budgets.mjs` | dry run with zero writes and full report, apply without table (aborts, zero writes, dry run still reports), backup content and order, backup failure, re-run no-op, interrupted resume, 409 as done, `--no-seed`, missing env | trimmed to fit the 400-line budget |
+| S3.3 | src/appwrite.test.js | `kind` expected `debt`, got `need` | 51 pass after `COST_CATEGORY.kind = 'debt'` | lookup test now uses an existing `need` category and still matches | n/a |
+| S3.4 | docs/setup.md | n/a | rollout steps added under the flexible budgets section | n/a | n/a |
+| S3.5 | npm test | n/a | 172 files / 3027 tests pass | n/a | n/a |
+
+## Size
+Exactly 400 (runner 213 + test 165 new, tracked diff 22 incl. docs). Trimmed comments and tests to stay within budget.
+
+## Work Unit Evidence
+- Focused: `npx vitest run scripts/migrate-budgets.test.js src/appwrite.test.js` green; `node --check scripts/migrate-budgets.mjs` ok. Runtime harness: injected fake fetch only; the runner was NEVER executed against Appwrite (OP-2, OP-3 are the operator's).
+- Rollback: delete the runner and its test, remove the `migrate:budgets` script and the docs steps, revert `COST_CATEGORY.kind` to `need`.
+
+## Decisions
+- `runMigration({argv, env, fetch, backupDir, log, error})` returns the exit code and is exported; the script auto-runs only when invoked directly (`import.meta.url` check).
+- npm script uses `node --env-file=.env scripts/migrate-budgets.mjs` like its siblings (the task text omitted `--env-file`).
+- Dry run does not need the team id; `--apply` requires it for row permissions `read`/`update` on `team:{id}`.
+- Dry run with a missing `budget_lines` warns and continues with no existing ids; `--apply` aborts before the backup.
+- Backup JSON: `{createdAt, databaseId, budgets, costCategories, existingLineIds, plan}`. Nia's `COST_CATEGORY` stays `need` until S8b.
