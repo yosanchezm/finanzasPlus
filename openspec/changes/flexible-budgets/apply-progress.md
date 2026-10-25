@@ -303,3 +303,26 @@ About 300 changed lines (tracked 144 additions + 64 deletions, new KpiCards.test
 - Known gap closed: the daily cashflow uses `debtPaymentEvents` (new core export) by `effectiveOn` day and drops `debtId` cost rows when events are readable.
 - The Gastos "movimientos" counter still counts every expense row (not only consumption).
 - `FinanceShell` keeps `totals` for the AssistantPanel only.
+
+## S8a (branch feat/fb-s8a-nia-budget): S8a.1-S8a.5 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S8a.1 | functions/nia/budget.test.js (loadBudgetMonth, budgetWindow) | module missing (import fails) | 20 pass | parity with `computeBudgetMonth` (Por asignar 4,200,000); reference income from M-1; Bogota time zone month split; legacy fallback for missing, empty-with-rows and unreadable `budget_lines`; empty + no legacy stays `lines`; `debtEvents` null gives `debt_data_unavailable`; debt payments counted; core table failure propagates | n/a |
+| S8a.2 | same (planBudgetEdit, budgetWrites) | same | pass | one `bo` line, recurring untouched; existing one-month line of any id updated; remove writes amount 0 one-month tombstone; investment accepted; income, debt, unknown category and bad amount rejected; legacy mode refuses with `LEGACY_REFUSAL`; writes target only `budget_lines` | n/a |
+| S8a.3 | same (budgetFigures) | same | pass | allocated, actual, Por asignar, per-group figures, reference income base, over-allocation | n/a |
+| S8a.4/5 | npm test | n/a | `npx vitest run --maxWorkers=6`: 178 files / 3118 tests pass | n/a | n/a |
+
+## Size
+365 new lines (budget.js 139, budget.test.js 226); no tracked file changed.
+
+## Work Unit Evidence
+- Focused: `npx vitest run functions/nia/budget.test.js` 20 pass. Runtime harness: N/A until S8b wiring (pure module, injected `listRows`).
+- Rollback: delete `functions/nia/budget.js` and its test.
+
+## Decisions (inputs for S8b)
+- `listRows(table, where, range?)` is the injected reader: flat rows with `$id`, fully paginated by the caller; the transactions call passes `range = {field: 'occurredAt', from, to}` from `budgetWindow(month)` (M-1 and M, one day wider each side). A 404 `code`/`status` marks a missing table.
+- `loadBudgetMonth` returns `{linesMode, lines, categories, budgetMonth}`; `budgets`, `debts`, `debt_events` and `budget_lines` reads never throw (missing/unavailable degrade to legacy or `debtEvents: null`).
+- `planBudgetEdit({draft, lines, linesMode, categories, ctx})` serves both the preview and the post-confirmation plan (re-plan with fresh lines); issues: `legacy_mode`, `unknown_category`, `income_category`, `debt_category`, `invalid_amount`. `budgetWrites(plan, householdId)` yields ordered `{op, table, id, data}`.
+- Pending shape and callbacks are left to S8b; the draft is `{action, categoryId, amountMinor, month}` (well under the pending size limit).
+- Nia's AI prompt kind enum and `COST_CATEGORY.kind = 'debt'` stay in S8b.
