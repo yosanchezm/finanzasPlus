@@ -238,3 +238,23 @@ About 351 lines (tracked diff 151, new files 200). The S6a-1/S6a-2 valve was not
 - Known S1b risk handled: when a one-month line exists for (target, M) and the user saves "Desde este mes", the dialog shows "Este mes tiene un ajuste puntual que seguirá aplicando".
 - Fixed values are whole amounts (minor = pesos, as `formatMoney`); percent is entered in % (up to 2 decimals, comma or dot) and stored as basis points.
 - Income category: dialog shows a notice instead of a form (the view never lists them).
+
+## S6b (branch feat/fb-s6b-category-kinds): S6b.1-S6b.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S6b.1/2 | src/features/budget/AddCategoryDialog.test.jsx | 3 failed (no Tipo select, no investment option) | 8 pass | option list is exactly need/want/saving/investment/income (no debt); investment stored as kind; income and default need still stored | `SegmentedControl` replaced by a `SelectField` using `GROUP_LABELS` |
+| S6b.1/2 | src/features/transactions/TransactionModal.test.jsx | 1 failed (flat options) | 11 pass | optgroups in group order, empty groups skipped, debt category under Deudas; income stays flat | `groupExpenseCategories` helper |
+| S6b.1/2 | copy-previous removal | n/a: already removed in S5b | verified | `grep copyPreviousBudgets\|onCopyPrevious\|upsertBudget` over src, scripts, functions, packages is empty after removing the dead `upsertBudget` (appwrite.js) and its App.test mock; BudgetView.test already asserts no copy control | n/a |
+| S6b.3 | npm test, npm run build | n/a | `npx vitest run --maxWorkers=6`: 176 files / 3078 tests pass; build ok | n/a | n/a |
+
+## Size
+About 93 changed lines (70 additions, 23 deletions).
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/features/budget src/features/transactions` green. Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S6b commit (kind select, optgroups, `upsertBudget` return).
+
+## Decisions
+- Deviation from task text: `debt` is NOT offered in AddCategoryDialog (system-owned per the design); the kind select offers Necesidades, Gustos, Ahorro, Inversión and Ingreso.
+- Tipo is now a native select (five options do not fit a segmented control on phones).

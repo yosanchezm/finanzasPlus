@@ -215,9 +215,9 @@ Depends on S1b and S5b. Valve: S6a-1 (dialog) / S6a-2 (save path).
 
 Depends on S5a.
 
-- [ ] S6b.1 RED: `AddCategoryDialog` test: kind select offers Inversión and Deuda besides existing kinds and stores `investment` / `debt`; `TransactionModal` test: expense categories grouped by group through `optgroup` using `groupOfKind`; test asserting no "copy previous month" control or `copyPreviousBudgets` reference remains in the budget feature. Reqs: BP-1, BP-8. Scenarios: Future month inherits, New kinds are not consumption. Pair: S6b.2. Done: fails.
-- [ ] S6b.2 GREEN: `AddCategoryDialog`, `TransactionModal`, removal of the copy-previous UI and dead code. Pair: S6b.1. Done: green.
-- [ ] S6b.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
+- [x] S6b.1 RED: `AddCategoryDialog` test: kind select offers Inversión and Deuda besides existing kinds and stores `investment` / `debt`; `TransactionModal` test: expense categories grouped by group through `optgroup` using `groupOfKind`; test asserting no "copy previous month" control or `copyPreviousBudgets` reference remains in the budget feature. Reqs: BP-1, BP-8. Scenarios: Future month inherits, New kinds are not consumption. Pair: S6b.2. Done: fails.
+- [x] S6b.2 GREEN: `AddCategoryDialog`, `TransactionModal`, removal of the copy-previous UI and dead code. Pair: S6b.1. Done: green.
+- [x] S6b.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
 
 ## Phase S7a: Dashboard data modules (230 lines)
 
