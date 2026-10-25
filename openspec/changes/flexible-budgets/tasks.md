@@ -197,9 +197,9 @@ Depends on S4. Files under `src/features/budget/`.
 
 Depends on S5a.
 
-- [ ] S5b.1 RED: `BudgetView.test.jsx`: five sections (need, want, saving, investment, debt) in order; category rows show planned, actual, remaining, a rule chip ("Fijo" or "x%"), a "Hogar" chip when `householdFixed`; `overBudget` rows styled as over; saving/investment overshoot styled as achieved not as over; tombstone rows show "Sin límite"; the group envelope row is distinguished from sub-limits and the `sublimits_exceed_envelope` warning is shown; `debt_data_unavailable` warning shown; help text mentions the credit-card double counting limitation; no copy-previous control. Reqs: BC-5, BC-6, BC-9, BC-11, BP-8. Scenarios: Fixed line in partial scope (display), Sub-limits exceed envelope (display), Documented limitation, Future month inherits. Pair: S5b.2. Done: fails.
-- [ ] S5b.2 GREEN: `BudgetView.jsx` sections and rows. Pair: S5b.1. Done: green.
-- [ ] S5b.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
+- [x] S5b.1 RED: `BudgetView.test.jsx`: five sections (need, want, saving, investment, debt) in order; category rows show planned, actual, remaining, a rule chip ("Fijo" or "x%"), a "Hogar" chip when `householdFixed`; `overBudget` rows styled as over; saving/investment overshoot styled as achieved not as over; tombstone rows show "Sin límite"; the group envelope row is distinguished from sub-limits and the `sublimits_exceed_envelope` warning is shown; `debt_data_unavailable` warning shown; help text mentions the credit-card double counting limitation; no copy-previous control. Reqs: BC-5, BC-6, BC-9, BC-11, BP-8. Scenarios: Fixed line in partial scope (display), Sub-limits exceed envelope (display), Documented limitation, Future month inherits. Pair: S5b.2. Done: fails.
+- [x] S5b.2 GREEN: `BudgetView.jsx` sections and rows. Pair: S5b.1. Done: green.
+- [x] S5b.3 REFACTOR and size checkpoint: `npm test`, `npm run build`.
 
 ## Phase S6a: LineEditorDialog and save path (340 lines)
 

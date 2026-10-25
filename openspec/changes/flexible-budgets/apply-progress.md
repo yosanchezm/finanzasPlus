@@ -195,3 +195,24 @@ About 278 lines (tracked diff 47, new files 231).
 - The header and the error banner are passed to `BudgetView` through a `header` slot; `BudgetHeader` is a separate presentational component.
 - `BudgetView` takes `canEdit` (default true): when false, the old limit fields are read-only and the copy-previous action is hidden. The paused handler and the legacy BudgetView props stay in the shell until S5b/S6a replace the body.
 - Legacy notice wins over the personal-scope note. Shell passes `scope` and `onRefresh={refreshInPlace}`.
+
+## S5b (branch feat/fb-s5b-group-sections): S5b.1-S5b.3 complete
+
+| Task | Test file | RED | GREEN | Triangulate | Refactor |
+|---|---|---|---|---|---|
+| S5b.1/2 | src/features/budget/BudgetView.test.jsx | 17 of 17 failed (old body crashed on the missing `categories`/`budgets` props) | 34 pass in `src/features/budget` | five ordered groups; Fijo / x % / Hogar chips; Excedido vs Meta superada (saving); Sin límite for no line and for a removed (amount 0) line; envelope vs sub-limits warning scoped to its group; debt_data_unavailable; credit-card limitation note; no copy control or inputs; edit hook present only with `canEdit` and `onEditLine`; phone cards | single `rowState` shared by table row and card |
+| S5b.3 | npm test, npm run build | n/a | 3056 tests pass; build ok | n/a | n/a |
+
+## Size
+OVER the 400 budget: tracked diff 298 additions + 435 deletions (about 733). Almost all deletions are the replaced limit editor (hooks, inputs, copy-previous, confirm dialog) and its tests; new code is about 298 lines. No pre-declared valve exists for S5b, and the body swap cannot be split without leaving a broken view.
+
+## Work Unit Evidence
+- Focused: `npx vitest run src/features/budget` green. Runtime harness: N/A (no live Appwrite by rule); `npm run build` passes.
+- Rollback: revert the S5b commit (restores the old body and the paused handler in the shell).
+
+## Decisions
+- `BudgetView` now reads `budgetMonth` (+ `allCategories` for icons); props `categories`, `budgets`, `onSave`, `onCopyPrevious` are gone. Shell no longer passes them nor defines `budgetEditingPaused`; `legacyDashboardProps` still returns `budgets` (dead field, drops in S7).
+- Summary card now uses `totals.budgetUsed` (Planeado/Gastado/Disponible); the old "Categorías excedidas" count and "Gasto sin límite" line were dropped.
+- Saving and investment overshoot shows "Meta superada" and "+ $ X" (not danger); debt overshoot is styled as over.
+- Edit hook: `onEditLine({ targetType, targetId })`, rendered as pencil buttons (44px on phones) only when `canEdit` and a handler exist; S6a wires it from the container. Group buttons target the group envelope.
+- Copy-previous removed from the view; `ConfirmDialog`/`Button` imports removed.
